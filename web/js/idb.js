@@ -1,0 +1,23 @@
+const DB_NAME = "izone-task1-practice";
+const STORE = "drafts";
+
+function openDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onupgradeneeded = () => request.result.createObjectStore(STORE, { keyPath: "key" });
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function transaction(mode, action) {
+  return openDb().then((db) => new Promise((resolve, reject) => {
+    const request = action(db.transaction(STORE, mode).objectStore(STORE));
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  }));
+}
+
+export const getDraft = (key) => transaction("readonly", (store) => store.get(key));
+export const putDraft = (value) => transaction("readwrite", (store) => store.put(value));
+export const deleteDraft = (key) => transaction("readwrite", (store) => store.delete(key));

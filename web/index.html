@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#14213d" />
+    <title>Luyện IELTS Writing Task 1</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2314213d'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-size='34' font-family='Arial' font-weight='700' fill='white'%3EI%3C/text%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#workspace">Đi tới bài làm</a>
+    <header class="topbar"><a class="brand" href="./">iZONE · Writing Task 1</a><p id="save-state" class="save-state" aria-live="polite">Chưa tải bài làm</p></header>
+    <main class="page-shell">
+      <section id="setup-card" class="card setup-card" aria-labelledby="setup-title">
+        <p class="eyebrow">Bài luyện</p><h1 id="setup-title">Bắt đầu bài làm</h1><p id="task-summary">Đang tải cấu hình bài…</p>
+        <form id="identity-form" novalidate>
+          <label>Lớp<select id="class-id" required><option value="">Chọn lớp của bạn</option></select></label>
+          <label>Họ và tên<input id="student-name" name="studentName" list="student-options" autocomplete="name" maxlength="120" required disabled /><datalist id="student-options"></datalist></label>
+          <p id="identity-error" class="form-error" role="alert" hidden></p><button class="primary" type="submit">Mở bài làm</button>
+        </form>
+      </section>
+      <section id="workspace" class="workspace" hidden aria-live="polite">
+        <div class="task-header"><div><p class="eyebrow">IELTS Writing Task 1</p><h1 id="task-title">Bài luyện</h1><p id="student-label" class="muted"></p></div><div class="actions"><button id="manual-save" class="secondary" type="button">Lưu ngay</button><button id="save-close" class="primary" type="button">Lưu &amp; đóng</button></div></div>
+        <p id="network-notice" class="notice" hidden></p>
+        <section id="conflict-card" class="conflict" hidden aria-labelledby="conflict-title"><h2 id="conflict-title">Bài làm đã được thay đổi ở nơi khác</h2><p>Hãy tải bản mới nhất trước. Bản cục bộ của bạn vẫn được giữ trên thiết bị này.</p><div class="actions"><button id="reload-server" class="secondary" type="button">Tải bản mới nhất</button><button id="keep-local" class="primary" type="button">Giữ bản này để lưu lại sau</button></div></section>
+        <div class="practice-layout"><section id="task-content" class="task-content" aria-label="Thông tin bài luyện"></section><div class="editor-layout"><section aria-label="Các phần bài viết"><div id="sections" class="sections"></div></section><aside class="comments-panel" aria-labelledby="comments-title"><div class="comments-heading"><div><p class="eyebrow">Nhận xét</p><h2 id="comments-title">Dòng thời gian</h2></div><span id="polling-state" class="polling-state">—</span></div><ol id="comment-list" class="comment-list" aria-live="polite"></ol><p id="empty-comments" class="muted">Chưa có nhận xét nào. Gửi một phần để nhận phản hồi.</p></aside></div></div>
+      </section>
+    </main>
+    <template id="section-template"><article class="section-card"><div class="section-heading"><div><p class="section-kicker"></p><h2></h2></div><span class="section-status">Chưa gửi</span></div><div class="text-fields"></div><p class="field-error" role="alert" hidden></p><div class="section-actions"><span class="word-count muted">0 từ</span><button class="secondary submit-section" type="button">Gửi để nhận xét</button></div></article></template>
+    <script type="module" src="./js/app.js"></script>
+  </body>
+</html>

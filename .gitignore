@@ -1,0 +1,11 @@
+node_modules/
+.env
+coverage/
+test-results/
+playwright-report/
+.playwright-cli/
+output/
+*.log
+*.tgz
+.DS_Store
+backend/.env.example.production

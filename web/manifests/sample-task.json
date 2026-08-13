@@ -1,0 +1,84 @@
+{
+  "schema_version": "task1-web-manifest-v1",
+  "activity": {
+    "version": "task1-web-activity-v1",
+    "id": "11111111-1111-4111-8111-111111111111",
+    "slug": "sample-task",
+    "title": "Bài luyện Writing Task 1 mẫu",
+    "type": "ielts_writing_task_1_preparation",
+    "locale": "vi-VN"
+  },
+  "task": {
+    "statement": "The chart below gives information about a fictional topic. Summarise the information by selecting and reporting the main features, and make comparisons where relevant.",
+    "chart_image": {
+      "kind": "reference",
+      "available": false,
+      "mime_type": "image/png",
+      "file_name": "",
+      "url": null,
+      "alt_text": "Biểu đồ của bài Writing Task 1 mẫu."
+    }
+  },
+  "decoding": {
+    "what": "Một biểu đồ mẫu dùng để kiểm tra giao diện.",
+    "unit": "Đơn vị giả lập",
+    "categories": ["Nhóm A", "Nhóm B"]
+  },
+  "analysis": {
+    "bullets": [
+      "Chọn 2–3 đặc điểm lớn cho Overview.",
+      "Nhóm số liệu hợp lý vào hai đoạn Body."
+    ]
+  },
+  "routes": [
+    {
+      "id": "A",
+      "name": "Nhóm theo xu hướng",
+      "rank": 1,
+      "recommended": true,
+      "body": {
+        "body_1": "Các hạng mục tăng",
+        "body_2": "Các hạng mục giảm",
+        "strengths": "Dễ đối chiếu xu hướng",
+        "tradeoffs": "Cần chọn số liệu tiêu biểu",
+        "best_for": "Biểu đồ có hai xu hướng rõ"
+      }
+    }
+  ],
+  "vocabulary": {
+    "overview": {
+      "naming": [{ "vi": "chiếm", "en": "account for" }],
+      "insights": [{ "vi": "nhìn chung", "en": "overall" }]
+    },
+    "routes": [
+      {
+        "id": "A",
+        "name": "Nhóm theo xu hướng",
+        "rank": 1,
+        "recommended": true,
+        "naming": [],
+        "story": [{ "vi": "lần lượt", "en": "respectively" }]
+      }
+    ]
+  },
+  "chatbots": {
+    "data_walk": { "label": "Chatbot 1: đọc đề và rà dữ liệu", "href": null, "status": "pending_link" },
+    "insight_and_routes": { "label": "Chatbot 2: tìm insight và chọn hướng thân bài", "href": null, "status": "pending_link" }
+  },
+  "feedback": {
+    "overview": { "enabled": true, "section": "overview", "prompt_version": "task1-overview-v1" },
+    "outline": { "enabled": true, "section": "outline", "prompt_version": "task1-body-outline-v1" }
+  },
+  "metadata": {
+    "factory_version": "task1-factory-v1",
+    "activity_version": "task1-web-activity-v1",
+    "source_contract": "doc_manifest",
+    "source_contract_version": "sample",
+    "prompt_versions": {
+      "chatbot_1": "task1-chatbot-1-v1",
+      "chatbot_2": "task1-chatbot-2-v1",
+      "overview": "task1-overview-v1",
+      "outline": "task1-body-outline-v1"
+    }
+  }
+}

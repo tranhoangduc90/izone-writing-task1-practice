@@ -1,0 +1,39 @@
+{
+  "schema_version": "task1-web-manifest-v1",
+  "activity": {
+    "version": "task1-web-activity-v1",
+    "id": "<UUID công khai>",
+    "slug": "<mã-đề>",
+    "title": "<tên bài luyện>",
+    "type": "ielts_writing_task_1_preparation",
+    "locale": "vi-VN"
+  },
+  "task": {
+    "statement": "<đề bài>",
+    "chart_image": {
+      "kind": "reference",
+      "available": true,
+      "mime_type": "image/png",
+      "file_name": "chart.png",
+      "url": "assets/<mã-đề>/chart.png",
+      "alt_text": "<mô tả biểu đồ>"
+    }
+  },
+  "decoding": { "what": "", "unit": "", "categories": [] },
+  "analysis": { "bullets": [] },
+  "routes": [],
+  "vocabulary": { "overview": { "naming": [], "insights": [] }, "routes": [] },
+  "chatbots": {
+    "data_walk": { "label": "Chatbot 1", "href": null, "status": "pending_link" },
+    "insight_and_routes": { "label": "Chatbot 2", "href": null, "status": "pending_link" }
+  },
+  "feedback": {
+    "overview": { "enabled": true, "section": "overview", "prompt_version": "" },
+    "outline": { "enabled": true, "section": "outline", "prompt_version": "" }
+  },
+  "metadata": {
+    "factory_version": "task1-factory-v1",
+    "activity_version": "task1-web-activity-v1",
+    "prompt_versions": { "chatbot_1": "", "chatbot_2": "", "overview": "", "outline": "" }
+  }
+}

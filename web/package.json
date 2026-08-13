@@ -1,0 +1,9 @@
+{
+  "name": "izone-task1-practice-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check": "node --check js/app.js && node --check js/api.js && node --check js/core.js && node --check js/idb.js"
+  }
+}

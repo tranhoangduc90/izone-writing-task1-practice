@@ -1,0 +1,24 @@
+services:
+  writing-task1-practice-api:
+    build: .
+    container_name: writing-task1-practice-api
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 15s
+    env_file: /opt/writing-task1-practice-api/.env
+    ports:
+      - "127.0.0.1:8790:8790"
+    networks: [writing-practice-net]
+    read_only: true
+    tmpfs: [/tmp:size=16m,noexec,nosuid,nodev]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 100
+    mem_limit: 256m
+    cpus: 0.50
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: "3" }
+networks:
+  writing-practice-net:
+    external: true

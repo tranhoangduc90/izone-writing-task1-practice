@@ -17,7 +17,7 @@ export function createWritingPracticeService({ pool }) {
       LEFT JOIN writing_practice.activity_roster roster ON roster.activity_class_id = class.id AND roster.active
       WHERE class.activity_id = $1 AND class.status='active' AND class.end_date >= CURRENT_DATE ORDER BY class.class_name_snapshot, roster.display_name, roster.display_alias`, [activity.rows[0].id]);
     const classes = new Map();
-    for (const row of rows) {
+    for (const row of rows.rows) {
       if (!classes.has(row.class_ref)) classes.set(row.class_ref, { classRef: row.class_ref, className: row.class_name_snapshot, students: [] });
       if (row.student_ref) classes.get(row.class_ref).students.push({ studentRef: row.student_ref, displayName: row.display_name, alias: row.display_alias });
     }

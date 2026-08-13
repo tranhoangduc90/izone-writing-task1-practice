@@ -170,6 +170,7 @@ BEGIN
     GRANT USAGE ON SCHEMA writing_practice TO writing_practice_api;
     GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA writing_practice TO writing_practice_api;
     GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA writing_practice TO writing_practice_api;
+    GRANT USAGE ON SCHEMA mapping TO writing_practice_api;
     GRANT SELECT, UPDATE ON mapping.reviewer_account TO writing_practice_api;
     GRANT EXECUTE ON FUNCTION writing_practice.refresh_activity_roster(BIGINT) TO writing_practice_api;
   END IF;

@@ -17,6 +17,17 @@ test("sample manifest follows the public v1 shape and contains no sensitive fiel
   assert.doesNotMatch(JSON.stringify(manifest), /grader.?prompt|credential|api.?key|student.?data|Bearer /i);
 });
 
+test("pilot manifest contains the released chart and six approved routes", () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifests", "pie-app-users-by-age.json"), "utf8"));
+  assert.equal(manifest.schema_version, "task1-web-manifest-v1");
+  assert.equal(manifest.activity.slug, "pie-app-users-by-age");
+  assert.equal(manifest.task.chart_image.url, "assets/task1-pie-app-age-groups.png");
+  assert.equal(manifest.routes.length, 6);
+  assert.equal(manifest.routes.filter((route) => route.recommended).length, 1);
+  assert.equal(manifest.vocabulary.routes.length, manifest.routes.length);
+  assert.doesNotMatch(JSON.stringify(manifest), /grader.?prompt|credential|api.?key|student.?data|Bearer /i);
+});
+
 test("public config only contains the API base URL", () => {
   const config = JSON.parse(fs.readFileSync(path.join(root, "config.json"), "utf8"));
   assert.deepEqual(Object.keys(config), ["apiBase"]);

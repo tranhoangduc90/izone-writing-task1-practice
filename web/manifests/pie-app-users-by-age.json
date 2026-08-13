@@ -1,0 +1,409 @@
+{
+  "schema_version": "task1-web-manifest-v1",
+  "activity": {
+    "version": "task1-web-activity-v1",
+    "id": "41ec3339-edb5-4b13-8324-064deed6ca63",
+    "slug": "pie-app-users-by-age",
+    "title": "Luyện Task 1: Độ tuổi người dùng ba ứng dụng",
+    "type": "ielts_writing_task_1_preparation",
+    "locale": "vi-VN"
+  },
+  "task": {
+    "statement": "The pie charts show the proportion of users across different age groups on three apps:Twitter, Facebook and YouTube.",
+    "chart_image": {
+      "kind": "reference",
+      "available": true,
+      "mime_type": "image/png",
+      "file_name": "task1-pie-app-age-groups.png",
+      "url": "assets/task1-pie-app-age-groups.png",
+      "alt_text": "Ba biểu đồ tròn thể hiện cơ cấu độ tuổi người dùng Facebook, Twitter và YouTube."
+    }
+  },
+  "decoding": {
+    "what": "Tỷ lệ người dùng theo các nhóm tuổi khác nhau trên ba ứng dụng: Facebook, YouTube và Twitter",
+    "unit": "% (phần trăm tổng số người dùng của mỗi ứng dụng)",
+    "categories": [
+      "Ứng dụng: Facebook, YouTube, Twitter",
+      "Nhóm tuổi: 10–17, 18–34, 35–49, 50–64, 65+"
+    ]
+  },
+  "analysis": {
+    "bullets": [
+      "Nhóm 18-34 chiếm tỷ trọng nổi bật trên Twitter (40%), trong khi nhóm 35-49 đứng đầu trên Facebook (30%) và YouTube (29%).",
+      "Facebook và YouTube có hồ sơ độ tuổi rất giống nhau: chênh lệch giữa hai ứng dụng chỉ từ 1 đến 3 điểm phần trăm ở cả năm nhóm tuổi.",
+      "Nhóm tuổi 35-49 và 50-64 có sự tương đồng rất lớn về tỷ lệ người dùng trên cả ba nền tảng (chênh lệch chỉ từ 1-2 điểm phần trăm).",
+      "Hai nhóm ở hai đầu trục tuổi đều chiếm tỷ trọng nhỏ; trong cả hai nhóm, tỷ lệ trên Twitter thấp hơn Facebook và YouTube."
+    ]
+  },
+  "routes": [
+    {
+      "id": "A",
+      "name": "So sánh theo hồ sơ ứng dụng (Facebook/YouTube và Twitter)",
+      "rank": 1,
+      "recommended": true,
+      "body": {
+        "body_1": "Mô tả hồ sơ độ tuổi rất giống nhau của Facebook và YouTube, tập trung vào hai nhóm 18-34 và 35-49 có tỷ trọng cao hơn trên cả hai ứng dụng.",
+        "body_2": "Mô tả hồ sơ khác biệt của Twitter với đỉnh nhọn ở nhóm 18-34 (40%) và sự sụt giảm mạnh ở các nhóm tuổi lớn hơn, đối chiếu với sự phân bổ của Facebook và YouTube.",
+        "strengths": "Tạo ra cấu trúc so sánh cực kỳ rõ ràng, làm nổi bật sự tương đồng giữa hai ứng dụng và sự khác biệt của ứng dụng còn lại.",
+        "tradeoffs": "Yêu cầu kỹ năng so sánh chéo tốt giữa hai đoạn thân bài để tránh viết thành hai mô tả rời rạc.",
+        "best_for": "Học sinh ở mọi trình độ, đặc biệt là những ai muốn viết một bài phân tích có tính hệ thống và mạch lạc cao."
+      }
+    },
+    {
+      "id": "B",
+      "name": "So sánh theo giai đoạn độ tuổi (Nhóm trẻ và Nhóm lớn tuổi hơn)",
+      "rank": 2,
+      "recommended": false,
+      "body": {
+        "body_1": "Mô tả và so sánh tỷ lệ người dùng của ba ứng dụng trong hai nhóm tuổi trẻ nhất (10-17 và 18-34), làm nổi bật mức tăng so với nhóm 10-17 và tỷ lệ 40% nổi bật của Twitter ở nhóm 18-34.",
+        "body_2": "Mô tả và so sánh tỷ lệ trong ba nhóm tuổi lớn hơn (35-49, 50-64, 65+), làm nổi bật xu hướng giảm dần; các tỷ lệ rất gần nhau ở 35-49 và 50-64 nhưng khoảng chênh tăng lên 6 điểm phần trăm ở 65+.",
+        "strengths": "Phản ánh logic theo tiến trình tuổi tác, giúp người đọc dễ dàng theo dõi xu hướng tăng giảm tự nhiên.",
+        "tradeoffs": "Có thể dẫn đến việc liệt kê số liệu tuần tự nếu không lồng ghép các so sánh chéo giữa ba ứng dụng một cách khéo léo.",
+        "best_for": "Học sinh thích cách tiếp cận tuyến tính, phân tích dữ liệu theo thứ tự các nhóm tuổi."
+      }
+    },
+    {
+      "id": "C",
+      "name": "So sánh theo độ lớn của tỷ lệ (Nhóm tuổi chiếm tỷ lệ cao và Nhóm tuổi chiếm tỷ lệ thấp)",
+      "rank": 3,
+      "recommended": false,
+      "body": {
+        "body_1": "Phân tích hai nhóm tuổi có tỷ lệ người dùng cao nhất trên cả ba nền tảng (18-34 và 35-49), so sánh sự thống trị của Twitter ở nhóm trẻ với sự cân bằng ở nhóm trung niên.",
+        "body_2": "Phân tích ba nhóm tuổi có tỷ lệ người dùng thấp hơn (10-17, 50-64, 65+), chỉ ra xu hướng giảm về hai đầu và vị trí thấp nhất của Twitter ở các nhóm này.",
+        "strengths": "Làm nổi bật ngay các nhóm tuổi có tỷ trọng cao hơn trên ba ứng dụng.",
+        "tradeoffs": "Sự phân chia nhóm tuổi có thể hơi khiên cưỡng vì nhóm 50-64 (khoảng 18-20%) không quá thấp so với nhóm 10-17.",
+        "best_for": "Học sinh muốn tập trung vào sự tương phản giữa các nhóm có tỷ trọng cao và thấp."
+      }
+    },
+    {
+      "id": "D",
+      "name": "So sánh theo mức độ tương đồng giữa các ứng dụng (Nhóm tuổi có tỷ lệ gần nhau và Nhóm tuổi có tỷ lệ chênh lệch)",
+      "rank": 4,
+      "recommended": false,
+      "body": {
+        "body_1": "Phân tích hai nhóm tuổi (35-49 và 50-64) nơi tỷ lệ người dùng trên cả ba nền tảng gần như trùng khớp (chênh lệch chỉ 1-2 điểm phần trăm).",
+        "body_2": "Phân tích các nhóm tuổi còn lại (10-17, 18-34, 65+) nơi có sự chênh lệch rõ rệt giữa các ứng dụng, đặc biệt là tỷ lệ 40% của Twitter ở nhóm 18-34.",
+        "strengths": "Mang tính phân tích cao, làm nổi bật những điểm đồng thuận và dị biệt trong dữ liệu một cách sâu sắc.",
+        "tradeoffs": "Đòi hỏi người viết phải gom nhóm dữ liệu phi truyền thống, dễ gây bối rối nếu không kiểm soát tốt cấu trúc.",
+        "best_for": "Học sinh khá giỏi muốn đạt điểm cao ở tiêu chí Coherence and Cohesion và Lexical Resource bằng cách tiếp cận độc đáo."
+      }
+    },
+    {
+      "id": "E",
+      "name": "So sánh theo thứ hạng lặp lại của các ứng dụng",
+      "rank": 5,
+      "recommended": false,
+      "body": {
+        "body_1": "Phân tích ba nhóm tuổi (10-17, 50-64, 65+) nơi thứ hạng tỷ lệ người dùng luôn giữ nguyên: YouTube cao nhất, tiếp theo là Facebook và thấp nhất là Twitter.",
+        "body_2": "Phân tích hai nhóm tuổi còn lại (18-34 và 35-49) nơi thứ hạng này thay đổi, với tỷ lệ của Twitter hoặc Facebook nổi bật hơn.",
+        "strengths": "Cực kỳ logic về mặt toán học và dữ liệu, giúp phát hiện ra các khuôn mẫu (patterns) ẩn trong biểu đồ.",
+        "tradeoffs": "Cấu trúc này có thể hơi khô khan và khó viết nếu học sinh không quen với việc mô tả thứ hạng.",
+        "best_for": "Học sinh có tư duy logic, thích phân tích số liệu theo các quy luật và cấu trúc toán học."
+      }
+    },
+    {
+      "id": "F",
+      "name": "So sánh theo vị trí trên trục độ tuổi (Nhóm tuổi trung tâm và Nhóm tuổi ở hai đầu)",
+      "rank": 6,
+      "recommended": false,
+      "body": {
+        "body_1": "Phân tích các nhóm tuổi trung tâm (18-34, 35-49, 50-64), so sánh tỷ trọng và nhóm đứng đầu của từng ứng dụng trong khoảng này.",
+        "body_2": "Phân tích hai nhóm tuổi ở hai đầu (10-17 và 65+), nhấn mạnh tỷ trọng nhỏ hơn trên cả ba ứng dụng và tỷ lệ thấp hơn của Twitter.",
+        "strengths": "Cách phân chia rất tự nhiên và trực quan dựa trên biểu đồ tròn hoặc trục tuổi tác.",
+        "tradeoffs": "Sự tương phản giữa hai đoạn thân bài có thể quá lớn về mặt khối lượng dữ liệu (thân bài 1 chứa nhiều thông tin hơn nhiều so với thân bài 2).",
+        "best_for": "Học sinh ưa thích sự phân chia trực quan, rõ ràng và dễ hiểu ngay từ cái nhìn đầu tiên."
+      }
+    }
+  ],
+  "vocabulary": {
+    "overview": {
+      "naming": [
+        {
+          "vi": "nhóm tuổi",
+          "en": "age groups"
+        },
+        {
+          "vi": "phân bố độ tuổi",
+          "en": "age distribution"
+        },
+        {
+          "vi": "hồ sơ người dùng",
+          "en": "user profiles"
+        },
+        {
+          "vi": "nền tảng mạng xã hội",
+          "en": "social media platforms"
+        }
+      ],
+      "insights": [
+        {
+          "vi": "chiếm ưu thế",
+          "en": "dominate"
+        },
+        {
+          "vi": "phân bổ đồng đều hơn",
+          "en": "more evenly distributed"
+        },
+        {
+          "vi": "tương đồng đáng kể",
+          "en": "striking similarity"
+        },
+        {
+          "vi": "nhóm tuổi chiếm tỷ lệ lớn nhất",
+          "en": "the most prominent age bracket"
+        },
+        {
+          "vi": "xu hướng trái ngược",
+          "en": "contrasting trend"
+        }
+      ]
+    },
+    "routes": [
+      {
+        "id": "A",
+        "name": "So sánh theo hồ sơ ứng dụng (Facebook/YouTube và Twitter)",
+        "rank": 1,
+        "recommended": true,
+        "naming": [
+          {
+            "vi": "hồ sơ tương tự",
+            "en": "similar profiles"
+          },
+          {
+            "vi": "mẫu phân bổ",
+            "en": "distribution pattern"
+          },
+          {
+            "vi": "sự tương đồng sát sao",
+            "en": "close resemblance"
+          }
+        ],
+        "story": [
+          {
+            "vi": "đạt đỉnh ở mức",
+            "en": "peak at"
+          },
+          {
+            "vi": "trái ngược hoàn toàn với",
+            "en": "in stark contrast to"
+          },
+          {
+            "vi": "tập trung mạnh mẽ vào",
+            "en": "heavily skewed towards"
+          },
+          {
+            "vi": "giảm dần theo độ tuổi",
+            "en": "decline progressively with age"
+          }
+        ]
+      },
+      {
+        "id": "B",
+        "name": "So sánh theo giai đoạn độ tuổi (Nhóm trẻ và Nhóm lớn tuổi hơn)",
+        "rank": 2,
+        "recommended": false,
+        "naming": [
+          {
+            "vi": "các nhóm tuổi trẻ hơn",
+            "en": "younger age groups"
+          },
+          {
+            "vi": "các nhóm tuổi lớn hơn",
+            "en": "older cohorts"
+          }
+        ],
+        "story": [
+          {
+            "vi": "tăng vọt",
+            "en": "surge"
+          },
+          {
+            "vi": "đạt mức cao nhất",
+            "en": "reach the highest proportion"
+          },
+          {
+            "vi": "xu hướng giảm dần",
+            "en": "downward trend"
+          },
+          {
+            "vi": "khoảng chênh tăng dần",
+            "en": "the gap widens"
+          }
+        ]
+      },
+      {
+        "id": "C",
+        "name": "So sánh theo độ lớn của tỷ lệ (Nhóm tuổi chiếm tỷ lệ cao và Nhóm tuổi chiếm tỷ lệ thấp)",
+        "rank": 3,
+        "recommended": false,
+        "naming": [
+          {
+            "vi": "nhóm tuổi có tỷ trọng cao",
+            "en": "higher-share age groups"
+          },
+          {
+            "vi": "nhóm tuổi có tỷ trọng thấp",
+            "en": "lower-share age groups"
+          }
+        ],
+        "story": [
+          {
+            "vi": "chiếm phần lớn",
+            "en": "constitute the bulk of"
+          },
+          {
+            "vi": "đóng góp tỷ lệ nhỏ nhất",
+            "en": "make up the smallest share"
+          },
+          {
+            "vi": "chiếm tỷ trọng cao hơn nhiều",
+            "en": "account for a much larger share than"
+          },
+          {
+            "vi": "duy trì ở mức thấp",
+            "en": "remain modest"
+          }
+        ]
+      },
+      {
+        "id": "D",
+        "name": "So sánh theo mức độ tương đồng giữa các ứng dụng (Nhóm tuổi có tỷ lệ gần nhau và Nhóm tuổi có tỷ lệ chênh lệch)",
+        "rank": 4,
+        "recommended": false,
+        "naming": [
+          {
+            "vi": "sự hội tụ dữ liệu",
+            "en": "data convergence"
+          },
+          {
+            "vi": "sự phân kỳ lớn",
+            "en": "wide divergence"
+          }
+        ],
+        "story": [
+          {
+            "vi": "gần như giống hệt nhau",
+            "en": "virtually identical"
+          },
+          {
+            "vi": "chênh lệch không đáng kể",
+            "en": "negligible difference"
+          },
+          {
+            "vi": "khoảng cách rộng nhất",
+            "en": "the widest disparity"
+          },
+          {
+            "vi": "chênh lệch rõ rệt",
+            "en": "vary markedly"
+          }
+        ]
+      },
+      {
+        "id": "E",
+        "name": "So sánh theo thứ hạng lặp lại của các ứng dụng",
+        "rank": 5,
+        "recommended": false,
+        "naming": [
+          {
+            "vi": "thứ tự xếp hạng nhất quán",
+            "en": "consistent ranking order"
+          },
+          {
+            "vi": "sự đảo ngược thứ hạng",
+            "en": "ranking reversal"
+          }
+        ],
+        "story": [
+          {
+            "vi": "giữ vị trí dẫn đầu",
+            "en": "hold the leading position"
+          },
+          {
+            "vi": "xếp ở vị trí cuối cùng",
+            "en": "rank lowest"
+          },
+          {
+            "vi": "cao hơn hai ứng dụng còn lại",
+            "en": "exceed the corresponding shares"
+          },
+          {
+            "vi": "chiếm vị trí áp chót",
+            "en": "occupy the second to last spot"
+          }
+        ]
+      },
+      {
+        "id": "F",
+        "name": "So sánh theo vị trí trên trục độ tuổi (Nhóm tuổi trung tâm và Nhóm tuổi ở hai đầu)",
+        "rank": 6,
+        "recommended": false,
+        "naming": [
+          {
+            "vi": "nhóm tuổi trung tâm",
+            "en": "central age brackets"
+          },
+          {
+            "vi": "hai nhóm tuổi ngoài cùng",
+            "en": "the outermost age groups"
+          }
+        ],
+        "story": [
+          {
+            "vi": "tập trung ở giữa",
+            "en": "concentrated in the middle"
+          },
+          {
+            "vi": "ở hai đầu cực của biểu đồ",
+            "en": "at the extreme ends of the spectrum"
+          },
+          {
+            "vi": "chiếm tỷ lệ không đáng kể",
+            "en": "account for a marginal percentage"
+          },
+          {
+            "vi": "chiếm các tỷ trọng lớn hơn",
+            "en": "account for the larger shares"
+          }
+        ]
+      }
+    ]
+  },
+  "chatbots": {
+    "data_walk": {
+      "label": "Chatbot 1: đọc đề và rà dữ liệu",
+      "href": null,
+      "status": "pending_link"
+    },
+    "insight_and_routes": {
+      "label": "Chatbot 2: tìm insight và chọn hướng thân bài",
+      "href": null,
+      "status": "pending_link"
+    }
+  },
+  "feedback": {
+    "overview": {
+      "enabled": true,
+      "section": "overview",
+      "prompt_version": "1"
+    },
+    "outline": {
+      "enabled": true,
+      "section": "outline",
+      "prompt_version": "1"
+    }
+  },
+  "metadata": {
+    "factory_version": "task1-factory-v1",
+    "activity_version": "task1-web-activity-v1",
+    "source_contract": "released-handout",
+    "source_contract_version": "2026-08-02",
+    "prompt_versions": {
+      "chatbot_1": "1",
+      "chatbot_2": "1",
+      "overview": "1",
+      "outline": "1"
+    }
+  }
+}
+

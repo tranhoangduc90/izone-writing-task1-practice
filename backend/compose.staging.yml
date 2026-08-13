@@ -1,13 +1,13 @@
 services:
-  writing-task1-practice-api:
+  writing-task1-practice-api-staging:
     build: .
-    container_name: writing-task1-practice-api
+    container_name: writing-task1-practice-api-staging
     restart: unless-stopped
     init: true
     stop_grace_period: 15s
-    env_file: /opt/writing-task1-practice-api/.env
+    env_file: /opt/writing-task1-practice-api-staging/.env
     ports:
-      - "127.0.0.1:8790:8790"
+      - "127.0.0.1:8791:8790"
     networks: [mapping-api-net, n8n-net]
     read_only: true
     tmpfs: [/tmp:size=16m,noexec,nosuid,nodev]

@@ -10,7 +10,8 @@ services:
       - "127.0.0.1:8791:8790"
     networks: [mapping-api-net, n8n-net]
     read_only: true
-    tmpfs: [/tmp:size=16m,noexec,nosuid,nodev]
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     pids_limit: 100

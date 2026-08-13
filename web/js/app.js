@@ -1,6 +1,7 @@
 import { createApi } from "./api.js";
 import { SECTION_KEYS, createRequestId, hasMeaningfulText, isConflict, normalizeProgress, pollingDelay, terminalResult, wordCount } from "./core.js";
 import { getDraft, putDraft } from "./idb.js";
+import { appendInlineMarkdown, appendMarkdown } from "./markdown.js";
 
 const $ = (id) => document.getElementById(id);
 const SECTION_INFO = {
@@ -52,17 +53,17 @@ function renderClassOptions() {
 
 function addTextCard(root, title, value) {
   if (!value) return;
-  const card = document.createElement("section"); const heading = document.createElement("h2"); const body = document.createElement("p");
+  const card = document.createElement("section"); const heading = document.createElement("h2"); const body = document.createElement("div"); body.className = "markdown-body";
   const normalized = typeof value === "object" && !Array.isArray(value)
     ? Object.entries(value).flatMap(([key, item]) => Array.isArray(item) ? item.map(entry => `${key}: ${entry}`) : [`${key}: ${item}`])
     : value;
-  heading.textContent = title; body.textContent = Array.isArray(normalized) ? normalized.join("\n") : normalized; card.append(heading, body); root.append(card);
+  heading.textContent = title; appendMarkdown(body, Array.isArray(normalized) ? normalized.join("\n") : normalized); card.append(heading, body); root.append(card);
 }
 
 function addListCard(root, title, values) {
   const items = values.filter(Boolean); if (!items.length) return;
   const card = document.createElement("section"); const heading = document.createElement("h2"); const list = document.createElement("ul"); heading.textContent = title;
-  for (const value of items) { const item = document.createElement("li"); item.textContent = value; list.append(item); }
+  for (const value of items) { const item = document.createElement("li"); appendInlineMarkdown(item, value); list.append(item); }
   card.append(heading, list); root.append(card);
 }
 
@@ -70,7 +71,7 @@ function renderTaskContent() {
   const root = $("task-content"); root.replaceChildren(); const manifest = app.manifest; const task = manifest.task || manifest;
   addTextCard(root, "Đề bài", task.statement || task.taskStatement);
   const imageUrl = task.chart_image?.url || task.chartImage || task.chartImageUrl || task.imageUrl;
-  if (imageUrl) { const card = document.createElement("section"); const title = document.createElement("h2"); const image = document.createElement("img"); title.textContent = "Biểu đồ"; image.src = imageUrl; image.alt = task.chart_image?.alt_text || task.chartAlt || "Biểu đồ của bài Writing Task 1"; card.append(title, image); root.append(card); }
+  if (imageUrl) { const card = document.createElement("section"); const title = document.createElement("h2"); const link = document.createElement("a"); const image = document.createElement("img"); const hint = document.createElement("p"); card.className = "chart-card"; title.textContent = "Biểu đồ"; link.className = "chart-link"; link.href = imageUrl; link.target = "_blank"; link.rel = "noopener noreferrer"; image.src = imageUrl; image.alt = task.chart_image?.alt_text || task.chartAlt || "Biểu đồ của bài Writing Task 1"; image.decoding = "async"; hint.className = "chart-hint"; hint.textContent = "Nhấn vào ảnh để mở kích thước đầy đủ."; link.append(image); card.append(title, link, hint); root.append(card); }
   if (manifest.decoding && typeof manifest.decoding === "object") {
     addListCard(root, "Cách đọc dữ liệu", [
       manifest.decoding.what ? `Nội dung: ${manifest.decoding.what}` : "",
@@ -83,7 +84,7 @@ function renderTaskContent() {
   const routes = manifest.routes || task.recommendedRoutes;
   if (Array.isArray(routes) && routes.length) {
     const card = document.createElement("section"); const heading = document.createElement("h2"); const list = document.createElement("ol"); heading.textContent = "Cách triển khai gợi ý";
-    [...routes].sort((a, b) => Number(Boolean(b.recommended)) - Number(Boolean(a.recommended))).forEach((route) => { const item = document.createElement("li"); const details = route.body ? `${route.body.body_1 || ""} / ${route.body.body_2 || ""}` : route.description; item.textContent = typeof route === "string" ? route : `${route.recommended ? "Khuyến nghị: " : ""}${route.name || route.title || route.label || "Cách triển khai"}${details ? ` — ${details}` : ""}`; list.append(item); }); card.append(heading, list); root.append(card);
+    [...routes].sort((a, b) => Number(Boolean(b.recommended)) - Number(Boolean(a.recommended))).forEach((route) => { const item = document.createElement("li"); const details = route.body ? `${route.body.body_1 || ""} / ${route.body.body_2 || ""}` : route.description; const text = typeof route === "string" ? route : `${route.recommended ? "**Khuyến nghị:** " : ""}**${route.name || route.title || route.label || "Cách triển khai"}**${details ? ` — ${details}` : ""}`; appendInlineMarkdown(item, text); list.append(item); }); card.append(heading, list); root.append(card);
   }
   const manifestVocab = manifest.vocabulary;
   const vocab = Array.isArray(manifestVocab) ? manifestVocab : [
@@ -91,8 +92,9 @@ function renderTaskContent() {
     ...(manifestVocab?.routes || []).flatMap(route => [...(route.naming || []), ...(route.story || [])])
   ];
   if (vocab.length) {
-    const card = document.createElement("section"); const heading = document.createElement("h2"); heading.textContent = "Từ vựng hỗ trợ"; card.append(heading);
-    vocab.forEach((entry) => { const detail = document.createElement("details"); const summary = document.createElement("summary"); const text = document.createElement("p"); summary.textContent = entry.en || entry.term || entry.title || "Từ vựng"; text.textContent = entry.vi || entry.meaning || entry.note || entry.example || ""; detail.append(summary, text); card.append(detail); }); root.append(card);
+    const card = document.createElement("section"); const heading = document.createElement("h2"); const wrapper = document.createElement("div"); const table = document.createElement("table"); const thead = document.createElement("thead"); const tbody = document.createElement("tbody"); heading.textContent = "Từ vựng hỗ trợ"; wrapper.className = "table-scroll"; table.className = "vocab-table"; const headRow = document.createElement("tr"); ["Ý tiếng Việt", "Từ, cụm từ tiếng Anh"].forEach((label) => { const th = document.createElement("th"); th.scope = "col"; th.textContent = label; headRow.append(th); }); thead.append(headRow);
+    vocab.forEach((entry) => { const row = document.createElement("tr"); const vi = document.createElement("td"); const en = document.createElement("td"); appendInlineMarkdown(vi, entry.vi || entry.meaning || entry.note || ""); appendInlineMarkdown(en, entry.en || entry.term || entry.title || entry.example || ""); row.append(vi, en); tbody.append(row); });
+    table.append(thead, tbody); wrapper.append(table); card.append(heading, wrapper); root.append(card);
   }
   const rawChatbots = manifest.chatbots || task.chatbotLinks;
   const chatbots = Array.isArray(rawChatbots) ? rawChatbots : Object.values(rawChatbots || {}).filter(bot => bot.href);
@@ -136,8 +138,9 @@ function mergeServer(payload) {
 function renderSections() {
   const root = $("sections"); const template = $("section-template"); root.replaceChildren();
   for (const section of SECTION_KEYS) {
-    const info = SECTION_INFO[section]; const card = template.content.firstElementChild.cloneNode(true); const status = card.querySelector(".section-status");
-    card.dataset.section = section; card.querySelector(".section-kicker").textContent = info.kicker; card.querySelector("h2").textContent = info.title;
+    const info = SECTION_INFO[section]; const workspace = template.content.firstElementChild.cloneNode(true); const card = workspace.querySelector(".section-card"); const status = card.querySelector(".section-status");
+    workspace.dataset.section = section; workspace.dataset.state = app.state.sections[section].status; card.dataset.section = section; card.querySelector(".section-kicker").textContent = info.kicker; card.querySelector("h2").textContent = info.title;
+    const commentsTitle = workspace.querySelector(".comments-title"); commentsTitle.id = `comments-title-${section}`; commentsTitle.textContent = `Dòng thời gian ${info.title}`; workspace.querySelector(".comments-panel").setAttribute("aria-labelledby", commentsTitle.id);
     const locked = ["passed", "queued"].includes(app.state.sections[section].status);
     status.textContent = statusLabel(app.state.sections[section].status); status.dataset.state = app.state.sections[section].status;
     for (const field of info.fields) {
@@ -146,29 +149,32 @@ function renderSections() {
       textarea.addEventListener("input", () => { app.state.texts[field.key] = textarea.value; markDirty(); refreshSection(card, section); }); label.append(textarea); card.querySelector(".text-fields").append(label);
     }
     const button = card.querySelector(".submit-section"); button.disabled = locked; button.textContent = app.state.sections[section].status === "queued" ? "Đang chấm" : locked ? "Phần này đã đạt" : "Gửi để nhận xét"; button.addEventListener("click", () => submitSection(section, card));
-    refreshSection(card, section); root.append(card);
+    refreshSection(card, section); root.append(workspace);
   }
 }
 
 function refreshSection(card, section) { card.querySelector(".word-count").textContent = `${wordCount(sectionText(section))} từ`; }
 function renderComments() {
-  const list = $("comment-list"); const comments = app.state.comments || []; list.replaceChildren();
-  for (const item of comments.slice().reverse()) {
-    const li = document.createElement("li"); const meta = document.createElement("div"); meta.className = "comment-meta";
-    const number = item.commentNumber ? `Comment lần ${item.commentNumber}` : "Comment";
-    const pending = item.status === "queued" ? " — Đang chấm" : "";
-    meta.textContent = `${number}${pending} · ${item.section === "outline" ? "Outline" : "Overview"} · ${item.createdAt ? new Date(item.createdAt).toLocaleString("vi-VN") : "Mới cập nhật"}`;
-    const body = document.createElement("p"); body.className = "comment-body"; body.textContent = item.feedback || item.message || item.text || "Đã cập nhật trạng thái chấm."; li.append(meta, body);
-    if (item.status === "technical_error" && item.attemptRef && item.canRetry !== false) {
-      const retry = document.createElement("button"); retry.type = "button"; retry.className = "button secondary compact"; retry.textContent = "Thử lại";
-      retry.addEventListener("click", () => retryComment(item, retry)); li.append(retry);
+  const comments = app.state.comments || [];
+  for (const section of SECTION_KEYS) {
+    const workspace = document.querySelector(`.section-workspace[data-section="${section}"]`); if (!workspace) continue;
+    const list = workspace.querySelector(".comment-list"); const sectionComments = comments.filter((item) => item.section === section); list.replaceChildren();
+    for (const item of sectionComments.slice().reverse()) {
+      const li = document.createElement("li"); const meta = document.createElement("div"); const body = document.createElement("div"); meta.className = "comment-meta"; body.className = "comment-body markdown-body"; li.dataset.status = item.status || "completed";
+      const number = item.commentNumber ? `Comment lần ${item.commentNumber}` : "Comment"; const pending = item.status === "queued" ? " — Đang chấm" : "";
+      meta.textContent = `${number}${pending} · ${item.createdAt ? new Date(item.createdAt).toLocaleString("vi-VN") : "Mới cập nhật"}`;
+      appendMarkdown(body, item.feedback || item.message || item.text || "Đã cập nhật trạng thái chấm."); li.append(meta, body);
+      if (item.status === "technical_error" && item.attemptRef && item.canRetry !== false) {
+        const retry = document.createElement("button"); retry.type = "button"; retry.className = "button secondary compact"; retry.textContent = "Thử lại";
+        retry.addEventListener("click", () => retryComment(item, retry)); li.append(retry);
+      }
+      list.append(li);
     }
-    list.append(li);
+    workspace.querySelector(".empty-comments").hidden = sectionComments.length > 0;
   }
-  $("empty-comments").hidden = comments.length > 0;
 }
 
-function renderAll() { renderSections(); renderComments(); }
+function renderAll() { renderSections(); renderComments(); updatePollingStates(); }
 function resetAutosave() { clearTimeout(app.saveTimer); if (app.dirty) app.saveTimer = setTimeout(async () => { await saveRemote("timer"); resetAutosave(); }, 10 * 60 * 1000); }
 function markDirty() { const wasClean = !app.dirty; app.dirty = true; setSaveState("Có thay đổi chưa lưu"); clearTimeout(app.idbTimer); app.idbTimer = setTimeout(saveLocal, 500); if (wasClean) resetAutosave(); }
 async function saveLocal() { if (!app.identity || !app.state) return; await putDraft({ key: keyForDraft(), savedAt: Date.now(), progress: app.state, sessionRef: app.sessionRef, identity: app.identity }); }
@@ -253,9 +259,18 @@ function applyTerminalAttempt(payload, fallbackSection) {
 
 function schedulePoll() {
   clearTimeout(app.pollTimer);
-  if (document.hidden || !activeAttempts().length) { $("polling-state").textContent = document.hidden ? "Đã tạm dừng" : "—"; return; }
+  updatePollingStates();
+  if (document.hidden || !activeAttempts().length) return;
   const earliest = Math.min(...activeAttempts().map((item) => item.submittedAt)); const wait = pollingDelay(Date.now() - earliest);
-  $("polling-state").textContent = "Đang chấm"; $("polling-state").dataset.state = "polling"; app.pollTimer = setTimeout(pollAttempts, wait);
+  app.pollTimer = setTimeout(pollAttempts, wait);
+}
+
+function updatePollingStates() {
+  for (const section of SECTION_KEYS) {
+    const node = document.querySelector(`.section-workspace[data-section="${section}"] .polling-state`); if (!node) continue;
+    const active = activeAttempts().some((item) => item.section === section);
+    node.textContent = active ? (document.hidden ? "Đã tạm dừng" : "Đang chấm") : "—"; node.dataset.state = active && !document.hidden ? "polling" : "idle";
+  }
 }
 
 async function pollAttempts() {

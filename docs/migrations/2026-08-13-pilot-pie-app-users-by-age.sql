@@ -20,7 +20,7 @@ VALUES (
   '41ec3339-edb5-4b13-8324-064deed6ca63',
   'pie-app-users-by-age',
   'task1-web-activity-v1',
-  'e4ddcc9d1a032b299b9e5f194639f6c76dd239ff41d7176660229e0ab2cce2c2',
+  'ed08ea05927f56a33a7025a7a1bd568dba37aa03472d31765f61e25d4171e886',
   'Luyện Task 1: Độ tuổi người dùng ba ứng dụng',
   'The pie charts show the proportion of users across different age groups on three apps:Twitter, Facebook and YouTube.',
   'recvqPmgd9l5P1',

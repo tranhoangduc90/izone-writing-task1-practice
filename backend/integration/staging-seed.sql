@@ -4,6 +4,69 @@
 -- Khi lỗi: transaction rollback toàn bộ; xem lỗi psql, không có dữ liệu dở dang.
 BEGIN;
 
+INSERT INTO mapping.classroom_course_mapping (
+  erp_course_class_id,
+  erp_class_name_snapshot,
+  classroom_course_id,
+  classroom_course_name_snapshot,
+  status
+)
+VALUES (
+  999999999,
+  'Lớp thử nghiệm 40 học viên',
+  'staging-course-1',
+  'Lớp thử nghiệm 40 học viên',
+  'approved'
+)
+ON CONFLICT (erp_course_class_id) DO UPDATE
+SET classroom_course_id = EXCLUDED.classroom_course_id,
+    classroom_course_name_snapshot = EXCLUDED.classroom_course_name_snapshot,
+    status = 'approved',
+    updated_at = now();
+
+INSERT INTO mapping.classroom_roster_snapshot (
+  classroom_course_id,
+  classroom_user_id,
+  classroom_name_snapshot,
+  roster_state
+)
+SELECT 'staging-course-1',
+       'staging-user-' || student_number,
+       'Học viên thử nghiệm ' || lpad(student_number::text, 2, '0'),
+       'active'
+FROM generate_series(1, 40) AS student_number
+ON CONFLICT (classroom_course_id, classroom_user_id) DO UPDATE
+SET classroom_name_snapshot = EXCLUDED.classroom_name_snapshot,
+    roster_state = 'active',
+    seen_at = now();
+
+INSERT INTO mapping.student_mapping_review (
+  erp_course_class_id,
+  erp_student_contact_id,
+  erp_student_name_snapshot,
+  classroom_course_id,
+  classroom_user_id,
+  classroom_name_snapshot,
+  match_method,
+  status,
+  public_id
+)
+SELECT 999999999,
+       990000000 + student_number,
+       'Học viên thử nghiệm ' || lpad(student_number::text, 2, '0'),
+       'staging-course-1',
+       'staging-user-' || student_number,
+       'Học viên thử nghiệm ' || lpad(student_number::text, 2, '0'),
+       'manual',
+       'approved',
+       ('00000000-0000-4000-8000-' || lpad(student_number::text, 12, '0'))::uuid
+FROM generate_series(1, 40) AS student_number
+ON CONFLICT (erp_course_class_id, classroom_user_id) DO UPDATE
+SET classroom_name_snapshot = EXCLUDED.classroom_name_snapshot,
+    status = 'approved',
+    public_id = EXCLUDED.public_id,
+    updated_at = now();
+
 INSERT INTO writing_practice.activity (
   slug,
   content_version,
@@ -48,28 +111,8 @@ SET class_name_snapshot = EXCLUDED.class_name_snapshot,
     end_date = EXCLUDED.end_date,
     status = 'active';
 
-INSERT INTO writing_practice.activity_roster (
-  activity_class_id,
-  student_public_id,
-  display_name,
-  display_alias,
-  active
-)
-SELECT scope.id,
-       ('00000000-0000-4000-8000-' || lpad(student_number::text, 12, '0'))::uuid,
-       'Học viên thử nghiệm ' || lpad(student_number::text, 2, '0'),
-       'Học viên thử nghiệm ' || lpad(student_number::text, 2, '0'),
-       true
-FROM writing_practice.activity_class_scope scope
-JOIN writing_practice.activity activity ON activity.id = scope.activity_id
-CROSS JOIN generate_series(1, 40) AS student_number
-WHERE activity.slug = 'staging-task-1'
-  AND activity.status = 'active'
-  AND scope.erp_course_class_id = 999999999
-ON CONFLICT (activity_class_id, student_public_id) DO UPDATE
-SET display_name = EXCLUDED.display_name,
-    display_alias = EXCLUDED.display_alias,
-    active = true,
-    updated_at = now();
+SELECT writing_practice.refresh_activity_roster(id)
+FROM writing_practice.activity
+WHERE slug = 'staging-task-1' AND status = 'active';
 
 COMMIT;

@@ -42,6 +42,15 @@ const server = http.createServer(async (request, response) => {
   }
   if (url.pathname === `/mock/api/v1/lesson-sessions/${uuid}/live`) return json(response, { ok: true, accepted: true });
   if (url.pathname === '/mock/api/v1/admin/live/activities/writing-lesson13-young-leaders') return json(response, { ok: true, generatedAt: new Date().toISOString(), students: [{ sessionRef: uuid, classRef, className: 'Lớp 67', studentRef, displayName: 'Học viên kiểm thử', online: true, savedAt: new Date().toISOString(), lastSeenAt: new Date().toISOString(), activeField: 'body1_topic', responses: { body1_idea1: 'Young leaders are often more adaptable.' }, sections: { body1_topic: { status: 'revision', attemptsWithoutPass: 3 } }, checkCount: 3, supportWarning: true }] });
+  if (url.pathname === `/mock/api/v1/admin/live/lesson-sessions/${uuid}`) return json(response, { ok: true, session: {
+    sessionRef: uuid,
+    responses: { body1_idea1: 'Young leaders are often more adaptable.', body1_idea2: 'They understand technology.', body1_topic: 'Young leaders can help organisations adapt.' },
+    sections: { body1_topic: { status: 'revision', attemptsWithoutPass: 3 } },
+    comments: [
+      { section: 'body1_topic', commentNumber: 1, status: 'completed', feedback: '### Cần sửa\n- Làm rõ hai supporting ideas.', createdAt: '2026-08-14T01:00:00Z', artifacts: {} },
+      { section: 'body1_topic', commentNumber: 2, status: 'completed', feedback: '### Tiến bộ\n**Topic Sentence** đã rõ hơn.', createdAt: '2026-08-14T02:00:00Z', artifacts: { vocabulary: { body1: [{ idea: 'thích nghi nhanh', terms: 'adapt quickly' }] } } }
+    ]
+  } });
   const relative = decodeURIComponent(url.pathname === '/' ? '/lesson.html' : url.pathname).replace(/^\/+/, '');
   const file = path.resolve(webRoot, relative);
   if (!file.startsWith(webRoot)) { response.writeHead(403); return response.end(); }
@@ -94,7 +103,12 @@ try {
   assert.equal(await teacher.locator('.teacher-student-card').count(), 1);
   await teacher.click('.teacher-student-card');
   await teacher.waitForSelector('#teacher-detail[open]');
+  await teacher.waitForSelector('.teacher-comment-timeline .comment-list > li');
+  assert.equal(await teacher.locator('.teacher-comment-timeline .comment-list > li').count(), 2);
+  assert.equal(await teacher.locator('.teacher-detail-vocabulary tbody tr').count(), 1);
   await teacher.screenshot({ path: path.join(outputRoot, 'lesson13-teacher-dashboard.png'), fullPage: true });
+  await teacher.mouse.click(5, 5);
+  await teacher.waitForFunction(() => !document.getElementById('teacher-detail').open);
 } finally {
   await browser.close();
   await new Promise(resolve => server.close(resolve));

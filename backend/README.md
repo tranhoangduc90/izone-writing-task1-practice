@@ -1,6 +1,6 @@
 # API luyện Writing Task 1
 
-API công khai không trả ERP ID, Google ID, email, prompt chấm hay credential. Sau khi mapping đồng bộ, n8n gọi `SELECT writing_practice.refresh_activity_roster(<activity_id>)`. Hàm này chỉ lấy lớp/mapping đã duyệt và thành viên Classroom `active`, lưu alias ổn định từ UUID công khai vào `activity_roster`.
+API công khai không trả ERP ID, Google ID, email, prompt chấm hay credential. Sau khi mapping đồng bộ, n8n gọi `SELECT writing_practice.refresh_activity_roster(<activity_id>)`. Hàm này lấy lớp/mapping đã duyệt và thành viên Classroom `active`, đồng thời nhận ngoại lệ ERP đã được phê duyệt trong `activity_roster_override`; trình duyệt vẫn chỉ nhận alias ổn định và UUID công khai.
 
 ## Chạy local
 

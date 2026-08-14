@@ -63,6 +63,7 @@ textarea { resize:vertical; min-height:10rem; line-height:1.55; }
 .section-status,.polling-state { white-space:nowrap; padding:.2rem .48rem; border-radius:999px; font-size:.78rem; font-weight:700; background:#edf2f7; color:#475467; }
 .section-status[data-state="passed"] { background:#e7f7ec; color:var(--success); }
 .section-status[data-state="queued"],.polling-state[data-state="polling"] { background:#fff5df; color:var(--warning); }
+.section-status[data-state="technical_error"] { background:#fff0df; color:#a5480d; }
 .section-status[data-state="revision"] { background:#fff0ee; color:var(--danger); }
 .section-actions { justify-content:space-between; margin-top:.65rem; }
 .draft-guidance { margin-bottom:1rem; padding:.9rem; border:1px solid #b9cce4; border-radius:10px; background:#eef6ff; }
@@ -139,12 +140,14 @@ textarea { resize:vertical; min-height:10rem; line-height:1.55; }
 .teacher-summary-card strong { font-size:1.55rem; color:var(--navy); }
 .teacher-summary-card[data-state="writing"] { border-color:#91b8e6; background:#f1f7ff; }
 .teacher-summary-card[data-state="queued"] { border-color:#e6c66a; background:var(--queued-surface); }
+.teacher-summary-card[data-state="technical_error"] { border-color:#d58b36; background:#fff4e8; }
 .teacher-summary-card[data-state="revision"] { border-color:#efaaa2; background:var(--revision-surface); }
 .teacher-summary-card[data-state="passed"] { border-color:#8fd0aa; background:var(--passed-surface); }
 .teacher-students { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:.85rem; }
 .teacher-student-card { display:grid; gap:.35rem; min-height:150px; padding:1rem; border:1px solid var(--line); border-radius:12px; background:#fff; color:var(--ink); text-align:left; box-shadow:0 1px 2px rgb(15 23 42/.04); }
 .teacher-student-card:hover { border-color:#8aaed7; box-shadow:0 6px 18px rgb(20 33 61/.08); }
 .teacher-student-card[data-state="queued"] { border-left:5px solid var(--warning); }
+.teacher-student-card[data-state="technical_error"] { border-left:5px solid #c75b12; background:#fff8f1; }
 .teacher-student-card[data-state="revision"] { border-left:5px solid var(--danger); }
 .teacher-student-card[data-state="passed"] { border-left:5px solid var(--success); }
 .teacher-student-header { display:flex; justify-content:space-between; gap:.6rem; align-items:flex-start; }
@@ -162,12 +165,38 @@ textarea { resize:vertical; min-height:10rem; line-height:1.55; }
 .teacher-response-field { margin:.55rem 0; padding:.7rem .8rem; border-radius:8px; background:#f6f8fb; }
 .teacher-response-field[data-active="true"] { box-shadow:inset 4px 0 #2563eb; background:#edf5ff; }
 .teacher-response-field p { margin:.25rem 0 0; white-space:pre-wrap; }
+.teacher-ai-recovery { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:.75rem; margin:.65rem 0; padding:.8rem; border:1px solid #e3a15b; border-radius:10px; background:#fff4e8; }
+.teacher-ai-recovery p { flex:1 1 320px; margin:0; color:#7a3d0c; }
 
 @media (min-width:760px) {
-  .teacher-summary { grid-template-columns:repeat(5,minmax(0,1fr)); }
+  .teacher-summary { grid-template-columns:repeat(6,minmax(0,1fr)); }
 }
 @media (max-width:620px) {
   .lesson-body-block { padding:.65rem; }
   .lesson-vocabulary { overflow-x:auto; }
   .teacher-class-filter { width:100%; }
 }
+
+/* Demo tải lớp và khôi phục lỗi AI; chỉ dùng dữ liệu giả trên trình duyệt. */
+.live-demo-page { max-width:1800px; }
+.live-demo-hero { margin-top:.5rem; }
+.live-demo-controls { margin-top:1rem; }
+.live-demo-safety { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.75rem; margin-bottom:1rem; }
+.live-demo-safety article { display:grid; gap:.2rem; padding:.9rem; border:1px solid #b9cce4; border-radius:12px; background:#eef6ff; }
+.live-demo-safety span { color:#526078; font-size:.88rem; }
+.live-demo-layout { display:grid; gap:1rem; align-items:start; }
+.live-demo-heading { margin:0 0 .75rem; font-size:1.2rem; }
+.live-demo-student-card { min-height:108px; cursor:default; }
+.live-demo-student-card[data-state="running"] { border-left:5px solid var(--blue); background:#f1f7ff; }
+.live-demo-student-card[data-state="technical_error"] { border-left:5px solid #c75b12; background:#fff4e8; }
+.live-demo-job { color:#6b4500; font-size:.8rem; font-weight:700; }
+.live-demo-event-panel { position:sticky; top:1rem; padding:1rem; }
+.live-demo-event-panel h2 { margin-bottom:.35rem; }
+.live-demo-events { display:grid; gap:.6rem; margin:1rem 0 0; padding:0; list-style:none; }
+.live-demo-events li { display:grid; gap:.15rem; padding:.65rem .75rem; border-left:4px solid #7ba5d6; border-radius:7px; background:#f6f8fb; font-size:.88rem; }
+.live-demo-events li[data-kind="warning"] { border-left-color:var(--warning); background:#fff8e9; }
+.live-demo-events li[data-kind="danger"] { border-left-color:var(--danger); background:#fff1ef; }
+.live-demo-events li[data-kind="success"] { border-left-color:var(--success); background:#effaf3; }
+.live-demo-events strong { color:#344054; font-size:.78rem; }
+@media (min-width:1180px) { .live-demo-layout { grid-template-columns:minmax(0,1fr) minmax(320px,.34fr); } }
+@media (max-width:620px) { .live-demo-safety { grid-template-columns:1fr; } .live-demo-controls { display:grid; grid-template-columns:1fr; } .live-demo-event-panel { position:static; } }

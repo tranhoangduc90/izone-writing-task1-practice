@@ -84,6 +84,7 @@ export function createTeacherApi(base = "", getToken = () => "") {
       if (classRef) url.searchParams.set("classRef", classRef);
       return fetchJson(url, { headers: authorized() });
     },
+    retryFailedAttempt: (attemptRef) => fetchJson(endpoint(root, `admin/attempts/${encodeURIComponent(attemptRef)}/retry`), jsonOptions("POST", {}, authorized())),
     reopenSection: (sessionRef, section, reason) => fetchJson(endpoint(root, `admin/lesson-sessions/${encodeURIComponent(sessionRef)}/sections/${encodeURIComponent(section)}/reopen`), jsonOptions("POST", { reason }, authorized())),
   };
 }

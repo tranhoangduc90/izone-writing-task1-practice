@@ -23,12 +23,16 @@ try {
   if (studentsWithSessions.some(student => Object.keys(student.sections || {}).length !== 6)) {
     throw new Error('Dashboard chưa trả đủ sáu section cho mỗi học viên.');
   }
+  const technicalErrorSections = studentsWithSessions.flatMap(student => Object.values(student.sections || {}))
+    .filter(section => section.status === 'technical_error' && section.technicalAttemptRef).length;
+  if (technicalErrorSections < 1) throw new Error('Dashboard chưa hiển thị lượt AI lỗi cho giảng viên khôi phục.');
   console.log(JSON.stringify({
     ok: true,
     syntheticStudents: result.students.length,
     studentsWithSessions: studentsWithSessions.length,
     sectionsPerStudent: 6,
-    aggregateRequest: true
+    aggregateRequest: true,
+    technicalErrorSections
   }));
 } finally {
   await pool.end();

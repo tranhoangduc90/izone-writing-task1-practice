@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://ducizone.ddns.net; object-src 'none'; base-uri 'none'; form-action 'self'" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#14213d" />
+    <title>Handout Writing · Lesson 13</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#lesson-workspace">Đi tới bài làm</a>
+    <header class="topbar">
+      <a class="brand" href="./lesson.html">iZONE · Writing trên lớp</a>
+      <p id="lesson-save-state" class="save-state" aria-live="polite">Chưa tải bài làm</p>
+    </header>
+    <main class="page-shell lesson-shell">
+      <section id="lesson-setup" class="card setup-card" aria-labelledby="lesson-setup-title">
+        <p class="eyebrow">Lesson 13</p>
+        <h1 id="lesson-setup-title">Bắt đầu handout Writing</h1>
+        <p id="lesson-summary">Đang tải cấu hình bài…</p>
+        <form id="lesson-identity-form" novalidate>
+          <label>Lớp<select id="lesson-class" required><option value="">Chọn lớp của bạn</option></select></label>
+          <label>Họ và tên<input id="lesson-student" list="lesson-students" autocomplete="name" maxlength="120" required disabled /><datalist id="lesson-students"></datalist></label>
+          <p id="lesson-identity-error" class="form-error" role="alert" hidden></p>
+          <button class="primary" type="submit">Mở bài làm</button>
+        </form>
+      </section>
+
+      <section id="lesson-workspace" class="workspace" hidden>
+        <div class="task-header">
+          <div><p class="eyebrow">Writing trên lớp · Lesson 13</p><h1 id="lesson-title">Handout Writing</h1><p id="lesson-student-label" class="muted"></p></div>
+          <div class="actions"><button id="lesson-save" class="secondary" type="button">Lưu ngay</button><button id="lesson-save-close" class="primary" type="button">Lưu &amp; đóng</button></div>
+        </div>
+        <p id="lesson-notice" class="notice" hidden></p>
+        <section id="lesson-conflict" class="conflict" hidden aria-labelledby="lesson-conflict-title">
+          <h2 id="lesson-conflict-title">Bài làm đã được thay đổi ở nơi khác</h2>
+          <p>Bản trên thiết bị vẫn được giữ. Hãy tải lại bản mới nhất trước khi tiếp tục.</p>
+          <button id="lesson-reload" class="secondary" type="button">Tải bản mới nhất</button>
+        </section>
+        <article class="lesson-prompt card"><p class="eyebrow">Đề bài</p><h2 id="lesson-prompt-title">Essay question</h2><div id="lesson-prompt-text" class="markdown-body"></div></article>
+        <div id="lesson-bodies" class="lesson-bodies"></div>
+      </section>
+    </main>
+
+    <template id="lesson-section-template">
+      <section class="section-workspace lesson-section-workspace">
+        <article class="section-card lesson-section-card">
+          <div class="section-heading"><div><p class="section-kicker"></p><h3></h3></div><span class="section-status">Chưa làm</span></div>
+          <p class="section-instruction muted"></p>
+          <div class="text-fields"></div>
+          <p class="field-error" role="alert" hidden></p>
+          <div class="section-actions"><span class="word-count muted">0 từ</span><button class="secondary submit-section" type="button">Check</button></div>
+        </article>
+        <aside class="comments-panel"><div class="comments-heading"><div><p class="eyebrow">Nhận xét</p><h3 class="comments-title">Dòng thời gian</h3></div><span class="polling-state">—</span></div><ol class="comment-list" aria-live="polite"></ol><p class="empty-comments muted">Chưa có nhận xét.</p></aside>
+      </section>
+    </template>
+    <script type="module" src="./js/lesson-app.js"></script>
+  </body>
+</html>

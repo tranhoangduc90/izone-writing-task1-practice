@@ -28,8 +28,18 @@ test("pilot manifest contains the released chart and six approved routes", () =>
   assert.doesNotMatch(JSON.stringify(manifest), /grader.?prompt|credential|api.?key|student.?data|Bearer /i);
 });
 
-test("public config only contains the API base URL", () => {
+test("public config only contains non-secret browser configuration", () => {
   const config = JSON.parse(fs.readFileSync(path.join(root, "config.json"), "utf8"));
-  assert.deepEqual(Object.keys(config), ["apiBase"]);
+  assert.deepEqual(Object.keys(config), ["apiBase", "googleClientId"]);
   assert.doesNotMatch(JSON.stringify(config), /token|secret|credential|authorization/i);
+});
+
+test("Lesson 13 manifest merges Body 1 and Body 2 without private grading prompts", () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifests", "writing-lesson13-young-leaders.json"), "utf8"));
+  assert.equal(manifest.schemaVersion, "lesson-handout.v1");
+  assert.equal(manifest.bodies.length, 2);
+  assert.equal(manifest.sections.length, 6);
+  assert.equal(new Set(manifest.sections.flatMap((section) => section.fields.map((field) => field.key))).size, 18);
+  assert.ok(manifest.sections.every((section) => section.requiredFields.length === 3));
+  assert.doesNotMatch(JSON.stringify(manifest), /grader.?prompt|credential|api.?key|student.?data|Bearer /i);
 });

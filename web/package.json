@@ -4,6 +4,6 @@
   "type": "module",
   "scripts": {
     "test": "node --test test/*.test.js",
-    "check": "node --check js/app.js && node --check js/api.js && node --check js/core.js && node --check js/idb.js && node --check js/markdown.js && node --check js/demo-draft.js"
+    "check": "node --check js/app.js && node --check js/lesson-app.js && node --check js/teacher-app.js && node --check js/api.js && node --check js/core.js && node --check js/lesson-core.js && node --check js/idb.js && node --check js/markdown.js && node --check js/demo-draft.js"
   }
 }

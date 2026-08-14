@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' https://accounts.google.com/gsi/style; img-src 'self' data: https://lh3.googleusercontent.com; connect-src 'self' https://ducizone.ddns.net https://accounts.google.com; frame-src https://accounts.google.com; object-src 'none'; base-uri 'none'; form-action 'self' https://accounts.google.com" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#14213d" />
+    <title>Theo dõi handout Writing</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body class="teacher-page">
+    <header class="topbar"><a class="brand" href="./teacher.html">iZONE · Theo dõi Writing</a><p id="teacher-updated" class="save-state">Chưa đăng nhập</p></header>
+    <main class="page-shell teacher-shell">
+      <section id="teacher-login" class="card teacher-login" aria-labelledby="teacher-login-title">
+        <p class="eyebrow">Dành cho giảng viên</p>
+        <h1 id="teacher-login-title">Đăng nhập để xem tiến độ lớp</h1>
+        <p>Dữ liệu bài làm chỉ được tải sau khi tài khoản giảng viên được hệ thống xác minh.</p>
+        <div id="google-signin"></div>
+        <p id="teacher-login-error" class="form-error" role="alert" hidden></p>
+      </section>
+
+      <section id="teacher-dashboard" hidden>
+        <div class="task-header">
+          <div><p class="eyebrow">Lesson 13</p><h1 id="teacher-title">Theo dõi bài làm</h1><p class="muted">Tự cập nhật bản tổng hợp của lớp mỗi 5 giây.</p></div>
+          <label class="teacher-class-filter">Lớp<select id="teacher-class"><option value="">Tất cả lớp</option></select></label>
+        </div>
+        <p id="teacher-error" class="notice" hidden></p>
+        <section id="teacher-summary" class="teacher-summary" aria-label="Tổng hợp trạng thái"></section>
+        <section id="teacher-students" class="teacher-students" aria-label="Danh sách học viên"></section>
+      </section>
+    </main>
+
+    <dialog id="teacher-detail" class="teacher-detail">
+      <form method="dialog"><button class="dialog-close" aria-label="Đóng">×</button></form>
+      <div id="teacher-detail-content"></div>
+    </dialog>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script type="module" src="./js/teacher-app.js"></script>
+  </body>
+</html>

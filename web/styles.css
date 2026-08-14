@@ -111,3 +111,63 @@ textarea { resize:vertical; min-height:10rem; line-height:1.55; }
 .demo-draft-workspace textarea { min-height:13rem; }
 .demo-draft-workspace .comments-panel { max-height:none; }
 @media (min-width:1280px) { .demo-layout { grid-template-columns:minmax(520px,.9fr) minmax(820px,1.5fr); } }
+
+/* Handout Writing Lesson 13 */
+.lesson-shell { max-width:1680px; }
+.lesson-prompt { margin-bottom:1.25rem; padding:1.1rem 1.25rem; border-left:5px solid var(--navy); }
+.lesson-prompt h2 { margin:.25rem 0 .45rem; }
+.lesson-bodies { display:grid; gap:1.5rem; }
+.lesson-body-block { display:grid; gap:1rem; padding:clamp(.75rem,2vw,1.25rem); border:1px solid #cbd6e4; border-radius:18px; background:#eef3f9; }
+.lesson-body-header { padding:.35rem .25rem; }
+.lesson-body-header h2 { color:var(--navy); font-size:1.45rem; }
+.lesson-body-header p { margin:.25rem 0 0; color:var(--muted); }
+.lesson-section-card textarea { min-height:7rem; }
+.lesson-section-card .section-instruction { margin:-.15rem 0 .85rem; font-size:.9rem; }
+.lesson-vocabulary { padding:1rem; overflow:hidden; }
+.lesson-vocabulary h3 { margin:0 0 .75rem; color:var(--navy); }
+.lesson-vocabulary table { width:100%; border-collapse:collapse; }
+.lesson-vocabulary th,.lesson-vocabulary td { width:50%; padding:.72rem; border:1px solid var(--line); text-align:left; vertical-align:top; }
+.lesson-vocabulary th { background:#eaf0f7; color:#344054; }
+.lesson-vocabulary tbody tr:nth-child(even) { background:#f7f9fc; }
+
+/* Dashboard chỉ đọc dành cho giảng viên */
+.teacher-shell { max-width:1680px; }
+.teacher-login { max-width:560px; margin:7vh auto; padding:2rem; }
+.teacher-class-filter { min-width:min(320px,100%); }
+.teacher-summary { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.75rem; margin-bottom:1rem; }
+.teacher-summary-card { display:flex; align-items:baseline; justify-content:space-between; gap:.5rem; padding:.9rem 1rem; border:1px solid var(--line); border-radius:12px; background:#fff; }
+.teacher-summary-card strong { font-size:1.55rem; color:var(--navy); }
+.teacher-summary-card[data-state="writing"] { border-color:#91b8e6; background:#f1f7ff; }
+.teacher-summary-card[data-state="queued"] { border-color:#e6c66a; background:var(--queued-surface); }
+.teacher-summary-card[data-state="revision"] { border-color:#efaaa2; background:var(--revision-surface); }
+.teacher-summary-card[data-state="passed"] { border-color:#8fd0aa; background:var(--passed-surface); }
+.teacher-students { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:.85rem; }
+.teacher-student-card { display:grid; gap:.35rem; min-height:150px; padding:1rem; border:1px solid var(--line); border-radius:12px; background:#fff; color:var(--ink); text-align:left; box-shadow:0 1px 2px rgb(15 23 42/.04); }
+.teacher-student-card:hover { border-color:#8aaed7; box-shadow:0 6px 18px rgb(20 33 61/.08); }
+.teacher-student-card[data-state="queued"] { border-left:5px solid var(--warning); }
+.teacher-student-card[data-state="revision"] { border-left:5px solid var(--danger); }
+.teacher-student-card[data-state="passed"] { border-left:5px solid var(--success); }
+.teacher-student-header { display:flex; justify-content:space-between; gap:.6rem; align-items:flex-start; }
+.teacher-student-meta { color:#526078; font-size:.84rem; }
+.teacher-support-warning { justify-self:start; padding:.2rem .5rem; border-radius:999px; background:#fee4e2; color:var(--danger); font-size:.78rem; font-weight:800; }
+.teacher-detail { width:min(1040px,calc(100% - 2rem)); max-height:90vh; padding:1.25rem; border:0; border-radius:16px; color:var(--ink); box-shadow:0 25px 60px rgb(15 23 42/.28); }
+.teacher-detail::backdrop { background:rgb(15 23 42/.52); }
+.dialog-close { float:right; width:44px; height:44px; border:1px solid var(--line); border-radius:50%; background:#fff; color:var(--ink); font-size:1.5rem; }
+.teacher-detail-heading { padding-right:3.25rem; }
+.teacher-detail-heading p { margin:.25rem 0 1rem; }
+.teacher-detail-body { margin-top:1rem; padding:1rem; border:1px solid var(--line); border-radius:12px; }
+.teacher-detail-body > h3 { margin:0 0 .8rem; color:var(--navy); }
+.teacher-detail-section { margin-top:.85rem; padding-top:.85rem; border-top:1px solid var(--line); }
+.teacher-detail-section h4 { margin:0 0 .6rem; }
+.teacher-response-field { margin:.55rem 0; padding:.7rem .8rem; border-radius:8px; background:#f6f8fb; }
+.teacher-response-field[data-active="true"] { box-shadow:inset 4px 0 #2563eb; background:#edf5ff; }
+.teacher-response-field p { margin:.25rem 0 0; white-space:pre-wrap; }
+
+@media (min-width:760px) {
+  .teacher-summary { grid-template-columns:repeat(5,minmax(0,1fr)); }
+}
+@media (max-width:620px) {
+  .lesson-body-block { padding:.65rem; }
+  .lesson-vocabulary { overflow-x:auto; }
+  .teacher-class-filter { width:100%; }
+}

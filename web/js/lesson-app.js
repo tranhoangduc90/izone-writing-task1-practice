@@ -225,7 +225,9 @@ function renderSection(section) {
 }
 
 function normalizeVocabularyRows(value, bodyKey) {
-  const raw = value?.[bodyKey] || value;
+  const hasBodyGroups = value && typeof value === "object" && !Array.isArray(value)
+    && (Object.hasOwn(value, "body1") || Object.hasOwn(value, "body2"));
+  const raw = hasBodyGroups ? value?.[bodyKey] : value;
   if (Array.isArray(raw)) return raw.map((row) => ({ idea: row.idea || row.meaning || row.label || "", terms: row.terms || row.english || row.words || "" }));
   if (raw && typeof raw === "object") return Object.entries(raw).map(([idea, terms]) => ({ idea, terms: Array.isArray(terms) ? terms.join(", ") : String(terms || "") }));
   return [];

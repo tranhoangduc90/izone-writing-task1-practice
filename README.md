@@ -29,7 +29,7 @@ Repo cũng có bản nháp **Writing trên lớp 67 – Lesson 13**, gộp hai h
 - Khi có thay đổi, trình duyệt vẫn lưu dự phòng cục bộ sau 500 ms và đồng bộ bản nháp lên database sau khoảng 15 giây. Chuyển ô, Check, Lưu và đóng đều yêu cầu lưu ngay.
 - Dashboard lấy một bản tổng hợp của lớp mỗi 5 giây, hiển thị bản nháp và trạng thái chỉ đọc. Luồng này dùng API/PostgreSQL, không tạo execution n8n.
 - Nếu AI lỗi, hệ thống tự thử tối đa ba lần trên cùng Comment. Sau ba lỗi, dashboard báo rõ và cho giảng viên xếp lại đúng lượt cũ; việc lưu bài vẫn tiếp tục độc lập.
-- Activity Lesson 13 đã phát hành riêng cho IC2200; roster công khai hiện có 14 học viên từ mapping đã duyệt.
+- Activity Lesson 13 đã phát hành riêng cho IC2200; roster công khai hiện có 15 học viên, gồm mapping đã duyệt và ngoại lệ ERP được lưu nội bộ.
 - Google Client ID trong cấu hình là định danh OAuth công khai; secret và token không được lưu trong repo.
 - Kết quả kiểm thử và thông tin khôi phục nằm trong [biên bản phát hành Lesson 13](docs/PRODUCTION_DEPLOYMENT_2026-08-14_LESSON13_IC2200.md).
 

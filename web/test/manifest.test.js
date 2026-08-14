@@ -41,6 +41,10 @@ test("Lesson 13 manifest merges Body 1 and Body 2 without private grading prompt
   assert.equal(manifest.sections.length, 6);
   assert.equal(new Set(manifest.sections.flatMap((section) => section.fields.map((field) => field.key))).size, 18);
   assert.ok(manifest.sections.every((section) => section.requiredFields.length === 3));
+  const middleFields = manifest.sections.flatMap((section) => section.fields).filter((field) => field.key.endsWith("_x"));
+  const finalFields = manifest.sections.flatMap((section) => section.fields).filter((field) => field.key.endsWith("_b"));
+  assert.ok(middleFields.every((field) => field.placeholder === "Giải thích cơ chế dẫn đến điểm cuối / Làm rõ cho điểm đầu…"));
+  assert.ok(finalFields.every((field) => field.placeholder === "Điều muốn chứng minh - Hệ quả cuối cùng…"));
   assert.doesNotMatch(JSON.stringify(manifest), /grader.?prompt|credential|api.?key|student.?data|Bearer /i);
 });
 

@@ -43,13 +43,13 @@
       "body": "body1",
       "title": "Phát triển Supporting Idea 1",
       "kicker": "Body 1 · Bước 2",
-      "instruction": "A nêu điểm đầu, X giải thích hoặc nối logic, B chốt hệ quả hoặc ví dụ phù hợp.",
+      "instruction": "A nêu điểm đầu, X giải thích cơ chế dẫn đến điểm cuối hoặc làm rõ điểm đầu, B chốt điều muốn chứng minh hoặc hệ quả cuối cùng.",
       "requiredFields": ["body1_support1_a", "body1_support1_x", "body1_support1_b"],
       "validationMode": "all",
       "fields": [
         { "key": "body1_support1_a", "label": "A · Điểm đầu", "rows": 3, "placeholder": "Luận điểm mở đầu…" },
-        { "key": "body1_support1_x", "label": "X · Điểm giữa", "rows": 3, "placeholder": "Giải thích mối liên hệ…" },
-        { "key": "body1_support1_b", "label": "B · Điểm cuối", "rows": 3, "placeholder": "Hệ quả hoặc ví dụ…" }
+        { "key": "body1_support1_x", "label": "X · Điểm giữa", "rows": 3, "placeholder": "Giải thích cơ chế dẫn đến điểm cuối / Làm rõ cho điểm đầu…" },
+        { "key": "body1_support1_b", "label": "B · Điểm cuối", "rows": 3, "placeholder": "Điều muốn chứng minh - Hệ quả cuối cùng…" }
       ]
     },
     {
@@ -62,8 +62,8 @@
       "validationMode": "all",
       "fields": [
         { "key": "body1_support2_a", "label": "A · Điểm đầu", "rows": 3, "placeholder": "Luận điểm mở đầu…" },
-        { "key": "body1_support2_x", "label": "X · Điểm giữa", "rows": 3, "placeholder": "Giải thích mối liên hệ…" },
-        { "key": "body1_support2_b", "label": "B · Điểm cuối", "rows": 3, "placeholder": "Hệ quả hoặc ví dụ…" }
+        { "key": "body1_support2_x", "label": "X · Điểm giữa", "rows": 3, "placeholder": "Giải thích cơ chế dẫn đến điểm cuối / Làm rõ cho điểm đầu…" },
+        { "key": "body1_support2_b", "label": "B · Điểm cuối", "rows": 3, "placeholder": "Điều muốn chứng minh - Hệ quả cuối cùng…" }
       ]
     },
     {
@@ -85,13 +85,13 @@
       "body": "body2",
       "title": "Phát triển Supporting Idea 1",
       "kicker": "Body 2 · Bước 2",
-      "instruction": "A nêu điểm đầu, X giải thích hoặc nối logic, B chốt hệ quả hoặc ví dụ phù hợp.",
+      "instruction": "A nêu điểm đầu, X giải thích cơ chế dẫn đến điểm cuối hoặc làm rõ điểm đầu, B chốt điều muốn chứng minh hoặc hệ quả cuối cùng.",
       "requiredFields": ["body2_support1_a", "body2_support1_x", "body2_support1_b"],
       "validationMode": "all",
       "fields": [
         { "key": "body2_support1_a", "label": "A · Điểm đầu", "rows": 3, "placeholder": "Luận điểm mở đầu…" },
-        { "key": "body2_support1_x", "label": "X · Điểm giữa", "rows": 3, "placeholder": "Giải thích mối liên hệ…" },
-        { "key": "body2_support1_b", "label": "B · Điểm cuối", "rows": 3, "placeholder": "Hệ quả hoặc ví dụ…" }
+        { "key": "body2_support1_x", "label": "X · Điểm giữa", "rows": 3, "placeholder": "Giải thích cơ chế dẫn đến điểm cuối / Làm rõ cho điểm đầu…" },
+        { "key": "body2_support1_b", "label": "B · Điểm cuối", "rows": 3, "placeholder": "Điều muốn chứng minh - Hệ quả cuối cùng…" }
       ]
     },
     {
@@ -104,8 +104,8 @@
       "validationMode": "all",
       "fields": [
         { "key": "body2_support2_a", "label": "A · Điểm đầu", "rows": 3, "placeholder": "Luận điểm mở đầu…" },
-        { "key": "body2_support2_x", "label": "X · Điểm giữa", "rows": 3, "placeholder": "Giải thích mối liên hệ…" },
-        { "key": "body2_support2_b", "label": "B · Điểm cuối", "rows": 3, "placeholder": "Hệ quả hoặc ví dụ…" }
+        { "key": "body2_support2_x", "label": "X · Điểm giữa", "rows": 3, "placeholder": "Giải thích cơ chế dẫn đến điểm cuối / Làm rõ cho điểm đầu…" },
+        { "key": "body2_support2_b", "label": "B · Điểm cuối", "rows": 3, "placeholder": "Điều muốn chứng minh - Hệ quả cuối cùng…" }
       ]
     }
   ],

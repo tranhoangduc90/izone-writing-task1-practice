@@ -18,6 +18,12 @@
 - Transaction phát hành tự đối chiếu roster materialized với mapping hiện hành và chỉ cho phép đúng một scope IC2200.
 - Readback sau phát hành: activity `active`, một lớp, 14 học viên, không còn phiên thử.
 
+## Cập nhật sau phát hành
+
+- Dashboard chỉ tải bản tổng hợp nhẹ mỗi 5 giây; khi mở một học viên mới tải riêng bài làm, toàn bộ timeline Comment và bảng từ vựng của đúng phiên đó.
+- Popup chi tiết đóng bằng nút ×, phím Esc hoặc nhấp vùng tối bên ngoài.
+- Roster hiện có 15 học viên. Một ngoại lệ ERP chưa có Classroom identity được lưu trong bảng nội bộ và chỉ xuất ra trình duyệt dưới dạng UUID công khai.
+
 ## Kiểm thử trước phát hành
 
 - Backend: 16/16 bài kiểm thử đạt.

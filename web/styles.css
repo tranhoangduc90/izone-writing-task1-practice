@@ -165,15 +165,26 @@ textarea { resize:vertical; min-height:10rem; line-height:1.55; }
 .teacher-student-header { display:flex; justify-content:space-between; gap:.6rem; align-items:flex-start; }
 .teacher-student-meta { color:#526078; font-size:.84rem; }
 .teacher-support-warning { justify-self:start; padding:.2rem .5rem; border-radius:999px; background:#fee4e2; color:var(--danger); font-size:.78rem; font-weight:800; }
-.teacher-detail { width:min(1040px,calc(100% - 2rem)); max-height:90vh; padding:1.25rem; border:0; border-radius:16px; color:var(--ink); box-shadow:0 25px 60px rgb(15 23 42/.28); }
+.teacher-detail { width:min(1420px,calc(100% - 2rem)); max-height:90vh; padding:1.25rem; border:0; border-radius:16px; color:var(--ink); box-shadow:0 25px 60px rgb(15 23 42/.28); }
 .teacher-detail::backdrop { background:rgb(15 23 42/.52); }
 .dialog-close { float:right; width:44px; height:44px; border:1px solid var(--line); border-radius:50%; background:#fff; color:var(--ink); font-size:1.5rem; }
 .teacher-detail-heading { padding-right:3.25rem; }
 .teacher-detail-heading p { margin:.25rem 0 1rem; }
+.teacher-detail-prompt { margin:.75rem 0 1rem; padding:.85rem 1rem; border-left:4px solid var(--navy); border-radius:8px; background:#f6f8fb; }
+.teacher-detail-prompt h3 { margin:.2rem 0 .35rem; color:var(--navy); }
 .teacher-detail-body { margin-top:1rem; padding:1rem; border:1px solid var(--line); border-radius:12px; }
-.teacher-detail-body > h3 { margin:0 0 .8rem; color:var(--navy); }
+.teacher-detail-body > h3 { margin:0; color:var(--navy); }
+.teacher-detail-body > .muted { margin:.2rem 0 .8rem; }
 .teacher-detail-section { margin-top:.85rem; padding-top:.85rem; border-top:1px solid var(--line); }
-.teacher-detail-section h4 { margin:0 0 .6rem; }
+.teacher-detail-section > .section-kicker { font-size:1rem; letter-spacing:.02em; text-transform:none; }
+.teacher-detail-section h4 { margin:.25rem 0 .2rem; }
+.teacher-detail-instruction { margin:0 0 .65rem; }
+.teacher-detail-section-layout { display:grid; gap:.85rem; align-items:start; }
+.teacher-comment-timeline { max-height:none; padding:.85rem; background:#f8fafc; }
+.teacher-comment-timeline .comments-heading { margin-bottom:.65rem; }
+.teacher-comment-timeline h4 { margin:.2rem 0 0; color:var(--navy); }
+.teacher-detail-vocabulary { margin-top:1rem; border:1px solid var(--line); border-radius:10px; background:#f8fafc; }
+.teacher-detail-vocabulary h4 { margin:0 0 .65rem; color:var(--navy); }
 .teacher-response-field { margin:.55rem 0; padding:.7rem .8rem; border-radius:8px; background:#f6f8fb; }
 .teacher-response-field[data-active="true"] { box-shadow:inset 4px 0 #2563eb; background:#edf5ff; }
 .teacher-response-field p { margin:.25rem 0 0; white-space:pre-wrap; }
@@ -182,6 +193,9 @@ textarea { resize:vertical; min-height:10rem; line-height:1.55; }
 
 @media (min-width:760px) {
   .teacher-summary { grid-template-columns:repeat(6,minmax(0,1fr)); }
+}
+@media (min-width:920px) {
+  .teacher-detail-section-layout { grid-template-columns:minmax(0,1fr) minmax(380px,.9fr); }
 }
 @media (max-width:620px) {
   .lesson-body-block { padding:.65rem; }

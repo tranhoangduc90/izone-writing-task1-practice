@@ -1,0 +1,49 @@
+{
+  "generatedFrom": "synthetic-band6-tests",
+  "cases": [
+    {
+      "id": "band6-language-errors",
+      "label": "Cần sửa · lỗi ngôn ngữ",
+      "resultStatus": "needs_revision",
+      "overview": "Overall, Twitter was most strongly concentrated among users aged 18-34, whereas Facebook and YouTube had similar age profiles.",
+      "body1": "Compare Facebook and YouTube, focusing on the similar shares for ages 18-34 and 35-49, followed by the older groups.",
+      "body2": "Describe Twitter's sharp peak at 18-34 and contrast it with the other applications.",
+      "draft1": "Overall, Twitter had the highest users in 18-34, while Facebook and YouTube were <cân bằng hơn>. In Facebook and YouTube, people aged 35-49 make up 30% and 29%. The 18-34 groups was 29% and 26%.",
+      "draft2": "Overall, Twitter had the highest users in the 18-34 group, while Facebook and YouTube were more balance. On Facebook and YouTube, people aged 35-49 make up 30% and 29% respectively. The 18-34 groups was 29% and 26%, which was slightly lower.",
+      "feedback": "### Điểm em đã làm tốt\n\n- Em đã biết cách dùng từ \"respectively\" rất chính xác để gán số liệu cho Facebook và YouTube theo đúng thứ tự.\n- Các số liệu em đưa vào cho nhóm 35-49 và 18-34 đều đã khớp chuẩn xác với biểu đồ.\n\n### Em cần sửa\n\n1. **Vị trí:** \"while Facebook and YouTube were more balance.\"\n   - **Vấn đề:** Em đã dịch được cụm `<cân bằng hơn>` nhưng đang dùng sai từ loại. \"Balance\" ở đây là danh từ, trong khi sau động từ to be \"were\" em cần dùng một tính từ.\n   - **Gợi ý sửa cục bộ:** \"...while Facebook and YouTube were more **balanced**.\" (Hoặc tự nhiên hơn: \"...had a more balanced age distribution.\")\n\n2. **Vị trí:** \"The 18-34 groups was 29% and 26%\"\n   - **Vấn đề:** Có lỗi sai về sự hòa hợp giữa chủ ngữ và động từ (\"groups\" số nhiều đi với \"was\" số ít). Ngoài ra, nói \"nhóm tuổi = 29%\" chưa được tự nhiên lắm, em nên dùng từ chỉ \"số liệu\" hoặc \"tỷ lệ\".\n   - **Gợi ý sửa cục bộ:** \"**The figures for the 18-34 group were** 29% and 26%...\"\n\n3. **Vị trí:** \"which was slightly lower.\"\n   - **Vấn đề:** Đại từ quan hệ \"which\" ở đây đang thay thế cho hai mức tỷ lệ (29% và 26%), do đó động từ to be theo sau nó phải chia ở dạng số nhiều.\n   - **Gợi ý sửa cục bộ:** \"...which **were** slightly lower.\"\n\n4. **Vị trí:** Cuối đoạn Body 1 (sau câu \"which was slightly lower.\")\n   - **Vấn đề:** Em đang bị thiếu ý so với Outline đã được duyệt. Outline yêu cầu Body 1 phải nhắc đến cả các nhóm tuổi lớn hơn (\"followed by the older groups\"), nhưng hiện tại em mới chỉ dừng lại ở nhóm 18-34.\n   - **Gợi ý sửa cục bộ:** Em cần viết thêm 1 câu để gom nhóm và so sánh tỷ lệ người dùng lớn tuổi (50-64 và 65+) của Facebook và YouTube nhé. (Ví dụ: *The older age groups (50-64 and 65+) accounted for smaller proportions on both platforms.*)\n\n### Việc em làm tiếp theo\n\nEm hãy chỉnh sửa lại các lỗi ngữ pháp ở trên và bổ sung thêm câu mô tả nhóm người dùng lớn tuổi cho Body 1, sau đó gửi lại Draft 2 đã hoàn thiện để Check nhé."
+    },
+    {
+      "id": "band6-data-error",
+      "label": "Cần sửa · sai dữ liệu",
+      "resultStatus": "needs_revision",
+      "overview": "Overall, Twitter was most strongly concentrated among users aged 18-34, whereas Facebook and YouTube had similar age profiles.",
+      "body1": "Compare Facebook and YouTube, focusing on the similar shares for ages 18-34 and 35-49, followed by the older groups.",
+      "body2": "Describe Twitter's sharp peak at 18-34 and contrast it with the other applications.",
+      "draft1": "Overall, Twitter was <nổi bật> for 18-34, and the other two apps were similar. For Facebook and YouTube, 18-34 was <lớn nhất>, at 29% and 26%.",
+      "draft2": "Overall, Twitter was particularly popular among 18-34-year-olds, and the other two apps had similar profiles. For both Facebook and YouTube, the 18-34 age group was the largest, at 29% and 26% respectively.",
+      "feedback": "### Điểm em đã làm tốt\n\n- Em đã xử lý rất tốt các phần trong ngoặc `<...>`, chuyển thành các cụm từ tiếng Anh tự nhiên và chính xác về mặt ngữ pháp (ví dụ: \"particularly popular\", \"the largest\").\n- Phần Overview của em viết rất rõ ràng, mạch lạc và bám sát định hướng ban đầu.\n\n### Em cần sửa\n\n1. **Vị trí:** \"the 18-34 age group was the largest, at 29% and 26% respectively.\"\n   - **Vấn đề:** Em đang bị nhầm lẫn dữ liệu biểu đồ. Nhóm tuổi chiếm tỷ lệ lớn nhất trên Facebook và YouTube thực chất là nhóm 35-49 (với tỷ lệ lần lượt là 30% và 29%). Nhóm 18-34 (29% và 26%) chỉ đứng thứ hai. \n   - **Gợi ý sửa cục bộ:** Em có thể sửa lại để chỉ ra nhóm 35-49 mới là lớn nhất, sau đó bám sát ngay bởi nhóm 18-34. Ví dụ: \"...the 35-49 age group was the largest (at 30% and 29% respectively), closely followed by the 18-34 cohort at 29% and 26%.\"\n\n2. **Vị trí:** Toàn bộ Body 1 (hiện tại chỉ có 1 câu)\n   - **Vấn đề:** Body 1 của em đang bị thiếu ý so với Outline đã được duyệt. Outline yêu cầu em so sánh cả nhóm 18-34, 35-49 và sau đó phải nhắc đến các nhóm tuổi lớn hơn (older groups). Hiện tại em mới chỉ viết được 1 câu và bỏ sót hoàn toàn dữ liệu của các nhóm tuổi già hơn.\n   - **Gợi ý sửa cục bộ:** Em cần viết thêm 1-2 câu nữa để hoàn thiện Body 1. Ví dụ (để miêu tả các nhóm tuổi lớn hơn): \"Meanwhile, the proportions of older users (50-64 and 65+) on these two platforms were noticeably smaller, standing at around 20% and 10% respectively.\"\n\n### Việc em làm tiếp theo\n\nEm hãy đính chính lại số liệu cho chính xác và viết bổ sung các ý còn thiếu để hoàn thiện Body 1, sau đó gửi lại Draft 2 để thầy/cô check nhé."
+    },
+    {
+      "id": "band6-acceptable",
+      "label": "Đã đạt · bài band 6.0",
+      "resultStatus": "passed",
+      "overview": "Overall, Twitter was most strongly concentrated among users aged 18-34, whereas Facebook and YouTube had similar age profiles and peaked at ages 35-49.",
+      "body1": "Compare Facebook and YouTube across the five age groups, emphasizing their similar proportions.",
+      "body2": "Describe Twitter's sharp peak at 18-34 and contrast it with the other applications.",
+      "draft1": "Overall, Twitter was <tập trung nhiều nhất> in the 18-34 group, while Facebook and YouTube had similar age profiles and peaked at 35-49. For Facebook and YouTube, 35-49 was 30% and 29%. 18-34 was 29% and 26%. The older groups were lower.",
+      "draft2": "Overall, Twitter was most strongly concentrated among users aged 18-34, while Facebook and YouTube had similar age profiles and peaked at ages 35-49. Looking first at Facebook and YouTube, users aged 35-49 made up the largest shares, at 30% and 29% respectively. The figures for 18-34-year-olds were slightly lower, at 29% for Facebook and 26% for YouTube. The shares for 50-64-year-olds were also similar, at 19% and 20%. Finally, the youngest group accounted for 14% and 15%, while the corresponding figures for the oldest users were 8% and 10%.",
+      "feedback": "Draft đã đạt 👍\n\n- Em đã dịch rất tốt phần tiếng Việt `<tập trung nhiều nhất>` thành \"most strongly concentrated\" và ghép nối mượt mà vào câu Overview.\n- Phần Body 1 đã lột xác hoàn toàn so với Draft 1: em đã biết cách dùng các cấu trúc so sánh và báo cáo số liệu đa dạng, tự nhiên (như *made up the largest shares*, *respectively*, *the corresponding figures*) và trích xuất số liệu hoàn toàn chính xác. Cách hành văn này rất tốt và hoàn toàn đáp ứng mục tiêu band 6.0+."
+    },
+    {
+      "id": "band6-age-sequence-language",
+      "label": "Đã đạt · diễn đạt nhóm tuổi",
+      "resultStatus": "passed",
+      "overview": "Overall, Twitter was most strongly concentrated among users aged 18-34, whereas Facebook and YouTube had similar age profiles and peaked at ages 35-49.",
+      "body1": "Compare Facebook and YouTube across the five age groups, emphasizing their similar proportions.",
+      "body2": "Describe Twitter's sharp peak at 18-34 and contrast it with the other applications.",
+      "draft1": "Overall, Twitter was <tập trung nhiều nhất> in 18-34, while Facebook and YouTube were similar. On Facebook and YouTube, 35-49 was highest. After that, the figures <giảm dần theo tuổi>.",
+      "draft2": "Overall, Twitter was most strongly concentrated among users aged 18-34, while Facebook and YouTube had similar age profiles and peaked at ages 35-49. On Facebook and YouTube, the 35-49 group was the largest, at 30% and 29%, followed by the 18-34 group at 29% and 26%. Moving to the older groups, the figures then fell to 19% and 20% for 50-64-year-olds and to 8% and 10% for those aged 65 and over. The youngest users accounted for similar shares of 14% and 15%.",
+      "feedback": "Draft đã đạt 👍\n\n- Em đã xử lý rất tốt các phần tiếng Việt trong Draft 1. Đặc biệt, cụm \"Moving to the older groups, the figures then fell...\" là một cách diễn đạt rất khéo léo và tự nhiên để mô tả sự chênh lệch tỷ lệ khi đi qua các nhóm tuổi mà không bị nhầm thành xu hướng thay đổi theo thời gian.\n- Các số liệu của Facebook và YouTube được trích xuất chính xác 100%, gom nhóm hợp lý và so sánh đối chiếu rất rõ ràng, hoàn thành xuất sắc mục tiêu của Body 1."
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#14213d" />
+    <title>Demo chấm Draft · Writing Task 1</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2314213d'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-size='34' font-family='Arial' font-weight='700' fill='white'%3ED%3C/text%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar"><a class="brand" href="./?task=pie-app-users-by-age">iZONE · Writing Task 1</a><p class="save-state">Dữ liệu giả · không ghi database</p></header>
+    <main class="page-shell demo-page">
+      <section class="demo-hero">
+        <p class="eyebrow">Bản kiểm thử công khai</p>
+        <h1>Draft 1 → Draft 2 · bài giả band 6.0</h1>
+        <p>Bốn trường hợp dưới đây đã được gửi qua đúng prompt Draft. Đây không phải bài hoặc danh tính học viên thật.</p>
+        <nav id="demo-case-nav" class="demo-case-nav" aria-label="Chọn trường hợp kiểm thử"></nav>
+      </section>
+      <div class="practice-layout demo-layout">
+        <section class="task-content" aria-label="Đề bài">
+          <article>
+            <h2>Đề bài</h2>
+            <p>The pie charts show the proportion of users across different age groups on three apps: Twitter, Facebook and YouTube.</p>
+            <a class="chart-link" href="./assets/task1-pie-app-age-groups.png" target="_blank" rel="noopener noreferrer"><img src="./assets/task1-pie-app-age-groups.png" alt="Ba biểu đồ tròn thể hiện người dùng Twitter, Facebook và YouTube theo nhóm tuổi" /></a>
+            <p class="chart-hint">Nhấn vào ảnh để xem kích thước gốc.</p>
+          </article>
+          <article>
+            <h2>Overview &amp; Outline đã đạt</h2>
+            <div class="demo-field"><strong>Overview</strong><p id="demo-overview"></p></div>
+            <div class="demo-field"><strong>Body 1</strong><p id="demo-body1"></p></div>
+            <div class="demo-field"><strong>Body 2</strong><p id="demo-body2"></p></div>
+          </article>
+        </section>
+        <section class="section-workspace demo-draft-workspace" data-state="passed" aria-labelledby="demo-draft-title">
+          <article class="section-card">
+            <div class="section-heading"><div><p class="section-kicker">Viết bài</p><h2 id="demo-draft-title">Draft 1 và Draft 2</h2></div><span id="demo-status" class="section-status"></span></div>
+            <div class="draft-guidance"><h3>Hướng dẫn</h3><p>Draft 1 có thể dùng tiếng Việt hoặc tiếng Anh cơ bản trong <code>&lt;...&gt;</code>. Sau đó copy xuống Draft 2 và sửa thành bản hoàn chỉnh.</p></div>
+            <label>Draft 1<textarea id="demo-draft1" readonly></textarea></label>
+            <p class="draft-copy-banner">Đã copy Draft 1 xuống ô Draft 2 rồi sửa</p>
+            <label>Draft 2<textarea id="demo-draft2" readonly></textarea></label>
+          </article>
+          <aside class="comments-panel">
+            <div class="comments-heading"><div><p class="eyebrow">Nhận xét</p><h2>Dòng thời gian Draft 1</h2></div><span class="polling-state">Đã chấm</span></div>
+            <ol class="comment-list"><li id="demo-comment"><div class="comment-meta">Comment lần 1</div><div id="demo-feedback" class="comment-body markdown-body"></div></li></ol>
+          </aside>
+        </section>
+      </div>
+    </main>
+    <script type="module" src="./js/demo-draft.js"></script>
+  </body>
+</html>

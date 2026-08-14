@@ -1,6 +1,6 @@
 # IZONE Writing Task 1 Practice
 
-Web app luyện **Overview** và **Outline hai thân bài** không phụ thuộc Google Docs.
+Web app luyện **Overview**, **Outline hai thân bài** và **Draft 1 → Draft 2** không phụ thuộc Google Docs.
 
 ## Cấu trúc
 
@@ -13,9 +13,10 @@ Web app luyện **Overview** và **Outline hai thân bài** không phụ thuộc
 
 1. Học viên mở `?task=<mã-đề>`, chọn lớp và họ tên.
 2. Trình duyệt lưu dự phòng cục bộ sau khi ngừng gõ; API chỉ nhận bản lưu định kỳ hoặc chủ động.
-3. Khi Check, API tạo đúng một Comment và một công việc chấm trong cùng transaction.
-4. Workflow n8n lấy công việc, dùng Prompt Registry + Gemini Hub và ghi lại kết quả.
-5. Giao diện kiểm tra trạng thái theo nhịp 2/5/10 giây và dừng khi có kết quả.
+3. Draft 2 chỉ mở sau khi Overview/Outline đã đạt và Draft 1 có nội dung; hệ thống copy Draft 1 xuống để học viên tự sửa.
+4. Khi Check, API tạo đúng một Comment và một công việc chấm trong cùng transaction.
+5. Workflow n8n lấy công việc, dùng Prompt Registry + Gemini Hub và ghi lại kết quả.
+6. Giao diện kiểm tra trạng thái theo nhịp 2/5/10 giây và dừng khi có kết quả.
 
 ## Trạng thái phát hành
 

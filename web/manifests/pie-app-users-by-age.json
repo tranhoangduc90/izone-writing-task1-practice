@@ -391,6 +391,11 @@
       "enabled": true,
       "section": "outline",
       "prompt_version": "1"
+    },
+    "draft": {
+      "enabled": true,
+      "section": "draft",
+      "prompt_version": "1"
     }
   },
   "metadata": {
@@ -402,7 +407,8 @@
       "chatbot_1": "1",
       "chatbot_2": "1",
       "overview": "1",
-      "outline": "1"
+      "outline": "1",
+      "draft": "1"
     }
   }
 }

@@ -1,5 +1,5 @@
-export const SECTION_KEYS = ["overview", "outline"];
-export const TEXT_KEYS = ["overview", "body1", "body2"];
+export const SECTION_KEYS = ["overview", "outline", "draft"];
+export const TEXT_KEYS = ["overview", "body1", "body2", "draft1", "draft2"];
 
 export function createRequestId() {
   return globalThis.crypto?.randomUUID?.() || `req-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -23,6 +23,7 @@ export function normalizeProgress(value = {}) {
   return {
     revision: value.draftVersion ?? value.version ?? value.revision ?? null,
     texts: Object.fromEntries(TEXT_KEYS.map((key) => [key, typeof value.draft?.[key] === "string" ? value.draft[key] : typeof value[key] === "string" ? value[key] : ""])),
+    draft2Unlocked: Boolean(value.draft?.draft2Unlocked ?? value.draft2Unlocked ?? value.draft2_unlocked),
     sections,
     comments: Array.isArray(value.comments) ? value.comments : [],
     attempts: value.attempts || [],
@@ -31,6 +32,11 @@ export function normalizeProgress(value = {}) {
 
 export function wordCount(text) { return text.trim() ? text.trim().split(/\s+/u).length : 0; }
 export function hasMeaningfulText(value) { return String(value || "").replace(/[\s\u200B-\u200D\u2060\uFEFF]/gu, "").length > 0; }
+export function safeHttpUrl(value, base = globalThis.location?.href || "https://example.invalid/") {
+  try { const url = new URL(String(value || ""), base); return ["http:", "https:"].includes(url.protocol) ? url.href : null; } catch { return null; }
+}
+export function draftPrerequisitesPassed(sections = {}) { return sections.overview?.status === "passed" && sections.outline?.status === "passed"; }
+export function canUnlockDraft2(texts = {}) { return hasMeaningfulText(texts.draft1); }
 export function pollingDelay(elapsedSinceSubmitMs) {
   if (elapsedSinceSubmitMs <= 20000) return 2000;
   if (elapsedSinceSubmitMs <= 120000) return 5000;

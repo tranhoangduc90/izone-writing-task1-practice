@@ -4,7 +4,7 @@ import { withTransaction } from './db.js';
 export class ApiError extends Error {
   constructor(status, code, message, extra = {}) { super(message); this.status = status; this.code = code; Object.assign(this, extra); }
 }
-const sections = ['overview', 'outline'];
+const sections = ['overview', 'outline', 'draft'];
 const hash = value => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const meaningfulText = value => String(value ?? '').replace(/[\s\u200B-\u200D\u2060\uFEFF]/gu, '');
 
@@ -24,7 +24,8 @@ export function createWritingPracticeService({ pool }) {
     return { activity: { slug: activity.rows[0].slug, title: activity.rows[0].title }, classes: [...classes.values()] };
   }
   async function sessionDetails(sessionRef, client = pool) {
-    const session = await client.query(`SELECT s.id, s.public_id AS "sessionRef", s.overview, s.body1, s.body2, s.draft_version AS "draftVersion", s.updated_at AS "updatedAt"
+    const session = await client.query(`SELECT s.id, s.public_id AS "sessionRef", s.overview, s.body1, s.body2, s.draft1, s.draft2,
+      s.draft2_unlocked AS "draft2Unlocked", s.draft_version AS "draftVersion", s.updated_at AS "updatedAt"
       FROM writing_practice.activity_session s WHERE s.public_id = $1`, [sessionRef]);
     if (!session.rowCount) throw new ApiError(404, 'SESSION_NOT_FOUND', 'Không tìm thấy phiên làm bài.');
     const [sectionRows, comments, attempts] = await Promise.all([
@@ -63,8 +64,8 @@ export function createWritingPracticeService({ pool }) {
       return sessionDetails((await client.query(`SELECT public_id FROM writing_practice.activity_session WHERE id=$1`, [session.rows[0].id])).rows[0].public_id, client);
     });
   }
-  async function saveDraft({ sessionRef, baseVersion, requestId, overview, body1, body2 }) {
-    const body = { overview, body1, body2, baseVersion };
+  async function saveDraft({ sessionRef, baseVersion, requestId, overview, body1, body2, draft1, draft2, draft2Unlocked }) {
+    const body = { overview, body1, body2, draft1, draft2, draft2Unlocked, baseVersion };
     return withTransaction(pool, async client => {
       const session = await client.query(`SELECT id, draft_version FROM writing_practice.activity_session WHERE public_id=$1 FOR UPDATE`, [sessionRef]);
       if (!session.rowCount) throw new ApiError(404, 'SESSION_NOT_FOUND', 'Không tìm thấy phiên làm bài.');
@@ -74,17 +75,29 @@ export function createWritingPracticeService({ pool }) {
         return sessionDetails(sessionRef, client);
       }
       if (session.rows[0].draft_version !== baseVersion) throw new ApiError(409, 'DRAFT_VERSION_CONFLICT', 'Bản nháp đã đổi ở nơi khác.', { current: await sessionDetails(sessionRef, client) });
-      await client.query(`UPDATE writing_practice.activity_session SET overview=$2, body1=$3, body2=$4,draft_version=draft_version+1,updated_at=now() WHERE id=$1`, [session.rows[0].id, overview, body1, body2]);
+      await client.query(`UPDATE writing_practice.activity_session SET overview=$2, body1=$3, body2=$4,
+        draft1=COALESCE($5,draft1), draft2=COALESCE($6,draft2), draft2_unlocked=draft2_unlocked OR COALESCE($7,false),
+        draft_version=draft_version+1,updated_at=now() WHERE id=$1`, [session.rows[0].id, overview, body1, body2, draft1 ?? null, draft2 ?? null, draft2Unlocked ?? null]);
       await client.query(`INSERT INTO writing_practice.draft_request(session_id,request_id,body_hash,draft_version) VALUES($1,$2,$3,$4)`, [session.rows[0].id, requestId, hash(body), baseVersion + 1]);
       return sessionDetails(sessionRef, client);
     });
   }
   async function submitCheck({ sessionRef, section, requestId, snapshot }) {
-    if ((section === 'overview' && !meaningfulText(snapshot.overview)) || (section === 'outline' && !meaningfulText(snapshot.body1) && !meaningfulText(snapshot.body2))) throw new ApiError(400, 'EMPTY_SECTION', 'Phần cần kiểm tra không được để trống.');
+    if ((section === 'overview' && !meaningfulText(snapshot.overview))
+      || (section === 'outline' && !meaningfulText(snapshot.body1) && !meaningfulText(snapshot.body2))
+      || (section === 'draft' && (!meaningfulText(snapshot.draft1) || !meaningfulText(snapshot.draft2)))) throw new ApiError(400, 'EMPTY_SECTION', 'Phần cần kiểm tra không được để trống.');
     return withTransaction(pool, async client => {
-      const session = await client.query(`SELECT id FROM writing_practice.activity_session WHERE public_id=$1 FOR UPDATE`, [sessionRef]);
+      const session = await client.query(`SELECT id,draft1,draft2,draft2_unlocked FROM writing_practice.activity_session WHERE public_id=$1 FOR UPDATE`, [sessionRef]);
       if (!session.rowCount) throw new ApiError(404, 'SESSION_NOT_FOUND', 'Không tìm thấy phiên làm bài.');
+      if (section === 'draft') {
+        const prerequisites = await client.query(`SELECT section_key,locked FROM writing_practice.session_section WHERE session_id=$1 AND section_key IN ('overview','outline') FOR SHARE`, [session.rows[0].id]);
+        if (prerequisites.rowCount !== 2 || prerequisites.rows.some(row => !row.locked)) throw new ApiError(409, 'DRAFT_PREREQUISITES_NOT_PASSED', 'Cần đạt Overview và Outline trước khi Check Draft 2.');
+        if (!session.rows[0].draft2_unlocked) throw new ApiError(409, 'DRAFT2_NOT_UNLOCKED', 'Cần hoàn thành Draft 1 và mở Draft 2 trước.');
+        if (!meaningfulText(session.rows[0].draft1) || !meaningfulText(session.rows[0].draft2)) throw new ApiError(400, 'EMPTY_SECTION', 'Draft 1 và Draft 2 không được để trống.');
+        if (session.rows[0].draft1 !== snapshot.draft1 || session.rows[0].draft2 !== snapshot.draft2) throw new ApiError(409, 'DRAFT_NOT_SAVED', 'Hãy lưu bản Draft mới nhất trước khi Check.');
+      }
       const sectionState = await client.query(`SELECT locked,round_number FROM writing_practice.session_section WHERE session_id=$1 AND section_key=$2 FOR UPDATE`, [session.rows[0].id, section]);
+      if (!sectionState.rowCount) throw new ApiError(409, 'SECTION_NOT_READY', 'Phần này chưa sẵn sàng để chấm.');
       if (sectionState.rows[0].locked) throw new ApiError(423, 'SECTION_LOCKED', 'Phần này đã đạt yêu cầu và đã được khóa.');
       const bodyHash = hash({ section, snapshot });
       const prior = await client.query(`SELECT attempt.public_id,attempt.session_id,attempt.section_key,attempt.status,attempt.version,

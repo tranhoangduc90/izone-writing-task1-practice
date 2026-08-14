@@ -1,5 +1,5 @@
 import { createApi } from "./api.js";
-import { SECTION_KEYS, createRequestId, hasMeaningfulText, isConflict, normalizeProgress, pollingDelay, terminalResult, wordCount } from "./core.js";
+import { SECTION_KEYS, canUnlockDraft2, createRequestId, draftPrerequisitesPassed, hasMeaningfulText, isConflict, normalizeProgress, pollingDelay, safeHttpUrl, terminalResult, wordCount } from "./core.js";
 import { getDraft, putDraft } from "./idb.js";
 import { appendInlineMarkdown, appendMarkdown } from "./markdown.js";
 
@@ -7,6 +7,7 @@ const $ = (id) => document.getElementById(id);
 const SECTION_INFO = {
   overview: { title: "Overview", kicker: "Phần 1", fields: [{ key: "overview", label: "Overview", placeholder: "Nêu những đặc điểm nổi bật nhất của biểu đồ…" }] },
   outline: { title: "Outline", kicker: "Phần 2", fields: [{ key: "body1", label: "Body 1", placeholder: "Nhóm số liệu thứ nhất…" }, { key: "body2", label: "Body 2", placeholder: "Nhóm số liệu thứ hai…" }] },
+  draft: { title: "Draft 1 → Draft 2", kicker: "Phần 3", fields: [{ key: "draft1", label: "Draft 1", placeholder: "Viết liên tục phần Overview và Body 1…" }, { key: "draft2", label: "Draft 2", placeholder: "Sửa bản sao Draft 1 thành tiếng Anh hoàn chỉnh…" }] },
 };
 const app = { manifest: null, activitySlug: null, api: null, roster: null, identity: null, sessionRef: null, state: null, dirty: false, idbTimer: null, saveTimer: null, pollTimer: null, pendingAttempts: new Map(), conflict: false };
 
@@ -70,7 +71,7 @@ function addListCard(root, title, values) {
 function renderTaskContent() {
   const root = $("task-content"); root.replaceChildren(); const manifest = app.manifest; const task = manifest.task || manifest;
   addTextCard(root, "Đề bài", task.statement || task.taskStatement);
-  const imageUrl = task.chart_image?.url || task.chartImage || task.chartImageUrl || task.imageUrl;
+  const imageUrl = safeHttpUrl(task.chart_image?.url || task.chartImage || task.chartImageUrl || task.imageUrl);
   if (imageUrl) { const card = document.createElement("section"); const title = document.createElement("h2"); const link = document.createElement("a"); const image = document.createElement("img"); const hint = document.createElement("p"); card.className = "chart-card"; title.textContent = "Biểu đồ"; link.className = "chart-link"; link.href = imageUrl; link.target = "_blank"; link.rel = "noopener noreferrer"; image.src = imageUrl; image.alt = task.chart_image?.alt_text || task.chartAlt || "Biểu đồ của bài Writing Task 1"; image.decoding = "async"; hint.className = "chart-hint"; hint.textContent = "Nhấn vào ảnh để mở kích thước đầy đủ."; link.append(image); card.append(title, link, hint); root.append(card); }
   if (manifest.decoding && typeof manifest.decoding === "object") {
     addListCard(root, "Cách đọc dữ liệu", [
@@ -100,7 +101,7 @@ function renderTaskContent() {
   const chatbots = Array.isArray(rawChatbots) ? rawChatbots : Object.values(rawChatbots || {}).filter(bot => bot.href);
   if (chatbots.length) {
     const card = document.createElement("section"); const heading = document.createElement("h2"); const list = document.createElement("ul"); heading.textContent = "Chatbot hỗ trợ";
-    chatbots.forEach((bot) => { const item = document.createElement("li"); const link = document.createElement("a"); link.href = bot.url || bot.href; link.target = "_blank"; link.rel = "noopener noreferrer"; link.textContent = bot.title || bot.label || "Mở chatbot hỗ trợ"; item.append(link); list.append(item); }); card.append(heading, list); root.append(card);
+    chatbots.forEach((bot) => { const href = safeHttpUrl(bot.url || bot.href); if (!href) return; const item = document.createElement("li"); const link = document.createElement("a"); link.href = href; link.target = "_blank"; link.rel = "noopener noreferrer"; link.textContent = bot.title || bot.label || "Mở chatbot hỗ trợ"; item.append(link); list.append(item); }); if (list.children.length) { card.append(heading, list); root.append(card); }
   }
 }
 
@@ -135,20 +136,57 @@ function mergeServer(payload) {
   for (const attempt of next.attempts) registerAttempt(attempt);
 }
 
+function addDraftGuidance(card) {
+  const guidance = document.createElement("div"); guidance.className = "draft-guidance markdown-body";
+  appendMarkdown(guidance, [
+    "### Cách làm Draft",
+    "Viết liên tục **Overview và Body 1**, không tra từ. Ở Draft 1, nếu thiếu từ, em có thể viết tiếng Việt hoặc tiếng Anh cơ bản rồi bọc phần đó trong `<...>`.",
+    "**Ví dụ mẫu**",
+    "> **Draft 1:** The percentage for one group was `<cao hơn rõ rệt>` than the corresponding figures.\n>\n> **Draft 2:** The percentage for one group was considerably higher than the corresponding figures.",
+  ].join("\n\n"));
+  card.querySelector(".text-fields").before(guidance);
+}
+
+function addTextarea(card, section, field, disabled) {
+  const label = document.createElement("label"); label.textContent = field.label;
+  const textarea = document.createElement("textarea"); textarea.name = field.key; textarea.rows = section === "overview" ? 7 : section === "draft" ? 10 : 5; textarea.maxLength = 5000; textarea.placeholder = field.placeholder; textarea.value = app.state.texts[field.key]; textarea.disabled = disabled;
+  textarea.addEventListener("input", () => {
+    app.state.texts[field.key] = textarea.value; markDirty(); refreshSection(card, section);
+    const unlock = card.querySelector(".unlock-draft2"); if (unlock) unlock.disabled = disabled || !canUnlockDraft2(app.state.texts);
+  });
+  label.append(textarea); card.querySelector(".text-fields").append(label);
+}
+
+function renderDraftFields(card, locked, prerequisitesPassed) {
+  addDraftGuidance(card);
+  if (!prerequisitesPassed) {
+    const notice = document.createElement("p"); notice.className = "draft-prerequisite"; notice.textContent = "Hãy hoàn thành và đạt Overview cùng Outline. Sau đó ô Draft 1 sẽ tự mở."; card.querySelector(".text-fields").append(notice); return;
+  }
+  addTextarea(card, "draft", SECTION_INFO.draft.fields[0], locked);
+  if (!app.state.draft2Unlocked) {
+    const unlock = document.createElement("button"); unlock.type = "button"; unlock.className = "primary unlock-draft2"; unlock.textContent = "Chuyển Draft 1 xuống Draft 2 và sửa"; unlock.disabled = locked || !canUnlockDraft2(app.state.texts);
+    unlock.addEventListener("click", () => {
+      if (!canUnlockDraft2(app.state.texts)) return;
+      app.state.texts.draft2 = app.state.texts.draft1; app.state.draft2Unlocked = true; markDirty(); renderAll(); document.querySelector('textarea[name="draft2"]')?.focus();
+    });
+    const hint = document.createElement("p"); hint.className = "muted draft-unlock-hint"; hint.textContent = "Nút này chỉ mở khi Draft 1 có nội dung. Hệ thống sẽ sao chép nguyên văn để em chỉnh sửa.";
+    card.querySelector(".text-fields").append(unlock, hint); return;
+  }
+  const banner = document.createElement("p"); banner.className = "draft-copy-banner"; banner.textContent = "Draft 1 đã được copy xuống. Hãy sửa Draft 2 thành tiếng Anh hoàn chỉnh rồi Check."; card.querySelector(".text-fields").append(banner);
+  addTextarea(card, "draft", SECTION_INFO.draft.fields[1], locked);
+}
+
 function renderSections() {
   const root = $("sections"); const template = $("section-template"); root.replaceChildren();
   for (const section of SECTION_KEYS) {
     const info = SECTION_INFO[section]; const workspace = template.content.firstElementChild.cloneNode(true); const card = workspace.querySelector(".section-card"); const status = card.querySelector(".section-status");
     workspace.dataset.section = section; workspace.dataset.state = app.state.sections[section].status; card.dataset.section = section; card.querySelector(".section-kicker").textContent = info.kicker; card.querySelector("h2").textContent = info.title;
-    const commentsTitle = workspace.querySelector(".comments-title"); commentsTitle.id = `comments-title-${section}`; commentsTitle.textContent = `Dòng thời gian ${info.title}`; workspace.querySelector(".comments-panel").setAttribute("aria-labelledby", commentsTitle.id);
-    const locked = ["passed", "queued"].includes(app.state.sections[section].status);
-    status.textContent = statusLabel(app.state.sections[section].status); status.dataset.state = app.state.sections[section].status;
-    for (const field of info.fields) {
-      const label = document.createElement("label"); label.textContent = field.label;
-      const textarea = document.createElement("textarea"); textarea.name = field.key; textarea.rows = section === "overview" ? 7 : 5; textarea.maxLength = 5000; textarea.placeholder = field.placeholder; textarea.value = app.state.texts[field.key]; textarea.disabled = locked;
-      textarea.addEventListener("input", () => { app.state.texts[field.key] = textarea.value; markDirty(); refreshSection(card, section); }); label.append(textarea); card.querySelector(".text-fields").append(label);
-    }
-    const button = card.querySelector(".submit-section"); button.disabled = locked; button.textContent = app.state.sections[section].status === "queued" ? "Đang chấm" : locked ? "Phần này đã đạt" : "Gửi để nhận xét"; button.addEventListener("click", () => submitSection(section, card));
+    const commentsTitle = workspace.querySelector(".comments-title"); commentsTitle.id = `comments-title-${section}`; commentsTitle.textContent = section === "draft" ? "Dòng thời gian Draft 1" : `Dòng thời gian ${info.title}`; workspace.querySelector(".comments-panel").setAttribute("aria-labelledby", commentsTitle.id);
+    const prerequisitesPassed = section !== "draft" || draftPrerequisitesPassed(app.state.sections); const locked = ["passed", "queued"].includes(app.state.sections[section].status) || !prerequisitesPassed;
+    status.textContent = section === "draft" && !prerequisitesPassed ? "Chờ phần trước" : statusLabel(app.state.sections[section].status); status.dataset.state = app.state.sections[section].status;
+    if (section === "draft") renderDraftFields(card, locked, prerequisitesPassed);
+    else for (const field of info.fields) addTextarea(card, section, field, locked);
+    const button = card.querySelector(".submit-section"); button.hidden = section === "draft" && !app.state.draft2Unlocked; button.disabled = locked; button.textContent = app.state.sections[section].status === "queued" ? "Đang chấm" : locked && app.state.sections[section].status === "passed" ? "Phần này đã đạt" : section === "draft" ? "Check Draft 2" : "Gửi để nhận xét"; button.addEventListener("click", () => submitSection(section, card));
     refreshSection(card, section); root.append(workspace);
   }
 }
@@ -183,7 +221,7 @@ async function restoreLocal() {
   const draft = await getDraft(keyForDraft());
   if (!draft?.progress) return;
   const localIsNewer = Number(draft.savedAt || 0) > serverUpdatedAt();
-  if (localIsNewer && confirm("Đã tìm thấy bản lưu cục bộ. Khôi phục bản này?")) { app.state = draft.progress; app.sessionRef = draft.sessionRef || app.sessionRef; app.dirty = true; showNotice("Đã khôi phục bản lưu trên thiết bị. Hãy lưu ngay để đồng bộ."); }
+  if (localIsNewer && confirm("Đã tìm thấy bản lưu cục bộ. Khôi phục bản này?")) { const restored = normalizeProgress(draft.progress); restored.updatedAt = draft.progress.updatedAt || app.state.updatedAt; app.state = restored; app.sessionRef = draft.sessionRef || app.sessionRef; app.dirty = true; showNotice("Đã khôi phục bản lưu trên thiết bị. Hãy lưu ngay để đồng bộ."); }
 }
 
 async function saveRemote(reason = "manual") {
@@ -199,15 +237,15 @@ async function saveRemote(reason = "manual") {
 }
 
 async function submitSection(section, card) {
-  const content = sectionContent(section); const filled = section === "overview" ? hasMeaningfulText(content.overview) : Object.values(content).some(hasMeaningfulText);
+  const content = sectionContent(section); const filled = section === "overview" ? hasMeaningfulText(content.overview) : section === "outline" ? Object.values(content).some(hasMeaningfulText) : app.state.draft2Unlocked && Object.values(content).every(hasMeaningfulText);
   const errorNode = card.querySelector(".field-error"); errorNode.hidden = filled;
-  if (!filled) { errorNode.textContent = section === "overview" ? "Bạn cần viết Overview trước khi gửi." : "Bạn cần viết ít nhất một trong hai ô Body trước khi gửi."; return; }
+  if (!filled) { errorNode.textContent = section === "overview" ? "Bạn cần viết Overview trước khi gửi." : section === "outline" ? "Bạn cần viết ít nhất một trong hai ô Body trước khi gửi." : "Bạn cần hoàn thành Draft 1, mở Draft 2 và sửa Draft 2 trước khi Check."; return; }
   if (!(await saveRemote("check"))) return;
   const previousStatus = app.state.sections[section].status;
   app.state.sections[section].status = "queued";
   renderAll();
   try {
-    const snapshot = { overview: app.state.texts.overview, body1: app.state.texts.body1, body2: app.state.texts.body2 };
+    const snapshot = { overview: app.state.texts.overview, body1: app.state.texts.body1, body2: app.state.texts.body2, draft1: app.state.texts.draft1, draft2: app.state.texts.draft2 };
     const result = await app.api.checkSection(app.sessionRef, section, snapshot, app.state.revision);
     const attempt = result.data.attempt || result.data;
     if (terminalResult(attempt)) { applyTerminalAttempt(attempt, section); renderAll(); return; }
@@ -304,7 +342,7 @@ async function openSession(event) {
 
 function closeWithKeepalive() {
   if (!app.dirty || !app.sessionRef || app.conflict) return;
-  const payload = JSON.stringify({ baseVersion: app.state.revision, overview: app.state.texts.overview, body1: app.state.texts.body1, body2: app.state.texts.body2, requestId: createRequestId() });
+  const payload = JSON.stringify({ baseVersion: app.state.revision, overview: app.state.texts.overview, body1: app.state.texts.body1, body2: app.state.texts.body2, draft1: app.state.texts.draft1, draft2: app.state.texts.draft2, draft2Unlocked: app.state.draft2Unlocked, requestId: createRequestId() });
   fetch(app.api.beaconUrl(app.sessionRef), { method: "PUT", headers: { "content-type": "application/json", ...(app.state.revision == null ? {} : { "if-match": String(app.state.revision) }) }, body: payload, keepalive: true }).catch(() => {});
 }
 

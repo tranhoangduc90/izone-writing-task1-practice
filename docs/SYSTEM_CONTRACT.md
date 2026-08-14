@@ -2,7 +2,7 @@
 
 ## Phạm vi
 
-- V1 chỉ có `overview` và `outline`.
+- V1 có `overview`, `outline` và `draft`.
 - App công khai cho phép chọn lớp và họ tên; không có đăng nhập học viên.
 - Mỗi section có trạng thái, chuỗi chưa đạt và lịch sử Comment riêng.
 - Section đã đạt bị khóa; section còn lại tiếp tục hoạt động.
@@ -30,11 +30,13 @@ Trả draft, `draftVersion`, trạng thái từng section, chuỗi chưa đạt 
 
 ### `PUT /api/v1/sessions/:sessionRef/draft`
 
-Nhận `baseVersion`, `requestId`, `overview`, `body1`, `body2`. Sai phiên bản trả `409` cùng bản server hiện tại.
+Nhận `baseVersion`, `requestId`, `overview`, `body1`, `body2`, `draft1`, `draft2`, `draft2Unlocked`. Sai phiên bản trả `409` cùng bản server hiện tại.
 
 ### `POST /api/v1/sessions/:sessionRef/checks`
 
 Nhận `section`, `requestId` và snapshot. Cùng `requestId` hoặc đã có lượt đang chạy chỉ trả lại lượt hiện tại, không tạo Gemini call mới.
+
+Với `section=draft`, API yêu cầu Overview và Outline đã đạt, Draft 2 đã được mở, Draft 1/Draft 2 đều có nội dung và snapshot khớp bản vừa lưu. Nếu không đạt điều kiện, API không tạo Comment hay công việc chấm.
 
 ### `GET /api/v1/attempts/:attemptRef`
 
@@ -59,6 +61,8 @@ Base path: `/api/v1/internal/grading-jobs`. Mọi request dùng Bearer token ri�
 
 `claim` không chứa tên học viên. Nó trả task, section, snapshot, lịch sử Comment cùng `promptRegistryKey`, `promptRecordId` và `promptVersion` đã ghim cho phiên đó.
 
+Prompt Registry dùng `prompt_overview`, `prompt_outline_body` và `prompt_draft2`. Prompt Draft không được đưa vào GitHub Pages hoặc response công khai.
+
 ## Quy tắc đếm và khóa
 
 - Chỉ `needs_revision` hoàn tất mới tăng chuỗi chưa đạt.
@@ -73,6 +77,14 @@ Base path: `/api/v1/internal/grading-jobs`. Mọi request dùng Bearer token ri�
 - Database: khi dirty đủ 10 phút, Save thủ công, Check, Lưu và đóng hoặc gửi nền khi đóng tab.
 - Check luôn lưu một snapshot bất biến trước khi tạo job.
 - Bản lưu dùng optimistic concurrency; không áp dụng “lần lưu cuối thắng”.
+
+## Quy tắc Draft
+
+- Draft chỉ mở sau khi cả Overview và Outline có trạng thái `passed`.
+- Ban đầu chỉ hiện Draft 1. Nút chuyển chỉ mở khi Draft 1 có nội dung có nghĩa.
+- Khi bấm chuyển, trình duyệt copy nguyên Draft 1 xuống Draft 2, lưu `draft2Unlocked=true` và mới hiển thị Draft 2.
+- Check Draft chấm Draft 2 trong phạm vi Overview + Body 1, nhưng giữ cả Draft 1 trong snapshot để đối chiếu quá trình sửa.
+- Section `draft` có trạng thái, chuỗi chưa đạt và timeline Comment riêng.
 
 ## Giới hạn tải
 

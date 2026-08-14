@@ -4,7 +4,7 @@ API công khai không trả ERP ID, Google ID, email, prompt chấm hay credenti
 
 ## Chạy local
 
-1. Áp dụng [migration](../docs/migrations/2026-08-13-writing-task1-practice.sql) vào PostgreSQL có schema `mapping`.
+1. Áp dụng [migration nền](../docs/migrations/2026-08-13-writing-task1-practice.sql), sau đó áp dụng [migration Draft](../docs/migrations/2026-08-14-add-draft-practice.sql) vào PostgreSQL có schema `mapping`.
 2. Sao chép `.env.example` thành `.env`; Bearer token nội bộ phải ngẫu nhiên và tối thiểu 32 ký tự. `GOOGLE_CLIENT_ID` dùng để xác thực tài khoản giảng viên đã có trong mapping.
 3. Chạy `npm install`, `npm run check`, `npm test`, `npm start`.
 
@@ -16,9 +16,9 @@ Nguồn quyết định là [SYSTEM_CONTRACT.md](../docs/SYSTEM_CONTRACT.md). C�
 
 - `GET /api/v1/activities/:slug/roster` trả activity và `classes[{ classRef, className, students[] }]`.
 - `POST /api/v1/sessions` nhận `activitySlug`, `classRef`, `studentRef`.
-- `GET /api/v1/sessions/:sessionRef` trả `overview`, `body1`, `body2`, `draftVersion`, trạng thái section, `failStreak`, Comment và lịch sử attempt.
-- `PUT /api/v1/sessions/:sessionRef/draft` nhận `baseVersion`, `requestId`, `overview`, `body1`, `body2`; xung đột trả `409` kèm `current` từ server.
-- `POST /api/v1/sessions/:sessionRef/checks` nhận `section: overview|outline`, `requestId`, `snapshot`. Overview trống hoặc cả body 1/2 trống với outline bị chặn; section đã pass mới khóa section đó.
+- `GET /api/v1/sessions/:sessionRef` trả `overview`, `body1`, `body2`, `draft1`, `draft2`, `draft2Unlocked`, `draftVersion`, trạng thái section, `failStreak`, Comment và lịch sử attempt.
+- `PUT /api/v1/sessions/:sessionRef/draft` nhận `baseVersion`, `requestId`, năm ô viết và trạng thái mở Draft 2; xung đột trả `409` kèm `current` từ server.
+- `POST /api/v1/sessions/:sessionRef/checks` nhận `section: overview|outline|draft`, `requestId`, `snapshot`. Draft chỉ được chấm khi Overview và Outline đã đạt, Draft 2 đã mở, hai Draft không trống và bản gửi trùng với bản vừa lưu.
 - `GET /api/v1/attempts/:attemptRef` dùng `ETag`/`If-None-Match`.
 - `POST /api/v1/attempts/:attemptRef/retry` chỉ mở lại lỗi kỹ thuật khi lượt đó chưa dùng hết ba lần thử.
 - API n8n là `/api/v1/internal/grading-jobs/{claim,:jobRef/complete,:jobRef/fail,recover}` với `Authorization: Bearer …`; claim bắt buộc lease 420 giây và không trả tên học viên.

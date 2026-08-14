@@ -5,14 +5,15 @@ import helmet from 'helmet';
 import { z } from 'zod';
 import { ApiError } from './service.js';
 
-const uuid=z.string().uuid(), section=z.enum(['overview','outline']);
+const uuid=z.string().uuid(), section=z.enum(['overview','outline','draft']);
 const meaningfulText = (value) => value.replace(/[\s\u200B-\u200D\u2060\uFEFF]/gu, '');
-const draft=z.object({overview:z.string().max(20_000),body1:z.string().max(20_000),body2:z.string().max(20_000)});
+const draft=z.object({overview:z.string().max(20_000),body1:z.string().max(20_000),body2:z.string().max(20_000),draft1:z.string().max(20_000).optional(),draft2:z.string().max(20_000).optional(),draft2Unlocked:z.boolean().optional()});
 const open=z.object({activitySlug:z.string().regex(/^[a-z0-9][a-z0-9-]{1,79}$/),classRef:uuid,studentRef:uuid});
 const save=z.object({baseVersion:z.number().int().min(0),requestId:uuid,...draft.shape});
 const check=z.object({section,requestId:uuid,snapshot:draft}).superRefine((value,context)=>{
  if(value.section==='overview'&&!meaningfulText(value.snapshot.overview))context.addIssue({code:'custom',path:['snapshot','overview'],message:'Overview trống.'});
  if(value.section==='outline'&&!meaningfulText(value.snapshot.body1)&&!meaningfulText(value.snapshot.body2))context.addIssue({code:'custom',path:['snapshot'],message:'Outline trống.'});
+ if(value.section==='draft'&&(!meaningfulText(value.snapshot.draft1||'')||!meaningfulText(value.snapshot.draft2||'')))context.addIssue({code:'custom',path:['snapshot'],message:'Draft 1 và Draft 2 không được để trống.'});
 });
 const claim=z.object({workerId:z.string().trim().min(1).max(100),maxJobs:z.number().int().min(1).max(4).default(1),leaseSeconds:z.literal(420)});
 const gradingResult=z.enum(['passed','needs_revision']);

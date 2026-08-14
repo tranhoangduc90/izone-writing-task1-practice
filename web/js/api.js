@@ -31,6 +31,9 @@ export function createApi(base = "") {
       overview: progress.texts.overview,
       body1: progress.texts.body1,
       body2: progress.texts.body2,
+      draft1: progress.texts.draft1,
+      draft2: progress.texts.draft2,
+      draft2Unlocked: progress.draft2Unlocked,
       requestId: createRequestId(),
     }, progress.revision == null ? {} : { "if-match": String(progress.revision) }, keepalive)),
     checkSection: (sessionRef, section, snapshot, revision) => fetchJson(endpoint(root, `sessions/${encodeURIComponent(sessionRef)}/checks`), jsonOptions("POST", {

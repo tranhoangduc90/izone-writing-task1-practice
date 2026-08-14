@@ -46,3 +46,44 @@ export function createApi(base = "") {
     beaconUrl: (sessionRef) => endpoint(root, `sessions/${encodeURIComponent(sessionRef)}/draft`),
   };
 }
+
+export function createLessonApi(base = "") {
+  const root = endpoint(base, "api/v1/");
+  return {
+    roster: (slug) => fetchJson(endpoint(root, `activities/${encodeURIComponent(slug)}/roster`)),
+    createSession: (activitySlug, classRef, studentRef) => fetchJson(endpoint(root, "lesson-sessions"), jsonOptions("POST", {
+      activitySlug,
+      classRef,
+      studentRef,
+    })),
+    session: (sessionRef) => fetchJson(endpoint(root, `lesson-sessions/${encodeURIComponent(sessionRef)}`)),
+    saveResponses: (sessionRef, progress, keepalive = false) => fetchJson(endpoint(root, `lesson-sessions/${encodeURIComponent(sessionRef)}/responses`), jsonOptions("PUT", {
+      baseVersion: progress.revision,
+      responses: progress.responses,
+      requestId: createRequestId(),
+    }, progress.revision == null ? {} : { "if-match": String(progress.revision) }, keepalive)),
+    checkSection: (sessionRef, section) => fetchJson(endpoint(root, `lesson-sessions/${encodeURIComponent(sessionRef)}/checks`), jsonOptions("POST", {
+      section,
+      requestId: createRequestId(),
+    })),
+    publishLive: (sessionRef, activeField) => fetchJson(endpoint(root, `lesson-sessions/${encodeURIComponent(sessionRef)}/live`), jsonOptions("PUT", {
+      activeField: activeField || null,
+    }, {}, true)),
+    attempt: (attemptRef, etag) => fetchJson(endpoint(root, `attempts/${encodeURIComponent(attemptRef)}`), { headers: etag ? { "if-none-match": etag } : {} }),
+    retryAttempt: (attemptRef) => fetchJson(endpoint(root, `attempts/${encodeURIComponent(attemptRef)}/retry`), jsonOptions("POST", {})),
+    beaconUrl: (sessionRef) => endpoint(root, `lesson-sessions/${encodeURIComponent(sessionRef)}/responses`),
+  };
+}
+
+export function createTeacherApi(base = "", getToken = () => "") {
+  const root = endpoint(base, "api/v1/");
+  const authorized = () => ({ authorization: `Bearer ${getToken()}` });
+  return {
+    liveActivity: (slug, classRef = "") => {
+      const url = new URL(endpoint(root, `admin/live/activities/${encodeURIComponent(slug)}`));
+      if (classRef) url.searchParams.set("classRef", classRef);
+      return fetchJson(url, { headers: authorized() });
+    },
+    reopenSection: (sessionRef, section, reason) => fetchJson(endpoint(root, `admin/lesson-sessions/${encodeURIComponent(sessionRef)}/sections/${encodeURIComponent(section)}/reopen`), jsonOptions("POST", { reason }, authorized())),
+  };
+}

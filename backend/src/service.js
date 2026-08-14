@@ -126,6 +126,7 @@ export function createWritingPracticeService({ pool }) {
   async function getAttempt(attemptRef) {
     const result = await pool.query(`SELECT attempt.public_id AS "attemptRef",attempt.section_key AS section,attempt.comment_number AS "commentNumber",
       attempt.status,attempt.result_status AS "resultStatus",attempt.feedback,attempt.error_code AS "errorCode",attempt.retry_count AS "retryCount",attempt.version,attempt.updated_at AS "updatedAt",
+      attempt.result_artifacts AS artifacts,
       state.fail_streak AS "attemptsWithoutPass",comment.public_id AS "commentRef",comment.status AS "commentStatus",comment.content AS "commentContent",comment.created_at AS "commentCreatedAt"
       FROM writing_practice.check_attempt attempt
       JOIN writing_practice.session_section state ON state.session_id=attempt.session_id AND state.section_key=attempt.section_key
@@ -135,21 +136,44 @@ export function createWritingPracticeService({ pool }) {
     const row = result.rows[0];
     const canRetry = row.status === 'failed' && row.retryCount < 3;
     return { ...row, canRetry, supportWarning: row.resultStatus === 'needs_revision' && row.attemptsWithoutPass > 0 && row.attemptsWithoutPass % 3 === 0,
-      comment: { commentRef: row.commentRef, attemptRef: row.attemptRef, section: row.section, commentNumber: row.commentNumber, status: row.commentStatus, feedback: row.commentContent, createdAt: row.commentCreatedAt, canRetry } };
+      comment: { commentRef: row.commentRef, attemptRef: row.attemptRef, section: row.section, commentNumber: row.commentNumber, status: row.commentStatus, feedback: row.commentContent, artifacts: row.artifacts, createdAt: row.commentCreatedAt, canRetry } };
   }
-  async function claimJobs({ workerId, maxJobs, leaseSeconds }) {
+  async function claimJobs({ workerId, maxJobs, leaseSeconds, workerPool = 'task1' }) {
     return withTransaction(pool, async client => {
       await client.query(`SELECT pg_advisory_xact_lock(hashtext('writing_practice:grading_capacity'))`);
       const result = await client.query(`WITH capacity AS (SELECT GREATEST(0,4-count(*))::int available FROM writing_practice.check_attempt WHERE status='leased' AND lease_expires_at>now()),
-      picked AS (SELECT a.id FROM writing_practice.check_attempt a,capacity WHERE capacity.available>0 AND a.status='queued' AND a.retry_count<3 ORDER BY a.created_at FOR UPDATE SKIP LOCKED LIMIT LEAST($1::int,(SELECT available FROM capacity)))
+      picked AS (SELECT attempt.id FROM writing_practice.check_attempt attempt
+        JOIN writing_practice.activity_session session ON session.id=attempt.session_id
+        JOIN writing_practice.activity activity ON activity.id=session.activity_id,capacity
+        WHERE capacity.available>0 AND attempt.status='queued' AND attempt.retry_count<3
+          AND activity.grading_pool=$4
+        ORDER BY attempt.created_at FOR UPDATE OF attempt SKIP LOCKED
+        LIMIT LEAST($1::int,(SELECT available FROM capacity)))
       UPDATE writing_practice.check_attempt a SET status='leased',worker_id=$2,lease_token=gen_random_uuid(),lease_expires_at=now()+($3::text||' seconds')::interval,retry_count=retry_count+1,version=version+1,updated_at=now() FROM picked
-      WHERE a.id=picked.id RETURNING a.id,a.public_id,a.section_key,a.comment_number,a.snapshot,a.lease_token,a.lease_expires_at,a.session_id`, [maxJobs, workerId, leaseSeconds]);
-      const jobs=[]; for (const row of result.rows) { const context=await client.query(`SELECT a.task_prompt,a.prompt_registry_key,a.prompt_record_ref,a.prompt_version,COALESCE(jsonb_agg(jsonb_build_object('commentNumber',c.comment_number,'content',c.content,'createdAt',c.created_at) ORDER BY c.comment_number) FILTER(WHERE c.id IS NOT NULL),'[]') history FROM writing_practice.activity_session s JOIN writing_practice.activity a ON a.id=s.activity_id LEFT JOIN writing_practice.comment c ON c.session_id=s.id AND c.section_key=$2 AND c.status='completed' WHERE s.id=$1 GROUP BY a.task_prompt,a.prompt_registry_key,a.prompt_record_ref,a.prompt_version`,[row.session_id,row.section_key]); jobs.push({jobRef:row.public_id,attemptRef:row.public_id,section:row.section_key,commentNumber:row.comment_number,studentInput:row.snapshot,snapshot:row.snapshot,leaseToken:row.lease_token,leaseExpiresAt:row.lease_expires_at,taskPrompt:context.rows[0].task_prompt,feedbackHistory:context.rows[0].history,promptRegistryKey:context.rows[0].prompt_registry_key,promptRecordId:context.rows[0].prompt_record_ref,promptVersion:context.rows[0].prompt_version}); }
+      WHERE a.id=picked.id RETURNING a.id,a.public_id,a.section_key,a.comment_number,a.snapshot,a.lease_token,a.lease_expires_at,a.session_id`, [maxJobs, workerId, leaseSeconds, workerPool]);
+      const jobs=[]; for (const row of result.rows) { const context=await client.query(`SELECT activity.task_prompt,activity.prompt_registry_key,
+        COALESCE(definition.prompt_record_ref,activity.prompt_record_ref) prompt_record_ref,
+        COALESCE(definition.prompt_version,activity.prompt_version) prompt_version,
+        COALESCE(jsonb_agg(jsonb_build_object('commentNumber',comment.comment_number,'content',comment.content,'createdAt',comment.created_at)
+          ORDER BY comment.comment_number) FILTER(WHERE comment.id IS NOT NULL),'[]') history
+        FROM writing_practice.activity_session session
+        JOIN writing_practice.activity activity ON activity.id=session.activity_id
+        LEFT JOIN writing_practice.activity_section_definition definition
+          ON definition.activity_id=activity.id AND definition.section_key=$2
+        LEFT JOIN writing_practice.comment comment ON comment.session_id=session.id
+          AND comment.section_key=$2 AND comment.status='completed'
+        WHERE session.id=$1
+        GROUP BY activity.task_prompt,activity.prompt_registry_key,activity.prompt_record_ref,
+          activity.prompt_version,definition.prompt_record_ref,definition.prompt_version`,[row.session_id,row.section_key]); jobs.push({jobRef:row.public_id,attemptRef:row.public_id,section:row.section_key,commentNumber:row.comment_number,studentInput:row.snapshot,snapshot:row.snapshot,leaseToken:row.lease_token,leaseExpiresAt:row.lease_expires_at,taskPrompt:context.rows[0].task_prompt,feedbackHistory:context.rows[0].history,promptRegistryKey:context.rows[0].prompt_registry_key,promptRecordId:context.rows[0].prompt_record_ref,promptVersion:context.rows[0].prompt_version,workerPool}); }
       return jobs;
     });
   }
-  async function completeJob({ jobRef, leaseToken, resultStatus, feedback }) { return withTransaction(pool, async client => {
-    const attempt=await client.query(`UPDATE writing_practice.check_attempt SET status='completed',result_status=$3,feedback=$4,completed_at=now(),lease_token=NULL,lease_expires_at=NULL,version=version+1,updated_at=now() WHERE public_id=$1 AND lease_token=$2 AND status='leased' AND lease_expires_at>now() RETURNING id,session_id,section_key,version`,[jobRef,leaseToken,resultStatus,feedback]);
+  async function completeJob({ jobRef, leaseToken, resultStatus, feedback, artifacts = {} }) { return withTransaction(pool, async client => {
+    const attempt=await client.query(`UPDATE writing_practice.check_attempt SET status='completed',result_status=$3,feedback=$4,
+      result_artifacts=$5::jsonb,completed_at=now(),lease_token=NULL,lease_expires_at=NULL,
+      version=version+1,updated_at=now()
+      WHERE public_id=$1 AND lease_token=$2 AND status='leased' AND lease_expires_at>now()
+      RETURNING id,session_id,section_key,version`,[jobRef,leaseToken,resultStatus,feedback,JSON.stringify(artifacts)]);
     if(!attempt.rowCount) throw new ApiError(409,'LEASE_NOT_OWNED','Công việc không còn thuộc tác vụ này.'); const row=attempt.rows[0];
     await client.query(`UPDATE writing_practice.comment SET status='completed',content=$2 WHERE attempt_id=$1`,[row.id,feedback]);
     if(resultStatus==='passed') await client.query(`UPDATE writing_practice.session_section SET locked=true,fail_streak=0,updated_at=now() WHERE session_id=$1 AND section_key=$2`,[row.session_id,row.section_key]);

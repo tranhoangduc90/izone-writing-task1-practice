@@ -2,6 +2,8 @@
 
 Web app luyện **Overview**, **Outline hai thân bài** và **Draft 1 → Draft 2** không phụ thuộc Google Docs.
 
+Repo cũng có bản nháp **Writing trên lớp 67 – Lesson 13**, gộp hai handout Body 1 và Body 2 thành một trang với sáu phần được chấm độc lập.
+
 ## Cấu trúc
 
 - `web/`: giao diện tĩnh dành cho GitHub Pages. Không chứa prompt chấm, danh sách học viên hoặc credential.
@@ -18,6 +20,16 @@ Web app luyện **Overview**, **Outline hai thân bài** và **Draft 1 → Draft
 5. Workflow n8n lấy công việc, dùng Prompt Registry + Gemini Hub và ghi lại kết quả.
 6. Giao diện kiểm tra trạng thái theo nhịp 2/5/10 giây và dừng khi có kết quả.
 
+## Lesson 13 và dashboard giảng viên
+
+- Trang học viên: `web/lesson.html?task=writing-lesson13-young-leaders`.
+- Trang giảng viên: `web/teacher.html?task=writing-lesson13-young-leaders`; bắt buộc đăng nhập Google và được cấp quyền trong `mapping.reviewer_account`.
+- Khi có thay đổi, trình duyệt vẫn lưu dự phòng cục bộ sau 500 ms và đồng bộ bản nháp lên database sau khoảng 15 giây. Chuyển ô, Check, Lưu và đóng đều yêu cầu lưu ngay.
+- Dashboard lấy một bản tổng hợp của lớp mỗi 5 giây, hiển thị bản nháp và trạng thái chỉ đọc. Luồng này dùng API/PostgreSQL, không tạo execution n8n.
+- Activity Lesson 13 đã phát hành riêng cho IC2200; roster công khai hiện có 14 học viên từ mapping đã duyệt.
+- Google Client ID trong cấu hình là định danh OAuth công khai; secret và token không được lưu trong repo.
+- Kết quả kiểm thử và thông tin khôi phục nằm trong [biên bản phát hành Lesson 13](docs/PRODUCTION_DEPLOYMENT_2026-08-14_LESSON13_IC2200.md).
+
 ## Trạng thái phát hành
 
-Đây là bản triển khai DEV. Push lên `main` chỉ chạy kiểm thử; bước xuất bản Pages phải được chạy thủ công sau release gate. Không có workflow n8n nào được tự động bật, không thay link Google Docs hiện tại và không có credential production trong kho mã.
+Push lên `main` chỉ chạy kiểm thử; bước xuất bản Pages phải được chạy thủ công sau release gate. Credential production, prompt chấm và dữ liệu học viên không nằm trong kho mã.

@@ -1,0 +1,116 @@
+{
+  "schemaVersion": "lesson-handout.v1",
+  "contentVersion": "2026-08-14.1",
+  "activity": {
+    "slug": "writing-lesson13-young-leaders",
+    "title": "Lesson 13 · Lập luận cho hai thân bài"
+  },
+  "task": {
+    "title": "Younger people as leaders",
+    "statement": "Directors and managers of organisations are often older people. Some people say that it is better for younger people to be leaders. To what extent do you agree or disagree?"
+  },
+  "bodies": [
+    {
+      "key": "body1",
+      "title": "Body 1",
+      "description": "Chốt hai ý hỗ trợ, viết topic sentence và phát triển từng ý theo A–X–B.",
+      "sectionKeys": ["body1_topic", "body1_support1", "body1_support2"]
+    },
+    {
+      "key": "body2",
+      "title": "Body 2",
+      "description": "Lặp lại cùng một quy trình cho thân bài thứ hai.",
+      "sectionKeys": ["body2_topic", "body2_support1", "body2_support2"]
+    }
+  ],
+  "sections": [
+    {
+      "key": "body1_topic",
+      "body": "body1",
+      "title": "Chốt idea và Topic Sentence",
+      "kicker": "Body 1 · Bước 1",
+      "instruction": "Viết hai ý hỗ trợ ngắn gọn, sau đó gộp chúng thành một Topic Sentence rõ lập trường.",
+      "requiredFields": ["body1_idea1", "body1_idea2", "body1_topic"],
+      "validationMode": "all",
+      "fields": [
+        { "key": "body1_idea1", "label": "Idea 1", "rows": 3, "placeholder": "Ý hỗ trợ thứ nhất…" },
+        { "key": "body1_idea2", "label": "Idea 2", "rows": 3, "placeholder": "Ý hỗ trợ thứ hai…" },
+        { "key": "body1_topic", "label": "Topic Sentence", "rows": 4, "placeholder": "Câu chủ đề bao quát hai ý…" }
+      ]
+    },
+    {
+      "key": "body1_support1",
+      "body": "body1",
+      "title": "Phát triển Supporting Idea 1",
+      "kicker": "Body 1 · Bước 2",
+      "instruction": "A nêu điểm đầu, X giải thích hoặc nối logic, B chốt hệ quả hoặc ví dụ phù hợp.",
+      "requiredFields": ["body1_support1_a", "body1_support1_x", "body1_support1_b"],
+      "validationMode": "all",
+      "fields": [
+        { "key": "body1_support1_a", "label": "A · Điểm đầu", "rows": 3, "placeholder": "Luận điểm mở đầu…" },
+        { "key": "body1_support1_x", "label": "X · Điểm giữa", "rows": 3, "placeholder": "Giải thích mối liên hệ…" },
+        { "key": "body1_support1_b", "label": "B · Điểm cuối", "rows": 3, "placeholder": "Hệ quả hoặc ví dụ…" }
+      ]
+    },
+    {
+      "key": "body1_support2",
+      "body": "body1",
+      "title": "Phát triển Supporting Idea 2",
+      "kicker": "Body 1 · Bước 3",
+      "instruction": "Hoàn thiện chuỗi A–X–B cho ý thứ hai. Sau khi Check, hệ thống có thể bổ sung bảng từ vựng hỗ trợ.",
+      "requiredFields": ["body1_support2_a", "body1_support2_x", "body1_support2_b"],
+      "validationMode": "all",
+      "fields": [
+        { "key": "body1_support2_a", "label": "A · Điểm đầu", "rows": 3, "placeholder": "Luận điểm mở đầu…" },
+        { "key": "body1_support2_x", "label": "X · Điểm giữa", "rows": 3, "placeholder": "Giải thích mối liên hệ…" },
+        { "key": "body1_support2_b", "label": "B · Điểm cuối", "rows": 3, "placeholder": "Hệ quả hoặc ví dụ…" }
+      ]
+    },
+    {
+      "key": "body2_topic",
+      "body": "body2",
+      "title": "Chốt idea và Topic Sentence",
+      "kicker": "Body 2 · Bước 1",
+      "instruction": "Viết hai ý hỗ trợ ngắn gọn, sau đó gộp chúng thành một Topic Sentence rõ lập trường.",
+      "requiredFields": ["body2_idea1", "body2_idea2", "body2_topic"],
+      "validationMode": "all",
+      "fields": [
+        { "key": "body2_idea1", "label": "Idea 1", "rows": 3, "placeholder": "Ý hỗ trợ thứ nhất…" },
+        { "key": "body2_idea2", "label": "Idea 2", "rows": 3, "placeholder": "Ý hỗ trợ thứ hai…" },
+        { "key": "body2_topic", "label": "Topic Sentence", "rows": 4, "placeholder": "Câu chủ đề bao quát hai ý…" }
+      ]
+    },
+    {
+      "key": "body2_support1",
+      "body": "body2",
+      "title": "Phát triển Supporting Idea 1",
+      "kicker": "Body 2 · Bước 2",
+      "instruction": "A nêu điểm đầu, X giải thích hoặc nối logic, B chốt hệ quả hoặc ví dụ phù hợp.",
+      "requiredFields": ["body2_support1_a", "body2_support1_x", "body2_support1_b"],
+      "validationMode": "all",
+      "fields": [
+        { "key": "body2_support1_a", "label": "A · Điểm đầu", "rows": 3, "placeholder": "Luận điểm mở đầu…" },
+        { "key": "body2_support1_x", "label": "X · Điểm giữa", "rows": 3, "placeholder": "Giải thích mối liên hệ…" },
+        { "key": "body2_support1_b", "label": "B · Điểm cuối", "rows": 3, "placeholder": "Hệ quả hoặc ví dụ…" }
+      ]
+    },
+    {
+      "key": "body2_support2",
+      "body": "body2",
+      "title": "Phát triển Supporting Idea 2",
+      "kicker": "Body 2 · Bước 3",
+      "instruction": "Hoàn thiện chuỗi A–X–B cho ý thứ hai. Sau khi Check, hệ thống có thể bổ sung bảng từ vựng hỗ trợ.",
+      "requiredFields": ["body2_support2_a", "body2_support2_x", "body2_support2_b"],
+      "validationMode": "all",
+      "fields": [
+        { "key": "body2_support2_a", "label": "A · Điểm đầu", "rows": 3, "placeholder": "Luận điểm mở đầu…" },
+        { "key": "body2_support2_x", "label": "X · Điểm giữa", "rows": 3, "placeholder": "Giải thích mối liên hệ…" },
+        { "key": "body2_support2_b", "label": "B · Điểm cuối", "rows": 3, "placeholder": "Hệ quả hoặc ví dụ…" }
+      ]
+    }
+  ],
+  "vocabulary": {
+    "title": "Từ vựng hỗ trợ",
+    "columns": ["Ý cần diễn đạt", "Từ/cụm từ tiếng Anh"]
+  }
+}

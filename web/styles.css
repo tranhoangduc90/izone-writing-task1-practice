@@ -122,14 +122,26 @@ textarea { resize:vertical; min-height:10rem; line-height:1.55; }
 .lesson-body-header { padding:.35rem .25rem; }
 .lesson-body-header h2 { color:var(--navy); font-size:1.45rem; }
 .lesson-body-header p { margin:.25rem 0 0; color:var(--muted); }
-.lesson-section-card textarea { min-height:7rem; }
+.lesson-section-card { background:#f5f8fc; border-color:#c8d5e5; }
+.lesson-section-card .section-kicker { font-size:clamp(1.18rem,2vw,1.28rem); line-height:1.25; letter-spacing:.015em; text-transform:none; }
+.lesson-section-card .section-heading h3 { margin:.35rem 0 0; font-size:1.06rem; line-height:1.35; }
+.lesson-section-card textarea,
+.lesson-section-workspace[data-state] .lesson-section-card textarea { min-height:7rem; background:#fff; }
 .lesson-section-card .section-instruction { margin:-.15rem 0 .85rem; font-size:.9rem; }
+.lesson-section-card .section-actions { display:grid; grid-template-columns:1fr; gap:.6rem; margin-top:1rem; }
+.lesson-section-card .submit-section { width:100%; min-height:56px; border-color:#1d4ed8; border-radius:11px; background:var(--blue); color:#fff; font-size:1.02rem; box-shadow:0 7px 18px rgb(37 99 235/.2); }
+.lesson-section-card .submit-section:hover:not(:disabled) { background:#1d4ed8; }
+.lesson-section-workspace[data-state="passed"] .lesson-section-card .submit-section { border-color:var(--success); background:var(--success); color:#fff; opacity:1; box-shadow:0 7px 18px rgb(22 112 68/.16); }
+.lesson-section-workspace[data-state="queued"] .lesson-section-card .submit-section { border-color:var(--warning); background:var(--warning); color:#fff; opacity:1; box-shadow:none; }
 .lesson-vocabulary { padding:1rem; overflow:hidden; }
 .lesson-vocabulary h3 { margin:0 0 .75rem; color:var(--navy); }
 .lesson-vocabulary table { width:100%; border-collapse:collapse; }
 .lesson-vocabulary th,.lesson-vocabulary td { width:50%; padding:.72rem; border:1px solid var(--line); text-align:left; vertical-align:top; }
 .lesson-vocabulary th { background:#eaf0f7; color:#344054; }
 .lesson-vocabulary tbody tr:nth-child(even) { background:#f7f9fc; }
+.lesson-completed-demo .lesson-prompt { margin-top:1rem; }
+.lesson-demo-note { border-left-color:var(--blue); background:#eef6ff; color:#24436b; }
+.lesson-demo-vocabulary { margin-top:1.5rem; }
 
 /* Dashboard chỉ đọc dành cho giảng viên */
 .teacher-shell { max-width:1680px; }

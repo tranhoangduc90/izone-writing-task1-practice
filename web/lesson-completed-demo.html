@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#14213d" />
+    <link rel="icon" href="data:," />
+    <title>Demo hoàn chỉnh · Handout Writing Lesson 13</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#demo-workspace">Đi tới bài demo</a>
+    <header class="topbar">
+      <a class="brand" href="./lesson.html?task=writing-lesson13-young-leaders">iZONE · Writing trên lớp</a>
+      <p class="save-state">Bản demo · không lưu dữ liệu</p>
+    </header>
+    <main id="demo-workspace" class="page-shell lesson-shell lesson-completed-demo">
+      <div class="task-header">
+        <div>
+          <p class="eyebrow">Bài minh hoạ đã hoàn thành</p>
+          <h1>Lesson 13 · Lập luận cho hai thân bài</h1>
+          <p class="muted">Học viên Demo · IC2200</p>
+        </div>
+      </div>
+      <p class="notice lesson-demo-note"><strong>Dữ liệu giả:</strong> sáu phần đều đã đạt sau nhiều lượt AI góp ý. Trang này chỉ để xem giao diện, không gọi API, database hoặc AI.</p>
+      <article class="lesson-prompt card">
+        <p class="eyebrow">Đề bài</p>
+        <h2>Younger people as leaders</h2>
+        <div id="demo-prompt" class="markdown-body"></div>
+      </article>
+      <div id="demo-bodies" class="lesson-bodies"></div>
+      <section class="lesson-vocabulary lesson-demo-vocabulary card" aria-labelledby="demo-vocabulary-title">
+        <p class="eyebrow">Sau khi hoàn thành</p>
+        <h3 id="demo-vocabulary-title">Bảng từ vựng hỗ trợ</h3>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Ý cần diễn đạt</th><th>Từ/cụm từ tiếng Anh</th></tr></thead>
+            <tbody id="demo-vocabulary-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <template id="demo-section-template">
+      <section class="section-workspace lesson-section-workspace" data-state="passed">
+        <article class="section-card lesson-section-card">
+          <div class="section-heading">
+            <div><p class="section-kicker"></p><h3></h3></div>
+            <span class="section-status" data-state="passed">Đã đạt</span>
+          </div>
+          <p class="section-instruction muted"></p>
+          <div class="text-fields"></div>
+          <div class="section-actions">
+            <span class="word-count muted"></span>
+            <button class="secondary submit-section" type="button" disabled>Phần này đã đạt</button>
+          </div>
+        </article>
+        <aside class="comments-panel">
+          <div class="comments-heading">
+            <div><p class="eyebrow">Nhận xét</p><h3 class="comments-title"></h3></div>
+            <span class="polling-state">Hoàn tất</span>
+          </div>
+          <ol class="comment-list"></ol>
+        </aside>
+      </section>
+    </template>
+    <script type="module" src="./js/lesson-completed-demo.js"></script>
+  </body>
+</html>

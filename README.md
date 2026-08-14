@@ -23,6 +23,7 @@ Repo cũng có bản nháp **Writing trên lớp 67 – Lesson 13**, gộp hai h
 ## Lesson 13 và dashboard giảng viên
 
 - Trang học viên: `web/lesson.html?task=writing-lesson13-young-leaders`.
+- Bản demo bài đã hoàn thành: `web/lesson-completed-demo.html`; chỉ dùng dữ liệu giả, không gọi API, database hoặc AI.
 - Trang giảng viên: `web/teacher.html?task=writing-lesson13-young-leaders`; bắt buộc đăng nhập Google và được cấp quyền trong `mapping.reviewer_account`.
 - Trang mô phỏng tải lớp: `web/teacher-live-demo.html`; dùng 40 học viên giả, không gọi API hoặc AI thật.
 - Khi có thay đổi, trình duyệt vẫn lưu dự phòng cục bộ sau 500 ms và đồng bộ bản nháp lên database sau khoảng 15 giây. Chuyển ô, Check, Lưu và đóng đều yêu cầu lưu ngay.

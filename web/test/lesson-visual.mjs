@@ -61,7 +61,7 @@ try {
   const desktop = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   await desktop.goto(`http://127.0.0.1:${port}/lesson.html?task=writing-lesson13-young-leaders`);
   await desktop.selectOption('#lesson-class', classRef);
-  await desktop.fill('#lesson-student', 'Học viên kiểm thử');
+  await desktop.selectOption('#lesson-student', studentRef);
   await desktop.click('#lesson-identity-form button');
   await desktop.waitForSelector('.lesson-body-block');
   assert.equal(await desktop.locator('.lesson-body-block').count(), 2);
@@ -77,7 +77,7 @@ try {
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await mobile.goto(`http://127.0.0.1:${port}/lesson.html?task=writing-lesson13-young-leaders`);
   await mobile.selectOption('#lesson-class', classRef);
-  await mobile.fill('#lesson-student', 'Học viên kiểm thử');
+  await mobile.selectOption('#lesson-student', studentRef);
   await mobile.click('#lesson-identity-form button');
   await mobile.waitForSelector('.lesson-body-block');
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);

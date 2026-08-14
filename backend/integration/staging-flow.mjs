@@ -189,6 +189,61 @@ for (const job of secondBatch.value.jobs) {
   ensure(failed.status === 200, 'Không đóng được job còn lại của phép thử giới hạn.');
 }
 
+// Kiểm thử Draft trên PostgreSQL thật: bị chặn trước khi Overview/Outline đạt,
+// chỉ chấm đúng bản đã lưu và khóa riêng phần Draft sau khi đạt.
+const draftSession = await openSession(9);
+const draftSaved = await request(`/api/v1/sessions/${draftSession.sessionRef}/draft`, {
+  method: 'PUT',
+  body: {
+    baseVersion: draftSession.draftVersion,
+    requestId: crypto.randomUUID(),
+    overview: 'Overview giả dùng cho kiểm thử Draft.',
+    body1: 'Outline Body 1 giả dùng cho kiểm thử Draft.',
+    body2: 'Outline Body 2 giả dùng cho kiểm thử Draft.',
+    draft1: 'Draft 1 giả có phần <cần sửa>.',
+    draft2: 'Draft 2 synthetic with the local issue corrected.',
+    draft2Unlocked: true
+  }
+});
+ensure(draftSaved.status === 200, `Lưu đủ dữ liệu Draft trả HTTP ${draftSaved.status}.`);
+
+async function submitSavedSection(sessionRef, section, snapshot) {
+  return request(`/api/v1/sessions/${sessionRef}/checks`, {
+    method: 'POST',
+    body: { section, requestId: crypto.randomUUID(), snapshot }
+  });
+}
+
+const draftSnapshot = {
+  overview: 'Overview giả dùng cho kiểm thử Draft.',
+  body1: 'Outline Body 1 giả dùng cho kiểm thử Draft.',
+  body2: 'Outline Body 2 giả dùng cho kiểm thử Draft.',
+  draft1: 'Draft 1 giả có phần <cần sửa>.',
+  draft2: 'Draft 2 synthetic with the local issue corrected.'
+};
+const prematureDraft = await submitSavedSection(draftSession.sessionRef, 'draft', draftSnapshot);
+ensure(prematureDraft.status === 409, `Draft trước điều kiện phải nhận 409, nhận HTTP ${prematureDraft.status}.`);
+
+for (const section of ['overview', 'outline']) {
+  const submitted = await submitSavedSection(draftSession.sessionRef, section, draftSnapshot);
+  ensure(submitted.status === 202, `Gửi ${section} cho điều kiện Draft trả HTTP ${submitted.status}.`);
+  const claimed = await claim();
+  ensure(claimed.value.jobs?.length === 1 && claimed.value.jobs[0].section === section, `Job điều kiện ${section} không đúng.`);
+  const completed = await complete(claimed.value.jobs[0], 'passed', `${section} đã đạt trong kiểm thử Draft.`);
+  ensure(completed.status === 200, `Hoàn tất điều kiện ${section} trả HTTP ${completed.status}.`);
+}
+
+const draftAttempt = await submitSavedSection(draftSession.sessionRef, 'draft', draftSnapshot);
+ensure(draftAttempt.status === 202, `Gửi Draft hợp lệ trả HTTP ${draftAttempt.status}.`);
+const draftClaim = await claim();
+const draftJob = draftClaim.value.jobs?.[0];
+ensure(draftClaim.status === 200 && draftJob?.section === 'draft', 'Không nhận được job Draft độc lập.');
+ensure(draftJob.studentInput?.draft1 === draftSnapshot.draft1 && draftJob.studentInput?.draft2 === draftSnapshot.draft2, 'Job Draft không mang đúng Draft 1/2 đã lưu.');
+const draftCompleted = await complete(draftJob, 'passed', 'Draft đã đạt trong kiểm thử staging.');
+ensure(draftCompleted.status === 200, `Hoàn tất Draft trả HTTP ${draftCompleted.status}.`);
+const lockedDraft = await submitSavedSection(draftSession.sessionRef, 'draft', draftSnapshot);
+ensure(lockedDraft.status === 423, `Draft đã đạt phải bị khóa, nhận HTTP ${lockedDraft.status}.`);
+
 process.stdout.write(`${JSON.stringify({
   syntheticStudents: students.length,
   rapidChecks: rapidChecks.length,
@@ -199,5 +254,8 @@ process.stdout.write(`${JSON.stringify({
   emptyOutlineStatus: emptyOutline.status,
   lockedSectionStatus: lockedCheck.status,
   etagValidated,
-  maximumConcurrentLeases: firstBatch.value.jobs.length
+  maximumConcurrentLeases: firstBatch.value.jobs.length,
+  draftBeforePrerequisitesStatus: prematureDraft.status,
+  draftJobSection: draftJob.section,
+  lockedDraftStatus: lockedDraft.status
 })}\n`);

@@ -65,23 +65,26 @@ function studentsForClass(classRef) {
 
 function updateStudentOptions() {
   const classRef = $("lesson-class").value;
-  const input = $("lesson-student");
-  const list = $("lesson-students");
-  input.value = "";
-  input.disabled = !classRef;
-  list.replaceChildren();
+  const select = $("lesson-student");
+  select.replaceChildren();
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Chọn họ và tên của bạn";
+  select.append(placeholder);
+  select.value = "";
+  select.disabled = !classRef;
   for (const student of studentsForClass(classRef)) {
     const option = document.createElement("option");
-    option.value = student.alias || student.displayName;
-    option.dataset.studentRef = student.studentRef;
-    list.append(option);
+    option.value = student.studentRef;
+    option.textContent = student.alias || student.displayName;
+    select.append(option);
   }
 }
 
 function selectedStudent() {
-  const label = $("lesson-student").value.trim();
-  const student = studentsForClass($("lesson-class").value).find((item) => (item.alias || item.displayName) === label);
-  return student ? { studentRef: student.studentRef, label } : null;
+  const studentRef = $("lesson-student").value;
+  const student = studentsForClass($("lesson-class").value).find((item) => item.studentRef === studentRef);
+  return student ? { studentRef: student.studentRef, label: student.alias || student.displayName } : null;
 }
 
 function mergeServer(payload, preserveResponses = false) {

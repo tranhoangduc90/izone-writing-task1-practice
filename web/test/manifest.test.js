@@ -43,3 +43,12 @@ test("Lesson 13 manifest merges Body 1 and Body 2 without private grading prompt
   assert.ok(manifest.sections.every((section) => section.requiredFields.length === 3));
   assert.doesNotMatch(JSON.stringify(manifest), /grader.?prompt|credential|api.?key|student.?data|Bearer /i);
 });
+
+test("student identity uses native selects for both class and name on mobile", () => {
+  for (const filename of ["index.html", "lesson.html"]) {
+    const html = fs.readFileSync(path.join(root, filename), "utf8");
+    assert.doesNotMatch(html, /<datalist/i);
+    assert.match(html, /<select[^>]+(?:student-name|lesson-student)/i);
+    assert.match(html, /Chọn họ và tên của bạn/);
+  }
+});

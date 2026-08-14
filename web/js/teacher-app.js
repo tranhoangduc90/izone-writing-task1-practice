@@ -11,6 +11,7 @@ function showDashboardError(value = "") { const node = $("teacher-error"); node.
 function studentStatus(student) {
   const sections = Object.values(student.sections || {});
   if (sections.some((section) => section.status === "queued")) return "queued";
+  if (sections.some((section) => section.status === "technical_error")) return "technical_error";
   if (sections.some((section) => section.status === "revision")) return "revision";
   if (sections.length && sections.every((section) => section.status === "passed")) return "passed";
   if (Object.values(student.responses || {}).some(hasMeaningfulText)) return "writing";
@@ -18,7 +19,7 @@ function studentStatus(student) {
 }
 
 function statusLabel(status) {
-  return ({ not_started: "Chưa làm", writing: "Đang viết", queued: "Đang chấm", revision: "Cần sửa", passed: "Đã đạt" })[status] || "Chưa làm";
+  return ({ not_started: "Chưa làm", writing: "Đang viết", queued: "Đang chấm", technical_error: "Lỗi chấm", revision: "Cần sửa", passed: "Đã đạt" })[status] || "Chưa làm";
 }
 
 function formatTime(value) {
@@ -40,7 +41,7 @@ function populateClasses(students) {
 function renderSummary(students) {
   const root = $("teacher-summary");
   root.replaceChildren();
-  const statuses = ["not_started", "writing", "queued", "revision", "passed"];
+  const statuses = ["not_started", "writing", "queued", "technical_error", "revision", "passed"];
   for (const status of statuses) {
     const card = document.createElement("article");
     card.className = "teacher-summary-card";
@@ -94,9 +95,35 @@ function showStudentDetail(student) {
       if (!definition) continue;
       const section = document.createElement("article"); section.className = "teacher-detail-section";
       const sectionTitle = document.createElement("h4");
-      const sectionState = student.sections?.[sectionKey]?.status || "draft";
+      const sectionInfo = student.sections?.[sectionKey] || {};
+      const sectionState = sectionInfo.status || "draft";
       sectionTitle.textContent = `${definition.title} · ${statusLabel(sectionState)}`;
       section.append(sectionTitle);
+      if (sectionState === "technical_error" && sectionInfo.technicalAttemptRef) {
+        const recovery = document.createElement("div");
+        recovery.className = "teacher-ai-recovery";
+        const message = document.createElement("p");
+        message.textContent = "AI đã lỗi sau ba lần thử. Bài viết vẫn được lưu an toàn; bạn có thể xếp lại chính Comment này.";
+        const retry = document.createElement("button");
+        retry.type = "button";
+        retry.className = "secondary";
+        retry.textContent = "Xếp chấm lại";
+        retry.addEventListener("click", async () => {
+          retry.disabled = true;
+          retry.textContent = "Đang xếp lại…";
+          try {
+            await state.api.retryFailedAttempt(sectionInfo.technicalAttemptRef);
+            $("teacher-detail").close();
+            await refresh();
+          } catch (error) {
+            retry.disabled = false;
+            retry.textContent = "Xếp chấm lại";
+            showDashboardError(error.message || "Chưa thể xếp chấm lại. Hệ thống sẽ giữ nguyên bài làm.");
+          }
+        });
+        recovery.append(message, retry);
+        section.append(recovery);
+      }
       for (const field of definition.fields || []) {
         const fieldRoot = document.createElement("div"); fieldRoot.className = "teacher-response-field";
         if (student.activeField === field.key && student.online) fieldRoot.dataset.active = "true";

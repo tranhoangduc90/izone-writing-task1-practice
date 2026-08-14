@@ -113,19 +113,25 @@ function studentsForClass(classRef) {
 
 function updateStudentOptions() {
   const classRef = $("class-id").value;
-  const input = $("student-name");
-  const list = $("student-options");
-  list.replaceChildren(); input.value = ""; input.disabled = !classRef;
+  const select = $("student-name");
+  select.replaceChildren();
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Chọn họ và tên của bạn";
+  select.append(placeholder);
+  select.value = "";
+  select.disabled = !classRef;
   for (const student of studentsForClass(classRef)) {
     const option = document.createElement("option");
-    option.value = student.alias || student.name;
-    option.dataset.studentRef = student.studentRef || student.ref;
-    list.append(option);
+    option.value = student.studentRef || student.ref;
+    option.textContent = student.alias || student.name;
+    select.append(option);
   }
 }
 
 function studentFromInput() {
-  const student = studentsForClass($("class-id").value).find((item) => (item.alias || item.name) === $("student-name").value.trim());
+  const studentRef = $("student-name").value;
+  const student = studentsForClass($("class-id").value).find((item) => (item.studentRef || item.ref) === studentRef);
   return student ? { studentRef: student.studentRef || student.ref, label: student.alias || student.name } : null;
 }
 

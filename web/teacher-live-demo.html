@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#14213d" />
+    <link rel="icon" href="data:," />
+    <title>Demo theo dõi lớp Writing</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar"><a class="brand" href="./teacher-live-demo.html">iZONE · Demo theo dõi Writing</a><p id="live-demo-updated" class="save-state" aria-live="polite">Đang bắt đầu</p></header>
+    <main class="page-shell teacher-shell live-demo-page">
+      <section class="demo-hero live-demo-hero">
+        <p class="eyebrow">Dữ liệu giả · không ghi database · không gọi AI thật</p>
+        <h1>40 học viên làm bài và giảng viên theo dõi gần thời gian thực</h1>
+        <p>Mỗi giây trên màn hình tương đương 5 giây trong lớp. Bản lưu bài, dashboard và hàng đợi AI được mô phỏng thành ba luồng độc lập, nên AI lỗi không làm mất bài hoặc dừng màn hình theo dõi.</p>
+        <div class="actions live-demo-controls">
+          <button id="live-demo-pause" class="secondary" type="button">Tạm dừng</button>
+          <button id="live-demo-reset" class="secondary" type="button">Chạy lại từ đầu</button>
+          <button id="live-demo-fail-once" class="secondary" type="button">Mô phỏng AI lỗi 1 lần</button>
+          <button id="live-demo-fail-three" class="primary" type="button">Mô phỏng AI lỗi 3 lần</button>
+        </div>
+      </section>
+
+      <section class="live-demo-safety" aria-label="Cơ chế giữ hệ thống liên tục">
+        <article><strong>1. Lưu bài độc lập</strong><span>PostgreSQL vẫn nhận bản nháp khi AI lỗi.</span></article>
+        <article><strong>2. Hàng đợi tối đa 4</strong><span>Lượt còn lại chờ, không giữ execution n8n.</span></article>
+        <article><strong>3. Tự thử lại</strong><span>Tối đa ba lần trên cùng Comment, không tăng chuỗi chưa đạt.</span></article>
+        <article><strong>4. Giảng viên khôi phục</strong><span>Sau ba lỗi, nút “Xếp chấm lại” dùng lại đúng lượt cũ.</span></article>
+      </section>
+
+      <section id="live-demo-summary" class="teacher-summary" aria-label="Tổng hợp lớp demo"></section>
+      <div class="live-demo-layout">
+        <section aria-labelledby="live-demo-students-title">
+          <h2 id="live-demo-students-title" class="live-demo-heading">Danh sách 40 học viên giả</h2>
+          <div id="live-demo-students" class="teacher-students"></div>
+        </section>
+        <aside class="card live-demo-event-panel" aria-labelledby="live-demo-events-title">
+          <h2 id="live-demo-events-title">Nhật ký hệ thống</h2>
+          <p class="muted">Theo dõi lưu bài, hàng đợi, lỗi AI và khôi phục mà không chứa nội dung bài viết.</p>
+          <ol id="live-demo-events" class="live-demo-events" aria-live="polite"></ol>
+        </aside>
+      </div>
+    </main>
+    <script type="module" src="./js/teacher-demo.js"></script>
+  </body>
+</html>

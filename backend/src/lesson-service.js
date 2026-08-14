@@ -219,10 +219,22 @@ export function createLessonPracticeService({ pool, now = () => Date.now() }) {
             WHEN EXISTS(SELECT 1 FROM writing_practice.check_attempt active
               WHERE active.session_id=section.session_id AND active.section_key=section.section_key
                 AND active.status IN ('queued','leased')) THEN 'queued'
+            WHEN latest_failed.public_id IS NOT NULL THEN 'technical_error'
             WHEN section.fail_streak>0 THEN 'revision' ELSE 'draft' END,
           'attemptsWithoutPass',section.fail_streak,
-          'roundNumber',section.round_number)) AS sections
-        FROM writing_practice.session_section section WHERE section.session_id=session.id
+          'roundNumber',section.round_number,
+          'technicalAttemptRef',latest_failed.public_id,
+          'technicalRetryCount',latest_failed.retry_count)) AS sections
+        FROM writing_practice.session_section section
+        LEFT JOIN LATERAL (
+          SELECT failed.public_id,failed.retry_count
+          FROM writing_practice.check_attempt failed
+          WHERE failed.session_id=section.session_id
+            AND failed.section_key=section.section_key
+            AND failed.status='failed'
+          ORDER BY failed.created_at DESC LIMIT 1
+        ) latest_failed ON true
+        WHERE section.session_id=session.id
       ) section_summary ON true
       LEFT JOIN LATERAL (
         SELECT count(*) AS check_count,
@@ -244,6 +256,39 @@ export function createLessonPracticeService({ pool, now = () => Date.now() }) {
     return { activitySlug, generatedAt: new Date(now()).toISOString(), students };
   }
 
+  async function retryFailedAttempt({ attemptRef, actorRef }) {
+    return withTransaction(pool, async client => {
+      const attempt = await client.query(`SELECT attempt.id,attempt.public_id,attempt.session_id,
+        attempt.section_key,attempt.comment_number,attempt.status,state.locked
+        FROM writing_practice.check_attempt attempt
+        JOIN writing_practice.session_section state ON state.session_id=attempt.session_id
+          AND state.section_key=attempt.section_key
+        WHERE attempt.public_id=$1 FOR UPDATE OF attempt,state`, [attemptRef]);
+      if (!attempt.rowCount) throw new ApiError(404, 'ATTEMPT_NOT_FOUND', 'Không tìm thấy lượt chấm.');
+      const row = attempt.rows[0];
+      if (['queued', 'leased'].includes(row.status)) {
+        return { attemptRef: row.public_id, section: row.section_key, commentNumber: row.comment_number, status: row.status, idempotent: true };
+      }
+      if (row.status !== 'failed' || row.locked) {
+        throw new ApiError(409, 'ATTEMPT_NOT_ADMIN_RETRYABLE', 'Lượt chấm này không thể xếp lại.');
+      }
+      const active = await client.query(`SELECT 1 FROM writing_practice.check_attempt
+        WHERE session_id=$1 AND section_key=$2 AND status IN ('queued','leased')`, [row.session_id, row.section_key]);
+      if (active.rowCount) throw new ApiError(409, 'SECTION_ALREADY_QUEUED', 'Phần này đã có một lượt đang chấm.');
+      await client.query(`UPDATE writing_practice.check_attempt
+        SET status='queued',retry_count=0,error_code=NULL,worker_id=NULL,lease_token=NULL,
+          lease_expires_at=NULL,completed_at=NULL,version=version+1,updated_at=now()
+        WHERE id=$1`, [row.id]);
+      await client.query(`UPDATE writing_practice.comment
+        SET status='queued',content='Đang chấm' WHERE attempt_id=$1`, [row.id]);
+      await client.query(`INSERT INTO writing_practice.admin_audit_event
+        (session_id,section_key,action,actor_ref,reason)
+        VALUES($1,$2,'retry_failed_attempt',$3,$4)`,
+      [row.session_id, row.section_key, actorRef, 'Giảng viên xếp chấm lại sau lỗi kỹ thuật.']);
+      return { attemptRef: row.public_id, section: row.section_key, commentNumber: row.comment_number, status: 'queued', idempotent: false };
+    });
+  }
+
   async function reopenSection({ sessionRef, section, actorRef, reason }) {
     return withTransaction(pool, async client => {
       const session = await client.query(`SELECT id FROM writing_practice.activity_session
@@ -261,5 +306,5 @@ export function createLessonPracticeService({ pool, now = () => Date.now() }) {
     });
   }
 
-  return { openSession, sessionDetails, saveResponses, submitCheck, publishLive, listLive, reopenSection };
+  return { openSession, sessionDetails, saveResponses, submitCheck, publishLive, listLive, retryFailedAttempt, reopenSection };
 }

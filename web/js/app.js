@@ -287,13 +287,17 @@ function renderComments() {
 function renderAll() { renderSections(); renderComments(); updatePollingStates(); }
 function resetAutosave() { clearTimeout(app.saveTimer); if (app.dirty) app.saveTimer = setTimeout(async () => { await saveRemote("timer"); resetAutosave(); }, 10 * 60 * 1000); }
 function markDirty() { const wasClean = !app.dirty; app.dirty = true; setSaveState("Có thay đổi chưa lưu"); clearTimeout(app.idbTimer); app.idbTimer = setTimeout(saveLocal, 500); if (wasClean) resetAutosave(); }
-async function saveLocal() { if (!app.identity || !app.state) return; await putDraft({ key: keyForDraft(), savedAt: Date.now(), progress: app.state, sessionRef: app.sessionRef, identity: app.identity }); }
+async function saveLocal() { if (!app.identity || !app.state) return; await putDraft({ key: keyForDraft(), savedAt: Date.now(), dirty: app.dirty, progress: app.state, sessionRef: app.sessionRef, identity: app.identity }); }
 
 async function restoreLocal() {
   const draft = await getDraft(keyForDraft());
   if (!draft?.progress) return;
-  const localIsNewer = Number(draft.savedAt || 0) > serverUpdatedAt();
-  if (localIsNewer && confirm("Đã tìm thấy bản lưu cục bộ. Khôi phục bản này?")) { const restored = normalizeProgress(draft.progress); restored.updatedAt = draft.progress.updatedAt || app.state.updatedAt; app.state = restored; app.sessionRef = draft.sessionRef || app.sessionRef; app.dirty = true; showNotice("Đã khôi phục bản lưu trên thiết bị. Hãy lưu ngay để đồng bộ."); }
+  const restored = normalizeProgress(draft.progress);
+  const localDiffers = restored.revision !== app.state.revision
+    || restored.draft2Unlocked !== app.state.draft2Unlocked
+    || JSON.stringify(restored.texts) !== JSON.stringify(app.state.texts);
+  const localIsNewer = Number(draft.savedAt || 0) > serverUpdatedAt() && localDiffers;
+  if (localIsNewer && confirm("Đã tìm thấy bản lưu cục bộ. Khôi phục bản này?")) { restored.updatedAt = draft.progress.updatedAt || app.state.updatedAt; app.state = restored; app.sessionRef = draft.sessionRef || app.sessionRef; app.dirty = true; showNotice("Đã khôi phục bản lưu trên thiết bị. Hãy lưu ngay để đồng bộ."); }
 }
 
 async function saveRemote(reason = "manual") {
@@ -409,6 +413,8 @@ async function openSession(event) {
     app.sessionRef = payload.sessionRef || payload.ref || payload.id;
     if (!app.sessionRef) throw new Error("API không trả mã phiên làm bài.");
     const session = await app.api.session(app.sessionRef); app.state = normalizeProgress(session.data.session || session.data); app.state.updatedAt = session.data.updatedAt || session.data.session?.updatedAt || null; await restoreLocal();
+    // Mã chỉ dùng để mở phiên hồ sơ tạm; xóa khỏi DOM ngay sau khi xác thực thành công.
+    $("access-code").value = ""; $("provisional-pin").value = ""; $("provisional-pin-confirm").value = "";
     $("student-label").textContent = `${student.label} · ${$("class-id").selectedOptions[0].textContent}`; $("setup-card").hidden = true; $("workspace").hidden = false; renderAll(); setSaveState(app.dirty ? "Đã khôi phục bản lưu cục bộ" : "Đã tải bài làm");
     renderTaskContent(); for (const attempt of app.state.attempts) registerAttempt(attempt); schedulePoll();
     schedulePresence(); clearInterval(app.heartbeatTimer); app.heartbeatTimer = setInterval(schedulePresence, 30_000);

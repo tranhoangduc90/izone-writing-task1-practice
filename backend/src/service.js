@@ -44,16 +44,16 @@ export function createWritingPracticeService({ pool, provisionalService = null }
       s.draft2_unlocked AS "draft2Unlocked", s.draft_version AS "draftVersion", s.updated_at AS "updatedAt"
       FROM writing_practice.activity_session s WHERE s.public_id = $1`, [sessionRef]);
     if (!session.rowCount) throw new ApiError(404, 'SESSION_NOT_FOUND', 'Không tìm thấy phiên làm bài.');
-    const [sectionRows, comments, attempts] = await Promise.all([
-      client.query(`SELECT section_key AS section, locked, fail_streak AS "failStreak", round_number AS "roundNumber" FROM writing_practice.session_section WHERE session_id = $1 ORDER BY section_key`, [session.rows[0].id]),
-      client.query(`SELECT comment.public_id AS "commentRef", attempt.public_id AS "attemptRef", comment.section_key AS section,
+    // Một pg Client chỉ chạy an toàn một truy vấn tại một thời điểm. Đọc tuần tự để tránh
+    // lỗi ngẫu nhiên khi sessionDetails chạy bên trong transaction mở/lưu/check.
+    const sectionRows = await client.query(`SELECT section_key AS section, locked, fail_streak AS "failStreak", round_number AS "roundNumber" FROM writing_practice.session_section WHERE session_id = $1 ORDER BY section_key`, [session.rows[0].id]);
+    const comments = await client.query(`SELECT comment.public_id AS "commentRef", attempt.public_id AS "attemptRef", comment.section_key AS section,
         comment.comment_number AS "commentNumber", comment.status, comment.content AS feedback, comment.created_at AS "createdAt",
         attempt.result_artifacts AS artifacts,
         (attempt.status='failed' AND attempt.retry_count<3) AS "canRetry"
         FROM writing_practice.comment comment JOIN writing_practice.check_attempt attempt ON attempt.id=comment.attempt_id
-        WHERE comment.session_id = $1 ORDER BY comment.created_at`, [session.rows[0].id]),
-      client.query(`SELECT public_id AS "attemptRef", section_key AS section, comment_number AS "commentNumber", status, result_status AS "resultStatus", error_code AS "errorCode", created_at AS "createdAt", completed_at AS "completedAt" FROM writing_practice.check_attempt WHERE session_id = $1 ORDER BY created_at DESC`, [session.rows[0].id])
-    ]);
+        WHERE comment.session_id = $1 ORDER BY comment.created_at`, [session.rows[0].id]);
+    const attempts = await client.query(`SELECT public_id AS "attemptRef", section_key AS section, comment_number AS "commentNumber", status, result_status AS "resultStatus", error_code AS "errorCode", created_at AS "createdAt", completed_at AS "completedAt" FROM writing_practice.check_attempt WHERE session_id = $1 ORDER BY created_at DESC`, [session.rows[0].id]);
     const sectionStates = Object.fromEntries(sectionRows.rows.map(row => [row.section, {
       status: row.locked ? 'passed' : row.failStreak > 0 ? 'revision' : 'draft',
       locked: row.locked,

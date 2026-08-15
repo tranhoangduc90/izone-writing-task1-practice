@@ -22,7 +22,11 @@ export function normalizeProgress(value = {}) {
   }
   return {
     revision: value.draftVersion ?? value.version ?? value.revision ?? null,
-    texts: Object.fromEntries(TEXT_KEYS.map((key) => [key, typeof value.draft?.[key] === "string" ? value.draft[key] : typeof value[key] === "string" ? value[key] : ""])),
+    texts: Object.fromEntries(TEXT_KEYS.map((key) => [key,
+      typeof value.draft?.[key] === "string" ? value.draft[key]
+        : typeof value.texts?.[key] === "string" ? value.texts[key]
+          : typeof value[key] === "string" ? value[key] : ""
+    ])),
     draft2Unlocked: Boolean(value.draft?.draft2Unlocked ?? value.draft2Unlocked ?? value.draft2_unlocked),
     sections,
     comments: Array.isArray(value.comments) ? value.comments : [],

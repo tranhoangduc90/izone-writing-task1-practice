@@ -64,11 +64,11 @@ async function claim(maxJobs = 1) {
   });
 }
 
-async function complete(job, resultStatus, feedback) {
+async function complete(job, resultStatus, feedback, artifacts) {
   return request(`/api/v1/internal/grading-jobs/${job.jobRef}/complete`, {
     internal: true,
     method: 'POST',
-    body: { leaseToken: job.leaseToken, resultStatus, feedback }
+    body: { leaseToken: job.leaseToken, resultStatus, feedback, ...(artifacts ? { artifacts } : {}) }
   });
 }
 
@@ -237,7 +237,12 @@ const draftClaim = await claim();
 const draftJob = draftClaim.value.jobs?.[0];
 ensure(draftClaim.status === 200 && draftJob?.section === 'draft', 'Không nhận được job Draft độc lập.');
 ensure(draftJob.studentInput?.draft1 === draftSnapshot.draft1 && draftJob.studentInput?.draft2 === draftSnapshot.draft2, 'Job Draft không mang đúng Draft 1/2 đã lưu.');
-const draftCompleted = await complete(draftJob, 'passed', 'Draft đã đạt trong kiểm thử staging.');
+const draftCompleted = await complete(
+  draftJob,
+  'passed',
+  'Draft đã đạt trong kiểm thử staging.',
+  { lmsUrl: 'https://practice.izone.edu.vn/shared/writing-essays/staging-synthetic/edit?page=0' }
+);
 ensure(draftCompleted.status === 200, `Hoàn tất Draft trả HTTP ${draftCompleted.status}.`);
 const lockedDraft = await submitSavedSection(draftSession.sessionRef, 'draft', draftSnapshot);
 ensure(lockedDraft.status === 423, `Draft đã đạt phải bị khóa, nhận HTTP ${lockedDraft.status}.`);

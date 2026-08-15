@@ -13,6 +13,19 @@ test("normalizes public session data into three section states", () => {
   assert.equal(result.sections.draft.status, "draft");
 });
 
+test("khôi phục bản IndexedDB giữ nguyên toàn bộ ô viết trong texts", () => {
+  const restored = normalizeProgress({
+    revision: 7,
+    texts: { overview: "Overview cục bộ", body1: "Body 1 cục bộ", body2: "Body 2 cục bộ", draft1: "Draft 1 cục bộ", draft2: "Draft 2 cục bộ" },
+    draft2Unlocked: true
+  });
+  assert.equal(restored.revision, 7);
+  assert.deepEqual(restored.texts, {
+    overview: "Overview cục bộ", body1: "Body 1 cục bộ", body2: "Body 2 cục bộ", draft1: "Draft 1 cục bộ", draft2: "Draft 2 cục bộ"
+  });
+  assert.equal(restored.draft2Unlocked, true);
+});
+
 test("polling backs off at the specified elapsed-time boundaries", () => {
   assert.equal(pollingDelay(0), 2000);
   assert.equal(pollingDelay(20000), 2000);

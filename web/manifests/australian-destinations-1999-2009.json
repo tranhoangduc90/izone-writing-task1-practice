@@ -1,0 +1,188 @@
+{
+  "schema_version": "task1-web-manifest-v1",
+  "activity": {
+    "version": "task1-web-activity-v1",
+    "id": "af14b76f-8dff-4ac1-a7eb-518496c25ca4",
+    "slug": "australian-destinations-1999-2009",
+    "title": "Luyện Task 1: Điểm đến của người Úc",
+    "type": "ielts_writing_task_1_preparation",
+    "locale": "vi-VN"
+  },
+  "task": {
+    "statement": "The table below gives information on the number of Australian people who visited the seven most popular destinations in 1999 and 2009.",
+    "chart_image": {
+      "kind": "reference",
+      "available": true,
+      "mime_type": "image/jpeg",
+      "file_name": "task1-australian-destinations-1999-2009.jpeg",
+      "url": "assets/task1-australian-destinations-1999-2009.jpeg",
+      "alt_text": "Bảng số người Úc đến bảy điểm đến phổ biến nhất vào năm 1999 và 2009, kèm tỷ lệ tăng."
+    }
+  },
+  "decoding": {
+    "what": "Số người Úc đến từng điểm trong bảy điểm đến phổ biến nhất",
+    "unit": "Người; cột cuối là tỷ lệ tăng so với năm 1999",
+    "categories": [
+      "Điểm đến: New Zealand, United Kingdom, United States, Indonesia, Fiji, Japan và China",
+      "Thời gian: 1999 và 2009",
+      "Các chiều thông tin: điểm đến, thời gian, số người và tỷ lệ tăng"
+    ]
+  },
+  "analysis": {
+    "bullets": [
+      "Số người đến cả bảy điểm đến đều tăng từ năm 1999 đến 2009; bảng chỉ có hai mốc nên không thể kết luận mức tăng diễn ra liên tục.",
+      "New Zealand đứng đầu trong cả hai năm và có mức tăng tuyệt đối lớn nhất, thêm 563.300 người.",
+      "Bốn vị trí đầu không đổi: New Zealand, United Kingdom, United States và Indonesia; China tăng từ hạng 7 lên hạng 5, còn Fiji và Japan cùng lùi một hạng.",
+      "China tăng nhanh nhất theo tỷ lệ, ở mức 249%, trong khi United States tăng chậm nhất, ở mức 33%.",
+      "New Zealand, Indonesia, Fiji, Japan và China đều tăng hơn 100%, nghĩa là số liệu năm 2009 lớn hơn gấp đôi năm 1999."
+    ]
+  },
+  "routes": [
+    {
+      "id": "A",
+      "name": "Giữ hạng và đổi hạng",
+      "rank": 1,
+      "recommended": true,
+      "body": {
+        "body_1": "New Zealand, United Kingdom, United States và Indonesia theo thứ hạng 1–4. Cả bốn giữ nguyên hạng; đối chiếu New Zealand có quy mô và mức tăng tuyệt đối lớn nhất với UK/US tăng chậm hơn, rồi Indonesia tăng 127% nhưng vẫn hạng 4.",
+        "body_2": "China, Fiji và Japan. Cả ba tăng hơn gấp đôi nhưng China tăng 249% để vượt Fiji và Japan, lên hạng 5; hai nước còn lại lùi một hạng.",
+        "strengths": "Nhóm cân đối 4/3, có câu chuyện rõ về sự ổn định của nhóm trên và thay đổi thứ hạng ở nhóm dưới.",
+        "tradeoffs": "Cần phân biệt mức tăng tuyệt đối với tốc độ tăng và tránh kể lần lượt từng nước.",
+        "best_for": "Học viên muốn có cấu trúc rõ, dễ so sánh và hạn chế liệt kê."
+      }
+    },
+    {
+      "id": "B",
+      "name": "Tăng hơn gấp đôi và tăng dưới gấp đôi",
+      "rank": 2,
+      "recommended": false,
+      "body": {
+        "body_1": "China, Japan, Indonesia, Fiji và New Zealand, sắp theo tỷ lệ tăng giảm dần hoặc theo quy mô với logic rõ. Tất cả có số liệu năm 2009 lớn hơn gấp đôi năm 1999; China nhanh nhất, còn New Zealand tăng nhiều người nhất.",
+        "body_2": "United Kingdom và United States. Hai nước tăng 60% và 33%, chậm nhất bảng nhưng vẫn giữ hạng 2 và 3 nhờ mức ban đầu cao.",
+        "strengths": "Tạo tương phản mạnh dựa trực tiếp vào cột tỷ lệ tăng và bao quát đủ bảy điểm đến.",
+        "tradeoffs": "Nhóm 5/2 không cân bằng; nhóm lớn phải được gom theo insight để không thành danh sách.",
+        "best_for": "Học viên muốn tập trung vào tốc độ tăng nhưng vẫn kiểm soát được quy mô và thứ hạng."
+      }
+    }
+  ],
+  "vocabulary": {
+    "overview": {
+      "naming": [
+        { "vi": "Số người Úc", "en": "the number of Australian visitors" },
+        { "vi": "Điểm đến", "en": "destination" },
+        { "vi": "Bảy điểm đến phổ biến nhất", "en": "the seven most popular destinations" },
+        { "vi": "Số liệu của một điểm đến", "en": "the figure for a destination" },
+        { "vi": "Tỷ lệ tăng", "en": "the growth rate / percentage increase" },
+        { "vi": "Số liệu tương ứng của năm sau", "en": "the corresponding figure in the later year" },
+        { "vi": "Mức tăng tuyệt đối", "en": "the absolute / numerical increase" },
+        { "vi": "Thứ hạng của điểm đến", "en": "the destination ranking / position" },
+        { "vi": "Trong cả hai năm", "en": "in both years" }
+      ],
+      "insights": [
+        { "vi": "Nhìn chung", "en": "Overall," },
+        { "vi": "Có thể thấy rõ rằng", "en": "It is clear that..." },
+        { "vi": "Tăng lên", "en": "increase / rise / grow" },
+        { "vi": "Ở cả bảy điểm đến", "en": "across all seven destinations" },
+        { "vi": "Giữ vị trí dẫn đầu", "en": "remain the leading destination" },
+        { "vi": "Có mức tăng khác nhau rõ rệt", "en": "show markedly different growth rates" },
+        { "vi": "Trong khi/trái lại", "en": "while / whereas / by contrast" },
+        { "vi": "Giữ nguyên bốn vị trí đầu", "en": "retain the top four positions" },
+        { "vi": "Tăng nhanh nhất theo tỷ lệ", "en": "record the fastest percentage growth" },
+        { "vi": "Tăng nhiều nhất về số người", "en": "record the largest absolute increase" },
+        { "vi": "Tăng chậm nhất", "en": "grow at the slowest rate" },
+        { "vi": "Tăng hơn gấp đôi", "en": "more than double" }
+      ]
+    },
+    "routes": [
+      {
+        "id": "A",
+        "name": "Giữ hạng và đổi hạng",
+        "rank": 1,
+        "recommended": true,
+        "naming": [
+          { "vi": "Xét bốn điểm đến dẫn đầu", "en": "Looking at the four leading destinations, ..." },
+          { "vi": "Bốn vị trí đầu", "en": "the top four positions" },
+          { "vi": "Số người đến New Zealand", "en": "the number visiting New Zealand" },
+          { "vi": "Đứng ở mức", "en": "stand at" },
+          { "vi": "Được ghi nhận ở mức", "en": "be recorded at" },
+          { "vi": "Ở vị trí thứ nhất", "en": "in first place / rank first" },
+          { "vi": "Ở vị trí thứ tư", "en": "in fourth place / rank fourth" },
+          { "vi": "Bốn điểm đến giữ nguyên hạng", "en": "the four destinations retained their rankings" },
+          { "vi": "Số liệu tương ứng của năm sau", "en": "the corresponding figure in the later year" },
+          { "vi": "So với mức tăng của New Zealand", "en": "compared with the rise for New Zealand" }
+        ],
+        "story": [
+          { "vi": "Giữ vị trí dẫn đầu", "en": "remain in the top position" },
+          { "vi": "Đứng đầu bảng", "en": "top the table / rank first" },
+          { "vi": "Bốn nước giữ nguyên thứ hạng", "en": "the four countries retained their positions" },
+          { "vi": "Tăng ở tốc độ chậm hơn", "en": "grow at a slower rate" },
+          { "vi": "Giữ vị trí thứ tư", "en": "remain in fourth place" },
+          { "vi": "Trong khi đó", "en": "meanwhile / whereas" },
+          { "vi": "Tăng tuyệt đối", "en": "increase in absolute terms" },
+          { "vi": "Tăng tương đối", "en": "increase in relative terms" },
+          { "vi": "Giữ nguyên thứ hạng", "en": "remain unchanged in the ranking" },
+          { "vi": "Đạt mức", "en": "reach / stand at" }
+        ]
+      },
+      {
+        "id": "B",
+        "name": "Tăng hơn gấp đôi và tăng dưới gấp đôi",
+        "rank": 2,
+        "recommended": false,
+        "naming": [
+          { "vi": "Trong nhóm tăng trên 100%", "en": "among destinations with growth above 100%" },
+          { "vi": "Các điểm đến tăng hơn gấp đôi", "en": "destinations whose figures more than doubled" },
+          { "vi": "Số liệu năm 1999 và 2009", "en": "the figures for 1999 and 2009" },
+          { "vi": "Tỷ lệ tăng tương ứng", "en": "the respective growth rates" },
+          { "vi": "Số liệu tương ứng của năm sau", "en": "the corresponding figure in the later year" },
+          { "vi": "So với giá trị ban đầu", "en": "compared with the initial figure" },
+          { "vi": "Lần lượt là", "en": "respectively" },
+          { "vi": "Khác biệt về tốc độ tăng", "en": "the difference in growth rates" },
+          { "vi": "Tăng trên 100%", "en": "growth of over 100%" }
+        ],
+        "story": [
+          { "vi": "Có tỷ lệ tăng cao nhất", "en": "record the highest growth rate" },
+          { "vi": "Tăng hơn gấp đôi", "en": "more than double / increase more than twofold" },
+          { "vi": "Tăng từ mức thấp nhất", "en": "rise from the lowest initial figure" },
+          { "vi": "Tăng nhanh hơn các điểm đến khác", "en": "grow faster than the other destinations" },
+          { "vi": "Vươn lên hai bậc", "en": "climb two places in the ranking" },
+          { "vi": "Dù có mức ban đầu thấp", "en": "despite a low initial figure" },
+          { "vi": "Trái với nhóm tăng dưới 100%", "en": "in contrast to the below-100% group" },
+          { "vi": "Tỷ lệ tăng cao nhất", "en": "the highest growth rate" },
+          { "vi": "Mức tăng tương đối lớn nhất", "en": "the largest relative increase" },
+          { "vi": "Tăng nhanh hơn đáng kể", "en": "grow considerably faster than" }
+        ]
+      }
+    ]
+  },
+  "chatbots": {
+    "data_walk": {
+      "label": "Chatbot 1: đọc đề và rà dữ liệu",
+      "href": null,
+      "status": "pending_link"
+    },
+    "insight_and_routes": {
+      "label": "Chatbot 2: tìm insight và chọn hướng thân bài",
+      "href": null,
+      "status": "pending_link"
+    }
+  },
+  "feedback": {
+    "overview": { "enabled": true, "section": "overview", "prompt_version": "1" },
+    "outline": { "enabled": true, "section": "outline", "prompt_version": "1" },
+    "draft": { "enabled": true, "section": "draft", "prompt_version": "1" }
+  },
+  "metadata": {
+    "factory_version": "task1-factory-v1",
+    "activity_version": "task1-web-activity-v1",
+    "source_contract": "released-handout",
+    "source_contract_version": "2026-08-13",
+    "prompt_versions": {
+      "chatbot_1": "1",
+      "chatbot_2": "1",
+      "overview": "1",
+      "outline": "1",
+      "draft": "1"
+    }
+  }
+}

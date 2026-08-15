@@ -88,7 +88,7 @@ export function createProvisionalStudentService({ pool, pepper }) {
       LEFT JOIN writing_practice.provisional_student provisional ON provisional.activity_class_id=scope.id
         AND provisional.student_public_id=COALESCE(alias.canonical_student_public_id,$3)
       WHERE activity.slug=$1 AND activity.status='active'
-        AND ($4::boolean=false OR activity.grading_pool<>'task1')
+        AND (($4::boolean AND activity.grading_pool<>'task1') OR (NOT $4::boolean AND activity.grading_pool='task1'))
         AND (roster.student_public_id IS NOT NULL OR provisional.student_public_id IS NOT NULL)`, [activitySlug, classRef, studentRef, lesson]);
     if (!roster.rowCount) throw new ApiError(404, 'SESSION_NOT_ALLOWED', 'Học viên không thuộc lớp đang hoạt động.');
     const row = roster.rows[0];

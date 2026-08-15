@@ -81,6 +81,14 @@ textarea { resize:vertical; min-height:10rem; line-height:1.55; }
 .comment-meta { color:#526078; font-size:.79rem; font-weight:700; }
 .comment-body { margin-top:.55rem; }
 .comment-list .compact { margin-top:.5rem; }
+.comments-panel.draft-result-panel { max-height:none; overflow:visible; }
+.draft-result-list { gap:0; }
+.draft-result-list > .draft-result-box { border-left:4px solid var(--blue); background:#f8fbff; }
+.draft-result-list > .draft-result-box[data-status="queued"] { border-left-color:var(--warning); background:#fffaf0; }
+.lms-result-link { display:grid; gap:.28rem; margin-top:.65rem; padding:.85rem; border:1px solid #8eb6e8; border-radius:9px; background:#eef6ff; color:#174ea6; text-decoration:none; }
+.lms-result-link:hover { border-color:#4e88cf; background:#e5f1ff; }
+.lms-result-link span { color:#526078; font-size:.78rem; font-weight:500; overflow-wrap:anywhere; }
+.draft-result-message { margin:.6rem 0 0; }
 .markdown-body { color:var(--ink); overflow-wrap:anywhere; }
 .markdown-body > :first-child { margin-top:0; }
 .markdown-body > :last-child { margin-bottom:0; }

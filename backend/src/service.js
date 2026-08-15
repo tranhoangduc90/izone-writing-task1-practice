@@ -7,6 +7,18 @@ export class ApiError extends Error {
 const sections = ['overview', 'outline', 'draft'];
 const hash = value => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const meaningfulText = value => String(value ?? '').replace(/[\s\u200B-\u200D\u2060\uFEFF]/gu, '');
+const draftLeaseSeconds = 1200;
+function normalizeLmsUrl(value) {
+  if (typeof value !== 'string' || value.length > 2048) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:'
+      && url.hostname.toLowerCase() === 'practice.izone.edu.vn'
+      && url.pathname.startsWith('/shared/writing-essays/')
+      ? url.href
+      : null;
+  } catch { return null; }
+}
 
 export function createWritingPracticeService({ pool }) {
   async function getRoster(slug) {
@@ -32,6 +44,7 @@ export function createWritingPracticeService({ pool }) {
       client.query(`SELECT section_key AS section, locked, fail_streak AS "failStreak", round_number AS "roundNumber" FROM writing_practice.session_section WHERE session_id = $1 ORDER BY section_key`, [session.rows[0].id]),
       client.query(`SELECT comment.public_id AS "commentRef", attempt.public_id AS "attemptRef", comment.section_key AS section,
         comment.comment_number AS "commentNumber", comment.status, comment.content AS feedback, comment.created_at AS "createdAt",
+        attempt.result_artifacts AS artifacts,
         (attempt.status='failed' AND attempt.retry_count<3) AS "canRetry"
         FROM writing_practice.comment comment JOIN writing_practice.check_attempt attempt ON attempt.id=comment.attempt_id
         WHERE comment.session_id = $1 ORDER BY comment.created_at`, [session.rows[0].id]),
@@ -147,7 +160,9 @@ export function createWritingPracticeService({ pool }) {
           AND activity.grading_pool=$4
         ORDER BY attempt.created_at FOR UPDATE OF attempt SKIP LOCKED
         LIMIT $1::int)
-      UPDATE writing_practice.check_attempt a SET status='leased',worker_id=$2,lease_token=gen_random_uuid(),lease_expires_at=now()+($3::text||' seconds')::interval,retry_count=retry_count+1,version=version+1,updated_at=now() FROM picked
+      UPDATE writing_practice.check_attempt a SET status='leased',worker_id=$2,lease_token=gen_random_uuid(),
+        lease_expires_at=now()+((CASE WHEN a.section_key='draft' THEN ${draftLeaseSeconds} ELSE $3 END)::text||' seconds')::interval,
+        retry_count=retry_count+1,version=version+1,updated_at=now() FROM picked
       WHERE a.id=picked.id RETURNING a.id,a.public_id,a.section_key,a.comment_number,a.snapshot,a.lease_token,a.lease_expires_at,a.session_id`, [maxJobs, workerId, leaseSeconds, workerPool]);
       const jobs=[]; for (const row of result.rows) { const context=await client.query(`SELECT activity.task_prompt,activity.prompt_registry_key,
         COALESCE(definition.prompt_record_ref,activity.prompt_record_ref) prompt_record_ref,
@@ -166,14 +181,21 @@ export function createWritingPracticeService({ pool }) {
       return jobs;
     });
   }
-  async function completeJob({ jobRef, leaseToken, resultStatus, feedback, artifacts = {} }) { return withTransaction(pool, async client => {
+  async function completeJob({ jobRef, leaseToken, resultStatus, feedback, artifacts = {} }) {
+    const rawLmsUrl = artifacts?.lmsUrl;
+    const lmsUrl = rawLmsUrl ? normalizeLmsUrl(rawLmsUrl) : null;
+    if (rawLmsUrl && !lmsUrl) throw new ApiError(400, 'INVALID_LMS_URL', 'Link kết quả LMS không hợp lệ.');
+    const storedArtifacts = lmsUrl ? { ...artifacts, lmsUrl } : artifacts;
+    const storedFeedback = lmsUrl || feedback;
+    return withTransaction(pool, async client => {
     const attempt=await client.query(`UPDATE writing_practice.check_attempt SET status='completed',result_status=$3,feedback=$4,
       result_artifacts=$5::jsonb,completed_at=now(),lease_token=NULL,lease_expires_at=NULL,
       version=version+1,updated_at=now()
       WHERE public_id=$1 AND lease_token=$2 AND status='leased' AND lease_expires_at>now()
-      RETURNING id,session_id,section_key,version`,[jobRef,leaseToken,resultStatus,feedback,JSON.stringify(artifacts)]);
+      RETURNING id,session_id,section_key,version`,[jobRef,leaseToken,resultStatus,storedFeedback,JSON.stringify(storedArtifacts)]);
     if(!attempt.rowCount) throw new ApiError(409,'LEASE_NOT_OWNED','Công việc không còn thuộc tác vụ này.'); const row=attempt.rows[0];
-    await client.query(`UPDATE writing_practice.comment SET status='completed',content=$2 WHERE attempt_id=$1`,[row.id,feedback]);
+    if(row.section_key==='draft' && (resultStatus!=='passed' || !lmsUrl)) throw new ApiError(400,'DRAFT_LMS_RESULT_REQUIRED','Draft chỉ hoàn tất khi có link LMS hợp lệ.');
+    await client.query(`UPDATE writing_practice.comment SET status='completed',content=$2 WHERE attempt_id=$1`,[row.id,storedFeedback]);
     if(resultStatus==='passed') await client.query(`UPDATE writing_practice.session_section SET locked=true,fail_streak=0,updated_at=now() WHERE session_id=$1 AND section_key=$2`,[row.session_id,row.section_key]);
     else await client.query(`UPDATE writing_practice.session_section SET fail_streak=fail_streak+1,updated_at=now() WHERE session_id=$1 AND section_key=$2`,[row.session_id,row.section_key]);
     const state=await client.query(`SELECT fail_streak FROM writing_practice.session_section WHERE session_id=$1 AND section_key=$2`,[row.session_id,row.section_key]); return {attemptRef:jobRef,status:'completed',resultStatus,version:row.version,supportWarning:resultStatus==='needs_revision' && state.rows[0].fail_streak%3===0};

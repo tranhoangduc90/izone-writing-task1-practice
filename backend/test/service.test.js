@@ -68,14 +68,57 @@ test('Draft Check cannot grade text newer than the latest saved database version
   assert.equal(queries.some(sql => sql.includes('INSERT INTO writing_practice.check_attempt')), false);
 });
 
-test('claim uses row locking without imposing a global four-job cap', async () => {
+test('Draft jobs receive a longer lease while claim keeps row locking without a global four-job cap', async () => {
   const queries = [];
   const pool = transactionalPool([{ rowCount: 0, rows: [] }], queries);
   const jobs = await createWritingPracticeService({ pool }).claimJobs({ workerId: 'test', maxJobs: 40, leaseSeconds: 420 });
 
   assert.deepEqual(jobs, []);
+  assert.equal(queries.some(sql => sql.includes("section_key='draft' THEN 1200")), true);
   assert.equal(queries.some(sql => sql.includes("GREATEST(0,4-count(*))")), false);
   assert.equal(queries.some(sql => sql.includes('writing_practice:grading_capacity')), false);
   assert.equal(queries.some(sql => sql.includes('FOR UPDATE OF attempt SKIP LOCKED')), true);
   assert.equal(queries.some(sql => sql.includes('LIMIT $1::int')), true);
+});
+
+test('Draft completion requires an official LMS link and then locks the section', async () => {
+  const queries = [];
+  const pool = transactionalPool([
+    { rowCount: 1, rows: [{ id: 'attempt-id', session_id: 'session-id', section_key: 'draft', version: 3 }] },
+    { rowCount: 1, rows: [] },
+    { rowCount: 1, rows: [] },
+    { rowCount: 1, rows: [{ fail_streak: 0 }] }
+  ], queries);
+  const service = createWritingPracticeService({ pool });
+  const result = await service.completeJob({
+    jobRef: 'job-ref',
+    leaseToken: 'lease-ref',
+    resultStatus: 'passed',
+    feedback: 'Đã có kết quả.',
+    artifacts: { lmsUrl: 'https://practice.izone.edu.vn/shared/writing-essays/example/edit?page=0' }
+  });
+  assert.equal(result.resultStatus, 'passed');
+  assert.equal(queries.some(sql => sql.includes('SET locked=true')), true);
+});
+
+test('Draft completion rejects a forged LMS host before writing to PostgreSQL', async () => {
+  let connected = false;
+  const pool = { connect: async () => { connected = true; throw new Error('Không được kết nối'); } };
+  const service = createWritingPracticeService({ pool });
+  await assert.rejects(
+    service.completeJob({ jobRef: 'job-ref', leaseToken: 'lease-ref', resultStatus: 'passed', feedback: 'X', artifacts: { lmsUrl: 'https://practice.izone.edu.vn.evil.example/result' } }),
+    error => error.code === 'INVALID_LMS_URL'
+  );
+  assert.equal(connected, false);
+});
+
+test('Draft completion rejects an unrelated path on the official LMS host', async () => {
+  let connected = false;
+  const pool = { connect: async () => { connected = true; throw new Error('Không được kết nối'); } };
+  const service = createWritingPracticeService({ pool });
+  await assert.rejects(
+    service.completeJob({ jobRef: 'job-ref', leaseToken: 'lease-ref', resultStatus: 'passed', feedback: 'X', artifacts: { lmsUrl: 'https://practice.izone.edu.vn/unrelated-page' } }),
+    error => error.code === 'INVALID_LMS_URL'
+  );
+  assert.equal(connected, false);
 });

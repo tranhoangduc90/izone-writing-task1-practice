@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { canUnlockDraft2, draftPrerequisitesPassed, hasMeaningfulText, normalizeProgress, pollingDelay, safeHttpUrl, terminalResult, wordCount } from "../js/core.js";
+import { canUnlockDraft2, draftPrerequisitesPassed, hasMeaningfulText, normalizeProgress, pollingDelay, safeHttpUrl, safeLmsUrl, terminalResult, wordCount } from "../js/core.js";
 
 test("normalizes public session data into three section states", () => {
   const result = normalizeProgress({ draftVersion: 4, draft: { overview: "A", body1: "B", body2: "C", draft1: "D1", draft2: "D2", draft2Unlocked: true }, sectionStates: { overview: { status: "passed" }, outline: { status: "revision", attemptsWithoutPass: 3 } } });
@@ -48,6 +48,14 @@ test("public manifest URLs only allow HTTP and HTTPS", () => {
   assert.equal(safeHttpUrl("javascript:alert(1)"), null);
   assert.equal(safeHttpUrl("data:text/html,unsafe"), null);
   assert.equal(safeHttpUrl("assets/chart.png", "https://app.example/task/"), "https://app.example/task/assets/chart.png");
+});
+
+test("Draft result only accepts the official HTTPS LMS host", () => {
+  assert.equal(safeLmsUrl("https://practice.izone.edu.vn/shared/writing-essays/example/edit?page=0"), "https://practice.izone.edu.vn/shared/writing-essays/example/edit?page=0");
+  assert.equal(safeLmsUrl("http://practice.izone.edu.vn/shared/writing-essays/example/edit?page=0"), null);
+  assert.equal(safeLmsUrl("https://practice.izone.edu.vn.evil.example/result"), null);
+  assert.equal(safeLmsUrl("https://practice.izone.edu.vn/unrelated-page"), null);
+  assert.equal(safeLmsUrl("javascript:alert(1)"), null);
 });
 
 test("completed attempt requires an explicit terminal resultStatus", () => {

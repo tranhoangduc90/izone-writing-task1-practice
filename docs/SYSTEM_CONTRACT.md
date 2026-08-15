@@ -4,7 +4,7 @@
 
 - V1 có `overview`, `outline` và `draft`.
 - App công khai cho phép chọn lớp và họ tên; không có đăng nhập học viên.
-- Mỗi section có trạng thái, chuỗi chưa đạt và lịch sử Comment riêng.
+- Overview và Outline có trạng thái, chuỗi chưa đạt và lịch sử Comment riêng. Draft chỉ có một ô kết quả LMS.
 - Section đã đạt bị khóa; section còn lại tiếp tục hoạt động.
 
 ## Dữ liệu công khai
@@ -55,13 +55,13 @@ Yêu cầu Google ID token của giảng viên có quyền; mở vòng mới và
 Base path: `/api/v1/internal/grading-jobs`. Mọi request dùng Bearer token riêng và không đi qua trình duyệt.
 
 - `POST /claim`: `{ "workerId": "...", "maxJobs": 1, "leaseSeconds": 420 }`.
-- `POST /:jobRef/complete`: lease token, `passed|needs_revision`, feedback văn bản.
+- `POST /:jobRef/complete`: lease token, `passed|needs_revision`, feedback văn bản và `artifacts` tùy chọn. Với Draft, chỉ chấp nhận `passed` cùng `artifacts.lmsUrl` thuộc đúng trang kết quả Writing trên LMS IZONE.
 - `POST /:jobRef/fail`: lease token, mã lỗi và cờ có thể thử lại.
 - `POST /recover`: trả công việc hết lease về hàng đợi hoặc đóng sau lần thử thứ ba.
 
-`claim` không chứa tên học viên. Nó trả task, section, snapshot, lịch sử Comment cùng `promptRegistryKey`, `promptRecordId` và `promptVersion` đã ghim cho phiên đó.
+`claim` không chứa tên học viên. Nó trả task, section, snapshot và lịch sử Comment. Overview/Outline còn nhận `promptRegistryKey`, `promptRecordId` và `promptVersion` đã ghim cho phiên đó.
 
-Prompt Registry dùng `prompt_overview`, `prompt_outline_body` và `prompt_draft2`. Prompt Draft không được đưa vào GitHub Pages hoặc response công khai.
+Prompt Registry của app dùng `prompt_overview` và `prompt_outline_body`. Draft được chuyển bằng webhook có xác thực sang workflow **06b. Draft 2 - Task 1**, dùng luồng chấm từng câu hiện có rồi trả một link LMS; prompt Draft không được đưa vào GitHub Pages hoặc response công khai.
 
 ## Quy tắc đếm và khóa
 
@@ -83,12 +83,13 @@ Prompt Registry dùng `prompt_overview`, `prompt_outline_body` và `prompt_draft
 - Draft chỉ mở sau khi cả Overview và Outline có trạng thái `passed`.
 - Ban đầu chỉ hiện Draft 1. Nút chuyển chỉ mở khi Draft 1 có nội dung có nghĩa.
 - Khi bấm chuyển, trình duyệt copy nguyên Draft 1 xuống Draft 2, lưu `draft2Unlocked=true` và mới hiển thị Draft 2.
-- Check Draft chấm Draft 2 trong phạm vi Overview + Body 1, nhưng giữ cả Draft 1 trong snapshot để đối chiếu quá trình sửa.
-- Section `draft` có trạng thái, chuỗi chưa đạt và timeline Comment riêng.
+- Check Draft gửi đề, Overview, Body 1, Body 2, Draft 1 và Draft 2 sang luồng chấm từng câu. Payload không chứa tên, email, ERP ID hay Google ID.
+- Trong lúc chấm, ô kết quả hiện trạng thái đang tạo link. Khi workflow trả link LMS hợp lệ, giao diện chỉ hiện một nút mở kết quả và khóa toàn bộ section Draft.
+- Lỗi kỹ thuật được thử lại trên cùng lượt; không tạo nhiều ô kết quả và không tính là một lần chưa đạt.
 
 ## Giới hạn tải
 
-- Tối đa bốn job ở trạng thái leased trên toàn hệ thống.
+- API không áp trần số job ở trạng thái leased. `maxJobs` chỉ giới hạn kích thước một lần lấy hàng đợi; n8n là nơi duy nhất điều tiết số lượt chạy đồng thời. Draft có lease tối đa 1.200 giây do luồng chấm từng câu dài hơn.
 - Polling 2 giây trong 20 giây đầu, 5 giây tới phút thứ hai, sau đó 10 giây.
 - Dừng polling khi tab ẩn hoặc khi job kết thúc.
 - n8n không giữ execution trong lúc học viên polling; API/PostgreSQL trả trạng thái trực tiếp.

@@ -1,6 +1,6 @@
 // Dữ liệu nhận vào: URL API staging, token nội bộ và roster 40 học viên giả.
 // Việc chính: kiểm tra ô trống, xung đột hai tab, chống Check trùng, cảnh báo lần 3/6/9,
-// lỗi kỹ thuật, khóa khi đạt, ETag và giới hạn bốn lượt chấm đồng thời.
+// lỗi kỹ thuật, khóa khi đạt, ETag và xác nhận API không còn trần bốn lượt chấm.
 // Kết quả: chỉ in số liệu tổng hợp; không in tên, bài làm, token hoặc mã nội bộ.
 // Khi lỗi: tiến trình dừng với tên phép kiểm tra bị lỗi để đối chiếu log API/PostgreSQL.
 const baseUrl = String(process.env.API_BASE_URL || '').replace(/\/$/, '');
@@ -173,17 +173,15 @@ const capacitySessions = await Promise.all([3, 4, 5, 6, 7, 8].map(openSession));
 const capacityAttempts = await Promise.all(capacitySessions.map((session, index) =>
   submitOverview(session.sessionRef, `Nội dung thử giới hạn đồng thời ${index + 1}.`)
 ));
-ensure(capacityAttempts.every(item => item.status === 202), 'Không tạo đủ sáu job thử giới hạn đồng thời.');
+ensure(capacityAttempts.every(item => item.status === 202), 'Không tạo đủ sáu job thử hàng đợi đồng thời.');
 const firstBatch = await claim(4);
 ensure(firstBatch.value.jobs?.length === 4, `Lần lấy đầu phải có 4 job, nhận ${firstBatch.value.jobs?.length ?? 0}.`);
-const blockedBatch = await claim(4);
-ensure(blockedBatch.value.jobs?.length === 0, 'Hệ thống đã cho thuê quá bốn job đồng thời.');
+const secondBatch = await claim(4);
+ensure(secondBatch.value.jobs?.length === 2, `API vẫn đang chặn hai job còn lại ở giới hạn bốn, nhận ${secondBatch.value.jobs?.length ?? 0}.`);
 for (const job of firstBatch.value.jobs) {
   const failed = await fail(job, false);
   ensure(failed.status === 200, 'Không đóng được job của phép thử giới hạn.');
 }
-const secondBatch = await claim(4);
-ensure(secondBatch.value.jobs?.length === 2, `Lần lấy sau phải có 2 job, nhận ${secondBatch.value.jobs?.length ?? 0}.`);
 for (const job of secondBatch.value.jobs) {
   const failed = await fail(job, false);
   ensure(failed.status === 200, 'Không đóng được job còn lại của phép thử giới hạn.');

@@ -140,15 +140,13 @@ export function createWritingPracticeService({ pool }) {
   }
   async function claimJobs({ workerId, maxJobs, leaseSeconds, workerPool = 'task1' }) {
     return withTransaction(pool, async client => {
-      await client.query(`SELECT pg_advisory_xact_lock(hashtext('writing_practice:grading_capacity'))`);
-      const result = await client.query(`WITH capacity AS (SELECT GREATEST(0,4-count(*))::int available FROM writing_practice.check_attempt WHERE status='leased' AND lease_expires_at>now()),
-      picked AS (SELECT attempt.id FROM writing_practice.check_attempt attempt
+      const result = await client.query(`WITH picked AS (SELECT attempt.id FROM writing_practice.check_attempt attempt
         JOIN writing_practice.activity_session session ON session.id=attempt.session_id
-        JOIN writing_practice.activity activity ON activity.id=session.activity_id,capacity
-        WHERE capacity.available>0 AND attempt.status='queued' AND attempt.retry_count<3
+        JOIN writing_practice.activity activity ON activity.id=session.activity_id
+        WHERE attempt.status='queued' AND attempt.retry_count<3
           AND activity.grading_pool=$4
         ORDER BY attempt.created_at FOR UPDATE OF attempt SKIP LOCKED
-        LIMIT LEAST($1::int,(SELECT available FROM capacity)))
+        LIMIT $1::int)
       UPDATE writing_practice.check_attempt a SET status='leased',worker_id=$2,lease_token=gen_random_uuid(),lease_expires_at=now()+($3::text||' seconds')::interval,retry_count=retry_count+1,version=version+1,updated_at=now() FROM picked
       WHERE a.id=picked.id RETURNING a.id,a.public_id,a.section_key,a.comment_number,a.snapshot,a.lease_token,a.lease_expires_at,a.session_id`, [maxJobs, workerId, leaseSeconds, workerPool]);
       const jobs=[]; for (const row of result.rows) { const context=await client.query(`SELECT activity.task_prompt,activity.prompt_registry_key,

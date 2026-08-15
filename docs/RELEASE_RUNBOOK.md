@@ -41,7 +41,7 @@ Production chỉ được bắt đầu khi ổ hệ thống còn tối thiểu 1
 
 - Một đề, một lớp, giữ link Google Docs cũ.
 - Theo dõi: thời gian hàng đợi, lỗi kỹ thuật, số job leased, CPU/RAM, disk, xung đột bản lưu và phục hồi IndexedDB.
-- Không tăng concurrency quá bốn trong pilot.
+- API không giữ trần số lượt chấm đồng thời; n8n là nơi duy nhất kiểm soát concurrency để tránh hai lớp giới hạn chồng lên nhau.
 - Kết thúc pilot mới cập nhật `Đường dẫn luyện tập` trong Lark.
 
 ## Rollback

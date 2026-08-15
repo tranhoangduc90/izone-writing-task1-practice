@@ -19,7 +19,8 @@ const check=z.object({section,requestId:uuid,snapshot:draft}).superRefine((value
  if(value.section==='outline'&&!meaningfulText(value.snapshot.body1)&&!meaningfulText(value.snapshot.body2))context.addIssue({code:'custom',path:['snapshot'],message:'Outline trống.'});
  if(value.section==='draft'&&(!meaningfulText(value.snapshot.draft1||'')||!meaningfulText(value.snapshot.draft2||'')))context.addIssue({code:'custom',path:['snapshot'],message:'Draft 1 và Draft 2 không được để trống.'});
 });
-const claim=z.object({workerId:z.string().trim().min(1).max(100),maxJobs:z.number().int().min(1).max(4).default(1),leaseSeconds:z.literal(420),workerPool:z.string().regex(/^[a-z0-9][a-z0-9_-]{1,49}$/).default('task1')});
+// maxJobs chỉ giới hạn kích thước một response để bảo vệ API; số job đang chấm đồng thời do n8n kiểm soát.
+const claim=z.object({workerId:z.string().trim().min(1).max(100),maxJobs:z.number().int().min(1).max(100).default(1),leaseSeconds:z.literal(420),workerPool:z.string().regex(/^[a-z0-9][a-z0-9_-]{1,49}$/).default('task1')});
 const gradingResult=z.enum(['passed','needs_revision']);
 const complete=z.object({leaseToken:uuid,resultStatus:gradingResult.optional(),status:gradingResult.optional(),feedback:z.string().trim().min(1).max(20_000),artifacts:z.record(z.string(),z.unknown()).optional()})
  .superRefine((value,context)=>{if(!value.resultStatus&&!value.status)context.addIssue({code:'custom',path:['status'],message:'Thiếu kết quả chấm.'});})

@@ -67,3 +67,15 @@ test('Draft Check cannot grade text newer than the latest saved database version
   );
   assert.equal(queries.some(sql => sql.includes('INSERT INTO writing_practice.check_attempt')), false);
 });
+
+test('claim uses row locking without imposing a global four-job cap', async () => {
+  const queries = [];
+  const pool = transactionalPool([{ rowCount: 0, rows: [] }], queries);
+  const jobs = await createWritingPracticeService({ pool }).claimJobs({ workerId: 'test', maxJobs: 40, leaseSeconds: 420 });
+
+  assert.deepEqual(jobs, []);
+  assert.equal(queries.some(sql => sql.includes("GREATEST(0,4-count(*))")), false);
+  assert.equal(queries.some(sql => sql.includes('writing_practice:grading_capacity')), false);
+  assert.equal(queries.some(sql => sql.includes('FOR UPDATE OF attempt SKIP LOCKED')), true);
+  assert.equal(queries.some(sql => sql.includes('LIMIT $1::int')), true);
+});

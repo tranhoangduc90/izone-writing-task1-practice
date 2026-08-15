@@ -40,6 +40,16 @@ test('roster iterates PostgreSQL result rows', async () => {
   assert.equal(result.classes[0].students.length, 1);
 });
 
+test('Task 1 session route cannot open a non-Task-1 grading pool', async () => {
+  const queries = [];
+  const pool = transactionalPool([{ rowCount: 0, rows: [] }], queries);
+  await assert.rejects(
+    createWritingPracticeService({ pool }).openSession({ activitySlug: 'lesson-activity', classRef: 'class-ref', studentRef: 'student-ref' }),
+    error => error.code === 'SESSION_NOT_ALLOWED'
+  );
+  assert.equal(queries.some(sql => sql.includes("a.grading_pool='task1'")), true);
+});
+
 test('Draft Check is rejected until Overview and Outline have both passed', async () => {
   const queries = [];
   const pool = transactionalPool([

@@ -73,7 +73,7 @@ export function createWritingPracticeService({ pool, provisionalService = null }
       const roster = identity ? { rowCount: 1, rows: [{ activity_id: identity.activityId, class_id: identity.classId, student_ref: identity.studentRef }] } : await client.query(`SELECT a.id AS activity_id, c.id AS class_id, r.student_public_id AS student_ref FROM writing_practice.activity a
         JOIN writing_practice.activity_class_scope c ON c.activity_id = a.id AND c.public_id = $2 AND c.status='active' AND c.end_date >= CURRENT_DATE
         JOIN writing_practice.activity_roster r ON r.activity_class_id = c.id AND r.student_public_id = $3 AND r.active
-        WHERE a.slug = $1 AND a.status = 'active' FOR KEY SHARE`, [activitySlug, classRef, studentRef]);
+        WHERE a.slug = $1 AND a.status = 'active' AND a.grading_pool='task1' FOR KEY SHARE`, [activitySlug, classRef, studentRef]);
       if (!roster.rowCount) throw new ApiError(404, 'SESSION_NOT_ALLOWED', 'Học viên không thuộc lớp đang hoạt động.');
       const row = roster.rows[0];
       const canonicalStudentRef = row.student_ref || studentRef;

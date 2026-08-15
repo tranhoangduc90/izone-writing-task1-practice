@@ -35,6 +35,17 @@ export function hasMeaningfulText(value) { return String(value || "").replace(/[
 export function safeHttpUrl(value, base = globalThis.location?.href || "https://example.invalid/") {
   try { const url = new URL(String(value || ""), base); return ["http:", "https:"].includes(url.protocol) ? url.href : null; } catch { return null; }
 }
+export function safeLmsUrl(value) {
+  if (typeof value !== "string" || value.length > 2048) return null;
+  const safe = safeHttpUrl(value);
+  if (!safe) return null;
+  const url = new URL(safe);
+  return url.protocol === "https:"
+    && url.hostname.toLowerCase() === "practice.izone.edu.vn"
+    && url.pathname.startsWith("/shared/writing-essays/")
+    ? url.href
+    : null;
+}
 export function draftPrerequisitesPassed(sections = {}) { return sections.overview?.status === "passed" && sections.outline?.status === "passed"; }
 export function canUnlockDraft2(texts = {}) { return hasMeaningfulText(texts.draft1); }
 export function pollingDelay(elapsedSinceSubmitMs) {

@@ -17,7 +17,7 @@ Repo cũng có bản nháp **Writing trên lớp 67 – Lesson 13**, gộp hai h
 2. Trình duyệt lưu dự phòng cục bộ sau khi ngừng gõ; API chỉ nhận bản lưu định kỳ hoặc chủ động.
 3. Draft 2 chỉ mở sau khi Overview/Outline đã đạt và Draft 1 có nội dung; hệ thống copy Draft 1 xuống để học viên tự sửa.
 4. Khi Check, API tạo đúng một Comment và một công việc chấm trong cùng transaction.
-5. Workflow n8n lấy công việc, dùng Prompt Registry + Gemini Hub và ghi lại kết quả.
+5. Overview/Outline dùng Prompt Registry + Gemini Hub. Draft dùng workflow chấm từng câu hiện có; khi LMS tạo xong trang kết quả, app hiện một link duy nhất và khóa section Draft.
 6. Giao diện kiểm tra trạng thái theo nhịp 2/5/10 giây và dừng khi có kết quả.
 
 ## Lesson 13 và dashboard giảng viên

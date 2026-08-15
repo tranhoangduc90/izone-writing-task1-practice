@@ -15,7 +15,7 @@
 - API Writing chạy container riêng, giới hạn `0,5 CPU` và `256 MB RAM`.
 - Workflow dùng credential Header Auth riêng; token không nằm trong workflow, Git hoặc log.
 - Workflow không lưu execution thành công/lỗi để tránh giữ bài làm và prompt trong n8n.
-- Tối đa bốn lease chấm đồng thời ở tầng PostgreSQL; mỗi nhịp workflow chỉ lấy một việc.
+- API không áp trần số lease; `maxJobs` chỉ giới hạn kích thước một lần lấy hàng đợi. n8n là nơi duy nhất điều tiết số lượt chạy đồng thời; khóa hàng `SKIP LOCKED`, idempotency, lease và retry vẫn ngăn lấy trùng hoặc làm mất lượt.
 - Worker `vps_2` được đặt trọng số `0` vì DNS không còn phân giải. Ba worker còn lại đã chạy vòng hai lượt liên tiếp, tất cả HTTP 200. Giá trị trước thay đổi đã được lưu trong thư mục backup cục bộ.
 
 ## Kiểm thử production

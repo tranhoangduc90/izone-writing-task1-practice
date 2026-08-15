@@ -7,7 +7,14 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sessionRef = "22222222-2222-4222-8222-222222222222";
 const attemptRef = "33333333-3333-4333-8333-333333333333";
 let draftVersion = 0;
-let draft = { overview: "", body1: "", body2: "" };
+let draft = {
+  overview: "Overall, Twitter was concentrated among younger users, while Facebook and YouTube had more balanced age profiles.",
+  body1: "Compare Facebook and YouTube across the five age groups.",
+  body2: "Describe Twitter's peak among users aged 18–34.",
+  draft1: "Overall, Twitter was <phổ biến nhất> with younger users, while the other apps were balanced.",
+  draft2: "Overall, Twitter was most popular among younger users, while Facebook and YouTube had more balanced age profiles.",
+  draft2Unlocked: true
+};
 let attemptVersion = 1;
 
 function session() {
@@ -18,13 +25,15 @@ function session() {
     updatedAt: new Date().toISOString(),
     sections: {
       overview: { status: "passed", attemptsWithoutPass: 0 },
-      outline: { status: "revision", attemptsWithoutPass: 2 }
+      outline: { status: "passed", attemptsWithoutPass: 0 },
+      draft: { status: "passed", attemptsWithoutPass: 0 }
     },
     comments: [
       { commentRef: "55555555-5555-4555-8555-555555555551", section: "overview", commentNumber: 1, status: "completed", feedback: "## Điểm làm tốt\n\n- Bạn đã nêu được **đặc điểm nổi bật**.\n- Câu Overview có so sánh.", createdAt: "2026-08-13T08:00:00.000Z" },
       { commentRef: "55555555-5555-4555-8555-555555555552", section: "overview", commentNumber: 2, status: "completed", feedback: "## Kết quả\n\n**Đã đạt.** Bạn có thể chuyển sang Body Outline.", createdAt: "2026-08-13T08:05:00.000Z" },
       { commentRef: "55555555-5555-4555-8555-555555555553", section: "outline", commentNumber: 1, status: "completed", feedback: "## Cần chỉnh\n\n1. Gom Facebook và YouTube vào cùng một nhóm.\n2. Đưa Twitter sang đoạn còn lại.", createdAt: "2026-08-13T08:10:00.000Z" },
-      { commentRef: "55555555-5555-4555-8555-555555555554", section: "outline", commentNumber: 2, status: "completed", feedback: "### Body 1\n\nCách nhóm đã rõ hơn.\n\n### Body 2\n\nHãy thêm sự đối chiếu với nhóm `18–34`.", createdAt: "2026-08-13T08:15:00.000Z" }
+      { commentRef: "55555555-5555-4555-8555-555555555554", section: "outline", commentNumber: 2, status: "completed", feedback: "### Body 1\n\nCách nhóm đã rõ hơn.\n\n### Body 2\n\nHãy thêm sự đối chiếu với nhóm `18–34`.", createdAt: "2026-08-13T08:15:00.000Z" },
+      { commentRef: "55555555-5555-4555-8555-555555555556", section: "draft", commentNumber: 1, status: "completed", feedback: "https://practice.izone.edu.vn/shared/writing-essays/demo-band6/edit?page=0", artifacts: { lmsUrl: "https://practice.izone.edu.vn/shared/writing-essays/demo-band6/edit?page=0" }, createdAt: "2026-08-15T08:30:00.000Z" }
     ],
     attempts: []
   };
@@ -50,7 +59,7 @@ const server = http.createServer(async (request, response) => {
   if (url.pathname === "/api/v1/sessions" && request.method === "POST") return json(response, 201, { ok: true, session: session() });
   if (url.pathname === `/api/v1/sessions/${sessionRef}` && request.method === "GET") return json(response, 200, { ok: true, session: session() });
   if (url.pathname === `/api/v1/sessions/${sessionRef}/draft` && request.method === "PUT") {
-    const value = await body(request); draft = { overview: value.overview, body1: value.body1, body2: value.body2 }; draftVersion += 1;
+    const value = await body(request); draft = { overview: value.overview, body1: value.body1, body2: value.body2, draft1: value.draft1, draft2: value.draft2, draft2Unlocked: value.draft2Unlocked }; draftVersion += 1;
     return json(response, 200, { ok: true, session: session() });
   }
   if (url.pathname === `/api/v1/sessions/${sessionRef}/checks` && request.method === "POST") {

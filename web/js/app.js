@@ -1,5 +1,5 @@
 import { createApi } from "./api.js";
-import { SECTION_KEYS, canUnlockDraft2, createRequestId, draftPrerequisitesPassed, hasMeaningfulText, isConflict, normalizeProgress, pollingDelay, safeHttpUrl, terminalResult, wordCount } from "./core.js";
+import { SECTION_KEYS, canUnlockDraft2, createRequestId, draftPrerequisitesPassed, hasMeaningfulText, isConflict, normalizeProgress, pollingDelay, safeHttpUrl, safeLmsUrl, terminalResult, wordCount } from "./core.js";
 import { getDraft, putDraft } from "./idb.js";
 import { appendInlineMarkdown, appendMarkdown } from "./markdown.js";
 
@@ -187,22 +187,49 @@ function renderSections() {
   for (const section of SECTION_KEYS) {
     const info = SECTION_INFO[section]; const workspace = template.content.firstElementChild.cloneNode(true); const card = workspace.querySelector(".section-card"); const status = card.querySelector(".section-status");
     workspace.dataset.section = section; workspace.dataset.state = app.state.sections[section].status; card.dataset.section = section; card.querySelector(".section-kicker").textContent = info.kicker; card.querySelector("h2").textContent = info.title;
-    const commentsTitle = workspace.querySelector(".comments-title"); commentsTitle.id = `comments-title-${section}`; commentsTitle.textContent = section === "draft" ? "Dòng thời gian Draft 1" : `Dòng thời gian ${info.title}`; workspace.querySelector(".comments-panel").setAttribute("aria-labelledby", commentsTitle.id);
+    const commentsTitle = workspace.querySelector(".comments-title"); commentsTitle.id = `comments-title-${section}`; commentsTitle.textContent = section === "draft" ? "Kết quả chấm từng câu" : `Dòng thời gian ${info.title}`; workspace.querySelector(".comments-panel").setAttribute("aria-labelledby", commentsTitle.id);
     const prerequisitesPassed = section !== "draft" || draftPrerequisitesPassed(app.state.sections); const locked = ["passed", "queued"].includes(app.state.sections[section].status) || !prerequisitesPassed;
     status.textContent = section === "draft" && !prerequisitesPassed ? "Chờ phần trước" : statusLabel(app.state.sections[section].status); status.dataset.state = app.state.sections[section].status;
     if (section === "draft") renderDraftFields(card, locked, prerequisitesPassed);
     else for (const field of info.fields) addTextarea(card, section, field, locked);
-    const button = card.querySelector(".submit-section"); button.hidden = section === "draft" && !app.state.draft2Unlocked; button.disabled = locked; button.textContent = app.state.sections[section].status === "queued" ? "Đang chấm" : locked && app.state.sections[section].status === "passed" ? "Phần này đã đạt" : section === "draft" ? "Check Draft 2" : "Gửi để nhận xét"; button.addEventListener("click", () => submitSection(section, card));
+    const button = card.querySelector(".submit-section"); button.hidden = section === "draft" && !app.state.draft2Unlocked; button.disabled = locked; button.textContent = app.state.sections[section].status === "queued" ? (section === "draft" ? "Đang tạo link LMS" : "Đang chấm") : locked && app.state.sections[section].status === "passed" ? (section === "draft" ? "Đã có kết quả LMS" : "Phần này đã đạt") : section === "draft" ? "Gửi chấm từng câu" : "Gửi để nhận xét"; button.addEventListener("click", () => submitSection(section, card));
     refreshSection(card, section); root.append(workspace);
   }
 }
 
 function refreshSection(card, section) { card.querySelector(".word-count").textContent = `${wordCount(sectionText(section))} từ`; }
+
+function renderDraftResult(workspace, sectionComments) {
+  const panel = workspace.querySelector(".comments-panel"); const list = workspace.querySelector(".comment-list"); const empty = workspace.querySelector(".empty-comments");
+  panel.classList.add("draft-result-panel"); list.classList.add("draft-result-list"); list.replaceChildren();
+  const latest = sectionComments.at(-1);
+  if (!latest) { empty.hidden = false; empty.textContent = "Sau khi gửi Draft 2, link kết quả chấm từng câu trên LMS sẽ xuất hiện tại đây."; return; }
+  empty.hidden = true;
+  const item = document.createElement("li"); item.className = "draft-result-box"; item.dataset.status = latest.status || "completed";
+  const meta = document.createElement("div"); meta.className = "comment-meta"; meta.textContent = latest.createdAt ? `Cập nhật ${new Date(latest.createdAt).toLocaleString("vi-VN")}` : "Kết quả Draft 2";
+  const lmsUrl = safeLmsUrl(latest.artifacts?.lmsUrl || latest.feedback);
+  if (lmsUrl) {
+    const link = document.createElement("a"); const label = document.createElement("strong"); const address = document.createElement("span");
+    link.className = "lms-result-link"; link.href = lmsUrl; link.target = "_blank"; link.rel = "noopener noreferrer";
+    label.textContent = "Mở kết quả chấm trên LMS"; address.textContent = lmsUrl; link.append(label, address); item.append(meta, link);
+  } else {
+    const message = document.createElement("p"); message.className = "draft-result-message";
+    message.textContent = latest.status === "queued" ? "Hệ thống đang chấm từng câu và tạo link LMS…" : latest.status === "technical_error" ? (latest.feedback || "Tạm thời chưa tạo được link LMS.") : "Kết quả đã cập nhật nhưng link LMS chưa hợp lệ. Vui lòng báo giảng viên.";
+    item.append(meta, message);
+    if (latest.status === "technical_error" && latest.attemptRef && latest.canRetry !== false) {
+      const retry = document.createElement("button"); retry.type = "button"; retry.className = "button secondary compact"; retry.textContent = "Thử lại";
+      retry.addEventListener("click", () => retryComment(latest, retry)); item.append(retry);
+    }
+  }
+  list.append(item);
+}
+
 function renderComments() {
   const comments = app.state.comments || [];
   for (const section of SECTION_KEYS) {
     const workspace = document.querySelector(`.section-workspace[data-section="${section}"]`); if (!workspace) continue;
     const list = workspace.querySelector(".comment-list"); const sectionComments = comments.filter((item) => item.section === section); list.replaceChildren();
+    if (section === "draft") { renderDraftResult(workspace, sectionComments); continue; }
     for (const item of sectionComments.slice().reverse()) {
       const li = document.createElement("li"); const meta = document.createElement("div"); const body = document.createElement("div"); meta.className = "comment-meta"; body.className = "comment-body markdown-body"; li.dataset.status = item.status || "completed";
       const number = item.commentNumber ? `Comment lần ${item.commentNumber}` : "Comment"; const pending = item.status === "queued" ? " — Đang chấm" : "";
@@ -257,7 +284,7 @@ async function submitSection(section, card) {
     if (terminalResult(attempt)) { applyTerminalAttempt(attempt, section); renderAll(); return; }
     app.state.sections[section].status = "queued"; registerAttempt(attempt); resetAutosave(); renderAll();
     const number = attempt.attemptNumber || attempt.commentNumber || attempt.sequence || app.state.sections[section].attemptsWithoutPass + 1;
-    upsertComment({ commentRef: attempt.commentRef, attemptRef: attempt.attemptRef, section, commentNumber: number, status: "queued", feedback: "Đang chấm", createdAt: new Date().toISOString() });
+    upsertComment({ commentRef: attempt.commentRef, attemptRef: attempt.attemptRef, section, commentNumber: number, status: "queued", feedback: section === "draft" ? "Hệ thống đang chấm từng câu và tạo link LMS…" : "Đang chấm", createdAt: new Date().toISOString() });
     renderComments(); setSaveState("Đã bắt đầu check...");
   } catch (error) {
     app.state.sections[section].status = previousStatus;
@@ -280,7 +307,7 @@ async function retryComment(comment, button) {
   button.disabled = true; button.textContent = "Đang thử lại…";
   try {
     const result = await app.api.retryAttempt(comment.attemptRef); const attempt = result.data.attempt || result.data;
-    upsertComment({ ...comment, status: "queued", feedback: "Đang chấm" });
+    upsertComment({ ...comment, status: "queued", feedback: comment.section === "draft" ? "Hệ thống đang chấm từng câu và tạo link LMS…" : "Đang chấm" });
     app.state.sections[comment.section].status = "queued"; registerAttempt(attempt); renderAll(); setSaveState("Đã bắt đầu check...");
   } catch (error) { showNotice(error.message); button.disabled = false; button.textContent = "Thử lại"; }
 }
@@ -313,7 +340,7 @@ function updatePollingStates() {
   for (const section of SECTION_KEYS) {
     const node = document.querySelector(`.section-workspace[data-section="${section}"] .polling-state`); if (!node) continue;
     const active = activeAttempts().some((item) => item.section === section);
-    node.textContent = active ? (document.hidden ? "Đã tạm dừng" : "Đang chấm") : "—"; node.dataset.state = active && !document.hidden ? "polling" : "idle";
+    node.textContent = active ? (document.hidden ? "Đã tạm dừng" : section === "draft" ? "Đang tạo link" : "Đang chấm") : "—"; node.dataset.state = active && !document.hidden ? "polling" : "idle";
   }
 }
 

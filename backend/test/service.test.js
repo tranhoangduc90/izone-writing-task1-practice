@@ -44,6 +44,7 @@ test('Draft Check is rejected until Overview and Outline have both passed', asyn
   const queries = [];
   const pool = transactionalPool([
     { rowCount: 1, rows: [{ id: 'session-id', draft1: 'D1', draft2: 'D2', draft2_unlocked: true }] },
+    { rowCount: 1, rows: [] },
     { rowCount: 2, rows: [{ section_key: 'overview', locked: true }, { section_key: 'outline', locked: false }] }
   ], queries);
   const service = createWritingPracticeService({ pool });
@@ -58,6 +59,7 @@ test('Draft Check cannot grade text newer than the latest saved database version
   const queries = [];
   const pool = transactionalPool([
     { rowCount: 1, rows: [{ id: 'session-id', draft1: 'Saved D1', draft2: 'Saved D2', draft2_unlocked: true }] },
+    { rowCount: 1, rows: [] },
     { rowCount: 2, rows: [{ section_key: 'overview', locked: true }, { section_key: 'outline', locked: true }] }
   ], queries);
   const service = createWritingPracticeService({ pool });

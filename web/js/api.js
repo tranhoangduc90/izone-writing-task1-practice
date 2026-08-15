@@ -24,7 +24,8 @@ export function createApi(base = "") {
   const root = endpoint(base, "api/v1/");
   return {
     roster: (slug) => fetchJson(endpoint(root, `activities/${encodeURIComponent(slug)}/roster`)),
-    createSession: (activitySlug, classRef, studentRef) => fetchJson(endpoint(root, "sessions"), jsonOptions("POST", { activitySlug, classRef, studentRef, requestId: createRequestId() })),
+    registerProvisional: (activitySlug, classRef, displayName, pin, duplicateConfirmed = false, requestId = createRequestId()) => fetchJson(endpoint(root, `activities/${encodeURIComponent(activitySlug)}/provisional-students`), jsonOptions("POST", { classRef, displayName, pin, duplicateConfirmed, requestId })),
+    createSession: (activitySlug, classRef, studentRef, accessCode) => fetchJson(endpoint(root, "sessions"), jsonOptions("POST", { activitySlug, classRef, studentRef, ...(accessCode ? { accessCode } : {}), requestId: createRequestId() })),
     session: (sessionRef) => fetchJson(endpoint(root, `sessions/${encodeURIComponent(sessionRef)}`)),
     saveDraft: (sessionRef, progress, keepalive = false) => fetchJson(endpoint(root, `sessions/${encodeURIComponent(sessionRef)}/draft`), jsonOptions("PUT", {
       baseVersion: progress.revision,
@@ -43,6 +44,7 @@ export function createApi(base = "") {
     }, revision == null ? {} : { "if-match": String(revision) })),
     attempt: (attemptRef, etag) => fetchJson(endpoint(root, `attempts/${encodeURIComponent(attemptRef)}`), { headers: etag ? { "if-none-match": etag } : {} }),
     retryAttempt: (attemptRef) => fetchJson(endpoint(root, `attempts/${encodeURIComponent(attemptRef)}/retry`), jsonOptions("POST", {})),
+    publishLive: (sessionRef) => fetchJson(endpoint(root, `sessions/${encodeURIComponent(sessionRef)}/live`), jsonOptions("PUT", {}, {}, true)),
     beaconUrl: (sessionRef) => endpoint(root, `sessions/${encodeURIComponent(sessionRef)}/draft`),
   };
 }
@@ -51,10 +53,12 @@ export function createLessonApi(base = "") {
   const root = endpoint(base, "api/v1/");
   return {
     roster: (slug) => fetchJson(endpoint(root, `activities/${encodeURIComponent(slug)}/roster`)),
-    createSession: (activitySlug, classRef, studentRef) => fetchJson(endpoint(root, "lesson-sessions"), jsonOptions("POST", {
+    registerProvisional: (activitySlug, classRef, displayName, pin, duplicateConfirmed = false, requestId = createRequestId()) => fetchJson(endpoint(root, `activities/${encodeURIComponent(activitySlug)}/provisional-students`), jsonOptions("POST", { classRef, displayName, pin, duplicateConfirmed, requestId })),
+    createSession: (activitySlug, classRef, studentRef, accessCode) => fetchJson(endpoint(root, "lesson-sessions"), jsonOptions("POST", {
       activitySlug,
       classRef,
       studentRef,
+      ...(accessCode ? { accessCode } : {}),
     })),
     session: (sessionRef) => fetchJson(endpoint(root, `lesson-sessions/${encodeURIComponent(sessionRef)}`)),
     saveResponses: (sessionRef, progress, keepalive = false) => fetchJson(endpoint(root, `lesson-sessions/${encodeURIComponent(sessionRef)}/responses`), jsonOptions("PUT", {
@@ -84,7 +88,11 @@ export function createTeacherApi(base = "", getToken = () => "") {
       if (classRef) url.searchParams.set("classRef", classRef);
       return fetchJson(url, { headers: authorized() });
     },
-    liveSession: (sessionRef) => fetchJson(endpoint(root, `admin/live/lesson-sessions/${encodeURIComponent(sessionRef)}`), { headers: authorized() }),
+    liveSession: (sessionRef) => fetchJson(endpoint(root, `admin/live/sessions/${encodeURIComponent(sessionRef)}`), { headers: authorized() }),
+    provisionalStudents: (slug, classRef = "") => { const url = new URL(endpoint(root, `admin/activities/${encodeURIComponent(slug)}/provisional-students`)); if (classRef) url.searchParams.set("classRef", classRef); return fetchJson(url, { headers: authorized() }); },
+    resetProvisionalCode: (studentRef) => fetchJson(endpoint(root, `admin/provisional-students/${encodeURIComponent(studentRef)}/reset-code`), jsonOptions("POST", {}, authorized())),
+    reconcileProvisional: (studentRef, officialStudentRef) => fetchJson(endpoint(root, `admin/provisional-students/${encodeURIComponent(studentRef)}/reconcile`), jsonOptions("POST", { officialStudentRef }, authorized())),
+    exportProgress: async (slug, classRef = "") => { const url = new URL(endpoint(root, `admin/activities/${encodeURIComponent(slug)}/export.csv`)); if (classRef) url.searchParams.set("classRef", classRef); const response = await fetch(url, { headers: authorized() }); if (!response.ok) throw new Error(`Không thể tải CSV (${response.status}).`); return response.blob(); },
     retryFailedAttempt: (attemptRef) => fetchJson(endpoint(root, `admin/attempts/${encodeURIComponent(attemptRef)}/retry`), jsonOptions("POST", {}, authorized())),
     reopenSection: (sessionRef, section, reason) => fetchJson(endpoint(root, `admin/lesson-sessions/${encodeURIComponent(sessionRef)}/sections/${encodeURIComponent(section)}/reopen`), jsonOptions("POST", { reason }, authorized())),
   };

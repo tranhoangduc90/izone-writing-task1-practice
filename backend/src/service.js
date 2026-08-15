@@ -20,18 +20,22 @@ function normalizeLmsUrl(value) {
   } catch { return null; }
 }
 
-export function createWritingPracticeService({ pool }) {
+export function createWritingPracticeService({ pool, provisionalService = null }) {
   async function getRoster(slug) {
     const activity = await pool.query(`SELECT id, slug, title FROM writing_practice.activity WHERE slug = $1 AND status = 'active'`, [slug]);
     if (!activity.rowCount) throw new ApiError(404, 'ACTIVITY_NOT_FOUND', 'Hoạt động chưa được mở.');
     const rows = await pool.query(`SELECT class.public_id AS class_ref, class.class_name_snapshot, roster.student_public_id AS student_ref,
-      roster.display_name, roster.display_alias FROM writing_practice.activity_class_scope class
+      roster.display_name, roster.display_alias, (provisional.status='pending') AS provisional,
+      (provisional.status='pending') AS requires_access_code FROM writing_practice.activity_class_scope class
       LEFT JOIN writing_practice.activity_roster roster ON roster.activity_class_id = class.id AND roster.active
+      LEFT JOIN writing_practice.provisional_student provisional ON provisional.activity_class_id=class.id
+        AND provisional.student_public_id=roster.student_public_id
       WHERE class.activity_id = $1 AND class.status='active' AND class.end_date >= CURRENT_DATE ORDER BY class.class_name_snapshot, roster.display_name, roster.display_alias`, [activity.rows[0].id]);
     const classes = new Map();
     for (const row of rows.rows) {
       if (!classes.has(row.class_ref)) classes.set(row.class_ref, { classRef: row.class_ref, className: row.class_name_snapshot, students: [] });
-      if (row.student_ref) classes.get(row.class_ref).students.push({ studentRef: row.student_ref, displayName: row.display_name, alias: row.display_alias });
+      if (row.student_ref) classes.get(row.class_ref).students.push({ studentRef: row.student_ref, displayName: row.display_name, alias: row.display_alias,
+        provisional: Boolean(row.provisional), requiresAccessCode: Boolean(row.requires_access_code) });
     }
     return { activity: { slug: activity.rows[0].slug, title: activity.rows[0].title }, classes: [...classes.values()] };
   }
@@ -62,20 +66,25 @@ export function createWritingPracticeService({ pool }) {
     }
     return { ...session.rows[0], sections: sectionStates, comments: comments.rows, attempts: attempts.rows };
   }
-  async function openSession({ activitySlug, classRef, studentRef }) {
-    return withTransaction(pool, async client => {
-      const roster = await client.query(`SELECT a.id AS activity_id, c.id AS class_id FROM writing_practice.activity a
+  async function openSession({ activitySlug, classRef, studentRef, accessCode }) {
+    const result = await withTransaction(pool, async client => {
+      const identity = provisionalService ? await provisionalService.resolveStudent(client, { activitySlug, classRef, studentRef, accessCode }) : null;
+      if (identity?.accessError) return { accessError: identity.accessError };
+      const roster = identity ? { rowCount: 1, rows: [{ activity_id: identity.activityId, class_id: identity.classId, student_ref: identity.studentRef }] } : await client.query(`SELECT a.id AS activity_id, c.id AS class_id, r.student_public_id AS student_ref FROM writing_practice.activity a
         JOIN writing_practice.activity_class_scope c ON c.activity_id = a.id AND c.public_id = $2 AND c.status='active' AND c.end_date >= CURRENT_DATE
         JOIN writing_practice.activity_roster r ON r.activity_class_id = c.id AND r.student_public_id = $3 AND r.active
         WHERE a.slug = $1 AND a.status = 'active' FOR KEY SHARE`, [activitySlug, classRef, studentRef]);
       if (!roster.rowCount) throw new ApiError(404, 'SESSION_NOT_ALLOWED', 'Học viên không thuộc lớp đang hoạt động.');
       const row = roster.rows[0];
-      await client.query(`INSERT INTO writing_practice.activity_session(activity_id, activity_class_id, student_public_id)
-        VALUES($1,$2,$3) ON CONFLICT(activity_id, student_public_id) DO UPDATE SET updated_at=now()`, [row.activity_id, row.class_id, studentRef]);
-      const session = await client.query(`SELECT id FROM writing_practice.activity_session WHERE activity_id=$1 AND student_public_id=$2`, [row.activity_id, studentRef]);
+      const canonicalStudentRef = row.student_ref || studentRef;
+      await client.query(`INSERT INTO writing_practice.activity_session(activity_id, activity_class_id, student_public_id,last_seen_at)
+        VALUES($1,$2,$3,now()) ON CONFLICT(activity_id, student_public_id) DO UPDATE SET updated_at=now(),last_seen_at=now()`, [row.activity_id, row.class_id, canonicalStudentRef]);
+      const session = await client.query(`SELECT id FROM writing_practice.activity_session WHERE activity_id=$1 AND student_public_id=$2`, [row.activity_id, canonicalStudentRef]);
       for (const section of sections) await client.query(`INSERT INTO writing_practice.session_section(session_id,section_key) VALUES($1,$2) ON CONFLICT DO NOTHING`, [session.rows[0].id, section]);
       return sessionDetails((await client.query(`SELECT public_id FROM writing_practice.activity_session WHERE id=$1`, [session.rows[0].id])).rows[0].public_id, client);
     });
+    if (result?.accessError) throw new ApiError(result.accessError.status, result.accessError.code, result.accessError.message);
+    return result;
   }
   async function saveDraft({ sessionRef, baseVersion, requestId, overview, body1, body2, draft1, draft2, draft2Unlocked }) {
     const body = { overview, body1, body2, draft1, draft2, draft2Unlocked, baseVersion };
@@ -90,7 +99,7 @@ export function createWritingPracticeService({ pool }) {
       if (session.rows[0].draft_version !== baseVersion) throw new ApiError(409, 'DRAFT_VERSION_CONFLICT', 'Bản nháp đã đổi ở nơi khác.', { current: await sessionDetails(sessionRef, client) });
       await client.query(`UPDATE writing_practice.activity_session SET overview=$2, body1=$3, body2=$4,
         draft1=COALESCE($5,draft1), draft2=COALESCE($6,draft2), draft2_unlocked=draft2_unlocked OR COALESCE($7,false),
-        draft_version=draft_version+1,updated_at=now() WHERE id=$1`, [session.rows[0].id, overview, body1, body2, draft1 ?? null, draft2 ?? null, draft2Unlocked ?? null]);
+        draft_version=draft_version+1,updated_at=now(),last_seen_at=now() WHERE id=$1`, [session.rows[0].id, overview, body1, body2, draft1 ?? null, draft2 ?? null, draft2Unlocked ?? null]);
       await client.query(`INSERT INTO writing_practice.draft_request(session_id,request_id,body_hash,draft_version) VALUES($1,$2,$3,$4)`, [session.rows[0].id, requestId, hash(body), baseVersion + 1]);
       return sessionDetails(sessionRef, client);
     });
@@ -102,6 +111,7 @@ export function createWritingPracticeService({ pool }) {
     return withTransaction(pool, async client => {
       const session = await client.query(`SELECT id,draft1,draft2,draft2_unlocked FROM writing_practice.activity_session WHERE public_id=$1 FOR UPDATE`, [sessionRef]);
       if (!session.rowCount) throw new ApiError(404, 'SESSION_NOT_FOUND', 'Không tìm thấy phiên làm bài.');
+      await client.query(`UPDATE writing_practice.activity_session SET last_seen_at=now() WHERE id=$1`, [session.rows[0].id]);
       if (section === 'draft') {
         const prerequisites = await client.query(`SELECT section_key,locked FROM writing_practice.session_section WHERE session_id=$1 AND section_key IN ('overview','outline') FOR SHARE`, [session.rows[0].id]);
         if (prerequisites.rowCount !== 2 || prerequisites.rows.some(row => !row.locked)) throw new ApiError(409, 'DRAFT_PREREQUISITES_NOT_PASSED', 'Cần đạt Overview và Outline trước khi Check Draft 2.');
@@ -150,6 +160,12 @@ export function createWritingPracticeService({ pool }) {
     const canRetry = row.status === 'failed' && row.retryCount < 3;
     return { ...row, canRetry, supportWarning: row.resultStatus === 'needs_revision' && row.attemptsWithoutPass > 0 && row.attemptsWithoutPass % 3 === 0,
       comment: { commentRef: row.commentRef, attemptRef: row.attemptRef, section: row.section, commentNumber: row.commentNumber, status: row.commentStatus, feedback: row.commentContent, artifacts: row.artifacts, createdAt: row.commentCreatedAt, canRetry } };
+  }
+  async function publishLive({ sessionRef }) {
+    const result = await pool.query(`UPDATE writing_practice.activity_session SET last_seen_at=now()
+      WHERE public_id=$1 RETURNING public_id`, [sessionRef]);
+    if (!result.rowCount) throw new ApiError(404, 'SESSION_NOT_FOUND', 'Không tìm thấy phiên làm bài.');
+    return { accepted: true };
   }
   async function claimJobs({ workerId, maxJobs, leaseSeconds, workerPool = 'task1' }) {
     return withTransaction(pool, async client => {
@@ -204,5 +220,5 @@ export function createWritingPracticeService({ pool }) {
   async function recoverJobs() { return withTransaction(pool, async client => { const r=await client.query(`UPDATE writing_practice.check_attempt SET status=CASE WHEN retry_count<3 THEN 'queued' ELSE 'failed' END,lease_token=NULL,lease_expires_at=NULL,version=version+1,updated_at=now() WHERE status='leased' AND lease_expires_at<=now() RETURNING id,public_id,status,retry_count`); await client.query(`UPDATE writing_practice.comment comment SET status='technical_error',content=CASE WHEN attempt.retry_count<3 THEN 'Tạm thời chưa thể chấm. Hãy nhấn Thử lại.' ELSE 'Hệ thống chưa thể chấm sau ba lần thử. Vui lòng báo giảng viên.' END FROM writing_practice.check_attempt attempt WHERE comment.attempt_id=attempt.id AND attempt.status='failed' AND comment.status='queued'`); return r.rows.map(x=>({attemptRef:x.public_id,status:x.status,canRetry:x.status==='failed'&&x.retry_count<3})); }); }
   async function retryAttempt(attemptRef) { return withTransaction(pool, async client => { const r=await client.query(`UPDATE writing_practice.check_attempt attempt SET status='queued',error_code=NULL,version=version+1,updated_at=now() FROM writing_practice.session_section state WHERE attempt.public_id=$1 AND attempt.status='failed' AND attempt.retry_count<3 AND state.session_id=attempt.session_id AND state.section_key=attempt.section_key AND state.locked=false AND NOT EXISTS(SELECT 1 FROM writing_practice.check_attempt active WHERE active.session_id=attempt.session_id AND active.section_key=attempt.section_key AND active.status IN ('queued','leased')) RETURNING attempt.id,attempt.public_id,attempt.section_key,attempt.comment_number,attempt.version`,[attemptRef]); if(!r.rowCount) throw new ApiError(409,'ATTEMPT_NOT_RETRYABLE','Lượt này không thể thử lại.'); await client.query(`UPDATE writing_practice.comment SET status='queued',content='Đang chấm' WHERE attempt_id=$1`,[r.rows[0].id]); return {attemptRef:r.rows[0].public_id,section:r.rows[0].section_key,commentNumber:r.rows[0].comment_number,status:'queued',version:r.rows[0].version}; }); }
   async function reopenSection({sessionRef,section,actorRef,reason}) { return withTransaction(pool, async client => { const session=await client.query(`SELECT id FROM writing_practice.activity_session WHERE public_id=$1 FOR UPDATE`,[sessionRef]); if(!session.rowCount) throw new ApiError(404,'SESSION_NOT_FOUND','Không tìm thấy phiên làm bài.'); const state=await client.query(`UPDATE writing_practice.session_section SET locked=false,fail_streak=0,round_number=round_number+1,updated_at=now() WHERE session_id=$1 AND section_key=$2 AND locked=true RETURNING round_number`,[session.rows[0].id,section]); if(!state.rowCount) throw new ApiError(409,'SECTION_NOT_LOCKED','Phần này hiện không bị khóa.'); await client.query(`INSERT INTO writing_practice.admin_audit_event(session_id,section_key,action,actor_ref,reason) VALUES($1,$2,'reopen_section',$3,$4)`,[session.rows[0].id,section,actorRef,reason]); return sessionDetails(sessionRef,client); }); }
-  return {getRoster,openSession,sessionDetails,saveDraft,submitCheck,getAttempt,claimJobs,completeJob,failJob,recoverJobs,retryAttempt,reopenSection};
+  return {getRoster,openSession,sessionDetails,saveDraft,submitCheck,publishLive,getAttempt,claimJobs,completeJob,failJob,recoverJobs,retryAttempt,reopenSection};
 }

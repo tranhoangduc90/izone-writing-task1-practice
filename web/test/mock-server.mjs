@@ -16,6 +16,7 @@ let draft = {
   draft2Unlocked: true
 };
 let attemptVersion = 1;
+const provisionalRef = "66666666-6666-4666-8666-666666666666";
 
 function session() {
   return {
@@ -24,7 +25,7 @@ function session() {
     ...draft,
     updatedAt: new Date().toISOString(),
     sections: {
-      overview: { status: "passed", attemptsWithoutPass: 0 },
+      overview: { status: "revision", attemptsWithoutPass: 1 },
       outline: { status: "passed", attemptsWithoutPass: 0 },
       draft: { status: "passed", attemptsWithoutPass: 0 }
     },
@@ -55,7 +56,23 @@ const server = http.createServer(async (request, response) => {
   if (/^\/api\/v1\/activities\/(sample-task|pie-app-users-by-age)\/roster$/u.test(url.pathname)) {
     return json(response, 200, { ok: true, classes: [{ classRef: "11111111-1111-4111-8111-111111111111", className: "Lớp thử giao diện", students: [{ studentRef: "44444444-4444-4444-8444-444444444444", alias: "Nguyễn Minh Anh" }] }] });
   }
-  if (url.pathname === "/config.json") return json(response, 200, { apiBase: "http://127.0.0.1:8080/" });
+  if (/^\/api\/v1\/activities\/(sample-task|pie-app-users-by-age)\/provisional-students$/u.test(url.pathname) && request.method === "POST") {
+    const value = await body(request);
+    if (!/^\d{4}$/u.test(value.pin || "")) return json(response, 400, { ok: false, error: "INVALID_REQUEST", message: "Mã phải có bốn số." });
+    return json(response, 201, { ok: true, student: { studentRef: provisionalRef, displayName: value.displayName, alias: value.displayName, provisional: true, requiresAccessCode: true } });
+  }
+  if (url.pathname === "/config.json") return json(response, 200, { apiBase: "http://127.0.0.1:8080/", googleClientId: "mock-client-id" });
+  if (url.pathname === "/api/v1/admin/live/activities/pie-app-users-by-age") {
+    const base = { classRef: "11111111-1111-4111-8111-111111111111", className: "Lớp thử giao diện", online: false, totalFields: 5, passedSectionCount: 0, attemptedSectionCount: 1, checkCount: 1, sections: { overview: { status: "revision" } }, responses: {} };
+    return json(response, 200, { ok: true, generatedAt: new Date().toISOString(), students: [
+      { ...base, studentRef: "70000000-0000-4000-8000-000000000009", displayName: "Học viên mốc 9", hasStarted: true, filledFields: 3, progressPercent: 60, supportRequired: true, supportSections: [{ section: "overview", commentNumber: 9, warningAt: "2026-08-15T01:00:00Z" }] },
+      { ...base, studentRef: "70000000-0000-4000-8000-000000000003", displayName: "Học viên tạm mốc 3", provisional: true, reconciliationStatus: "pending", hasStarted: true, filledFields: 1, progressPercent: 20, supportRequired: true, supportSections: [{ section: "outline", commentNumber: 3, warningAt: "2026-08-15T00:00:00Z" }] },
+      { ...base, studentRef: "70000000-0000-4000-8000-000000000010", displayName: "Tiến trình thấp", hasStarted: true, filledFields: 1, progressPercent: 20, supportRequired: false },
+      { ...base, studentRef: "70000000-0000-4000-8000-000000000080", displayName: "Tiến trình cao", hasStarted: true, filledFields: 4, progressPercent: 80, passedSectionCount: 2, supportRequired: false },
+      { ...base, studentRef: "70000000-0000-4000-8000-000000000000", displayName: "Chưa bắt đầu", hasStarted: false, filledFields: 0, progressPercent: 0, attemptedSectionCount: 0, checkCount: 0, sections: {}, supportRequired: false }
+    ] });
+  }
+  if (url.pathname === "/api/v1/admin/activities/pie-app-users-by-age/provisional-students") return json(response, 200, { ok: true, students: [{ studentRef: "70000000-0000-4000-8000-000000000003", displayName: "Học viên tạm mốc 3", classRef: "11111111-1111-4111-8111-111111111111", className: "Lớp thử giao diện", reconciliationStatus: "pending" }] });
   if (url.pathname === "/api/v1/sessions" && request.method === "POST") return json(response, 201, { ok: true, session: session() });
   if (url.pathname === `/api/v1/sessions/${sessionRef}` && request.method === "GET") return json(response, 200, { ok: true, session: session() });
   if (url.pathname === `/api/v1/sessions/${sessionRef}/draft` && request.method === "PUT") {

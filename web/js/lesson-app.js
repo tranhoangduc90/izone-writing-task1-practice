@@ -1,6 +1,6 @@
 import { createLessonApi } from "./api.js";
 import { createRequestId, isConflict, pollingDelay, terminalResult, wordCount } from "./core.js";
-import { getDraft, putDraft } from "./idb.js";
+import { getDraft, getLatestDraft, putDraft } from "./idb.js";
 import { fieldDefinitions, normalizeLessonProgress, sectionDefinitions, sectionIsFilled } from "./lesson-core.js";
 import { appendMarkdown } from "./markdown.js";
 
@@ -77,14 +77,47 @@ function updateStudentOptions() {
     const option = document.createElement("option");
     option.value = student.studentRef;
     option.textContent = student.alias || student.displayName;
+    option.dataset.requiresAccessCode = student.requiresAccessCode ? "true" : "false";
     select.append(option);
   }
+  $("lesson-access-code-row").hidden = true;
 }
 
 function selectedStudent() {
   const studentRef = $("lesson-student").value;
   const student = studentsForClass($("lesson-class").value).find((item) => item.studentRef === studentRef);
-  return student ? { studentRef: student.studentRef, label: student.alias || student.displayName } : null;
+  return student ? { studentRef: student.studentRef, label: student.alias || student.displayName,
+    provisional: Boolean(student.provisional), requiresAccessCode: Boolean(student.requiresAccessCode) } : null;
+}
+
+function updateAccessCode() {
+  const student = selectedStudent();
+  $("lesson-access-code-row").hidden = !student?.requiresAccessCode;
+  if (!student?.requiresAccessCode) $("lesson-access-code").value = "";
+}
+
+async function createProvisionalStudent() {
+  const error = $("lesson-identity-error"); const button = $("lesson-create-provisional");
+  const classRef = $("lesson-class").value; const name = $("lesson-provisional-name").value;
+  const pin = $("lesson-provisional-pin").value; const confirmPin = $("lesson-provisional-pin-confirm").value;
+  if (!classRef) { error.hidden = false; error.textContent = "Hãy chọn lớp trước."; return; }
+  if (!/^\d{4}$/.test(pin) || pin !== confirmPin) { error.hidden = false; error.textContent = "Hai ô mã phải giống nhau và gồm đúng 4 số."; return; }
+  button.disabled = true;
+  try {
+    const result = await app.api.registerProvisional(app.activitySlug, classRef, name, pin, $("lesson-duplicate-confirm").checked, createRequestId());
+    const student = result.data.student; const group = app.roster.classes.find((item) => item.classRef === classRef);
+    group.students.push({ ...student, provisional: true, requiresAccessCode: true });
+    updateStudentOptions(); $("lesson-student").value = student.studentRef; updateAccessCode(); $("lesson-access-code").value = pin;
+    $("lesson-provisional-panel").hidden = true; error.hidden = false; error.textContent = "Đã tạo hồ sơ tạm. Hãy bấm Mở bài làm.";
+  } catch (requestError) {
+    if (requestError.data?.error === "PROVISIONAL_STUDENT_EXISTS" && requestError.data.current) {
+      const existing = requestError.data.current; const group = app.roster.classes.find((item) => item.classRef === classRef);
+      if (!group.students.some((item) => item.studentRef === existing.studentRef)) group.students.push({ ...existing, provisional: true, requiresAccessCode: true });
+      updateStudentOptions(); $("lesson-student").value = existing.studentRef; updateAccessCode(); $("lesson-duplicate-confirm-row").hidden = false;
+    }
+    if (requestError.data?.error === "DUPLICATE_STUDENT_NAME") $("lesson-duplicate-confirm-row").hidden = false;
+    error.hidden = false; error.textContent = requestError.message;
+  } finally { button.disabled = false; }
 }
 
 function mergeServer(payload, preserveResponses = false) {
@@ -440,7 +473,9 @@ async function openSession(event) {
   errorNode.hidden = true;
   app.identity = { classRef, studentRef: student.studentRef, label: student.label };
   try {
-    const opened = await app.api.createSession(app.activitySlug, classRef, student.studentRef);
+    const accessCode = student.requiresAccessCode ? $("lesson-access-code").value : undefined;
+    if (student.requiresAccessCode && !/^\d{4}$/.test(accessCode)) throw new Error("Hãy nhập đúng mã 4 số của hồ sơ tạm.");
+    const opened = await app.api.createSession(app.activitySlug, classRef, student.studentRef, accessCode);
     app.sessionRef = (opened.data.session || opened.data).sessionRef;
     const result = await app.api.session(app.sessionRef);
     app.state = normalizeLessonProgress(result.data.session || result.data, app.manifest);
@@ -459,6 +494,20 @@ async function openSession(event) {
   }
 }
 
+async function resumeRecent() {
+  const local = await getLatestDraft(`lesson:${app.activitySlug}:`); if (!local) return;
+  const errorNode = $("lesson-identity-error"); errorNode.hidden = true;
+  try {
+    app.identity = local.identity; app.sessionRef = local.sessionRef;
+    const result = await app.api.session(app.sessionRef); app.state = normalizeLessonProgress(result.data.session || result.data, app.manifest); await restoreLocal();
+    const className = app.roster.classes?.find(item => item.classRef === app.identity.classRef)?.className || "Lớp đã chọn";
+    $("lesson-student-label").textContent = `${app.identity.label || "Bài gần nhất"} · ${className}`;
+    $("lesson-setup").hidden = true; $("lesson-workspace").hidden = false; renderBodies();
+    for (const attempt of app.state.attempts) registerAttempt(attempt); schedulePresence();
+    clearInterval(app.heartbeatTimer); app.heartbeatTimer = setInterval(schedulePresence, 30_000);
+  } catch (error) { errorNode.hidden = false; errorNode.textContent = `Chưa thể tiếp tục bài gần nhất: ${error.message}`; }
+}
+
 function saveWithKeepalive() {
   if (!app.dirty || !app.sessionRef || app.conflict) return;
   const payload = JSON.stringify({ baseVersion: app.state.revision, responses: app.state.responses, requestId: createRequestId() });
@@ -471,8 +520,13 @@ async function init() {
     const roster = await app.api.roster(app.activitySlug);
     app.roster = roster.data;
     renderClassOptions();
+    $("lesson-resume-recent").hidden = !(await getLatestDraft(`lesson:${app.activitySlug}:`));
     $("lesson-class").addEventListener("change", updateStudentOptions);
+    $("lesson-student").addEventListener("change", updateAccessCode);
     $("lesson-identity-form").addEventListener("submit", openSession);
+    $("lesson-show-provisional").addEventListener("click", () => { $("lesson-provisional-panel").hidden = !$("lesson-provisional-panel").hidden; });
+    $("lesson-create-provisional").addEventListener("click", createProvisionalStudent);
+    $("lesson-resume-recent").addEventListener("click", resumeRecent);
     $("lesson-save").addEventListener("click", () => saveRemote("manual"));
     $("lesson-save-close").addEventListener("click", async () => {
       if (!(await saveRemote("close"))) return;

@@ -8,7 +8,8 @@ const schema = z.object({
   ALLOWED_ORIGINS: z.string().min(1),
   TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(3).default(1),
   INTERNAL_API_TOKEN: z.string().min(32),
-  GOOGLE_CLIENT_ID: z.string().trim().min(1)
+  GOOGLE_CLIENT_ID: z.string().trim().min(1),
+  PROVISIONAL_STUDENT_PIN_PEPPER: z.string().min(32)
 });
 
 export function loadConfig(env = process.env) {
@@ -21,6 +22,7 @@ export function loadConfig(env = process.env) {
     allowedOrigins: new Set(value.ALLOWED_ORIGINS.split(',').map(item => item.trim()).filter(Boolean)),
     trustProxyHops: value.TRUST_PROXY_HOPS,
     internalApiToken: value.INTERNAL_API_TOKEN,
-    googleClientId: value.GOOGLE_CLIENT_ID
+    googleClientId: value.GOOGLE_CLIENT_ID,
+    provisionalStudentPinPepper: value.PROVISIONAL_STUDENT_PIN_PEPPER
   };
 }

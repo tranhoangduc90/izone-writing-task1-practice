@@ -432,10 +432,10 @@ async function resumeRecent() {
   const error = $("identity-error"); error.hidden = true;
   try {
     app.identity = local.identity; app.sessionRef = local.sessionRef;
-    const result = await app.api.session(app.sessionRef); app.state = normalizeProgress(result.data.session || result.data); await restoreLocal();
+    const result = await app.api.session(app.sessionRef); app.state = normalizeProgress(result.data.session || result.data); app.state.updatedAt = result.data.updatedAt || result.data.session?.updatedAt || null; await restoreLocal();
     const className = (app.roster.classes || []).find(item => (item.classRef || item.ref) === app.identity.classRef)?.className || "Lớp đã chọn";
     $("student-label").textContent = `${app.identity.label || "Bài gần nhất"} · ${className}`;
-    $("setup-card").hidden = true; $("workspace").hidden = false; renderAll(); renderTaskContent();
+    $("setup-card").hidden = true; $("workspace").hidden = false; renderAll(); renderTaskContent(); setSaveState(app.dirty ? "Đã khôi phục bản lưu cục bộ" : "Đã tải bài làm");
     for (const attempt of app.state.attempts) registerAttempt(attempt); schedulePoll(); schedulePresence();
     clearInterval(app.heartbeatTimer); app.heartbeatTimer = setInterval(schedulePresence, 30_000);
   } catch (requestError) { error.hidden = false; error.textContent = `Chưa thể tiếp tục bài gần nhất: ${requestError.message}`; }

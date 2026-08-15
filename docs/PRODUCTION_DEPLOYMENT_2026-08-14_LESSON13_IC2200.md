@@ -1,5 +1,7 @@
 # Biên bản phát hành Lesson 13 cho IC2200
 
+> Ghi chú hiện hành: API production không còn trần bốn job leased. n8n là nơi duy nhất điều tiết tải; kết quả staging bên dưới là mốc lịch sử trước thay đổi này.
+
 ## Phạm vi
 
 - Bài: `writing-lesson13-young-leaders`, phiên bản `2026-08-14.1`.

@@ -27,7 +27,7 @@ Production chỉ được bắt đầu khi ổ hệ thống còn tối thiểu 1
 2. Validate local JSON và live readback.
 3. Chạy Manual test bằng dữ liệu giả, không dùng dữ liệu học viên thật.
 4. Kiểm tra Prompt Registry, Gemini Hub, pass marker và nhánh lỗi kỹ thuật.
-5. Với Draft, kiểm tra webhook Header Auth, credential LMS trong kho credential, allow-list link kết quả và callback về đúng lease. Không lưu execution thành công/lỗi vì payload chứa bài viết.
+5. Với Draft, kiểm tra lời gọi workflow nội bộ, credential LMS trong kho credential, allow-list link kết quả và callback về đúng lease. Không lưu execution thành công/lỗi vì payload chứa bài viết.
 6. Xác nhận API không áp trần số job leased; `maxJobs` chỉ giới hạn kích thước một lần lấy hàng đợi và n8n là nơi duy nhất điều tiết concurrency.
 7. Chỉ bật Schedule/webhook sau khi được phê duyệt riêng.
 

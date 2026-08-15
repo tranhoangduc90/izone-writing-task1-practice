@@ -1,6 +1,6 @@
 // Dữ liệu nhận vào: URL API staging, token nội bộ và roster 40 học viên hoàn toàn giả.
 // Việc chính: kiểm tra lưu động 18 ô, chống Check trùng, tách hàng đợi Lesson 13,
-// khóa section khi đạt, lỗi kỹ thuật, heartbeat và giới hạn bốn lượt chấm toàn hệ thống.
+// khóa section khi đạt, lỗi kỹ thuật, heartbeat và xác nhận API không còn trần bốn lượt chấm.
 // Kết quả: chỉ in số liệu tổng hợp; không in tên, nội dung bài, UUID hoặc token.
 // Khi lỗi: tiến trình dừng với tên phép kiểm tra; xem log staging, không xem log production.
 const baseUrl = String(process.env.API_BASE_URL || '').replace(/\/$/, '');
@@ -171,14 +171,12 @@ ensure(remainingSaved.every(item => item.status === 200), '40 lượt lưu đồ
 const capacityChecks = await Promise.all(remainingSessions.slice(0, 6).map(session =>
   check(session.sessionRef, 'body2_topic')
 ));
-ensure(capacityChecks.every(item => item.status === 202), 'Không tạo đủ sáu job kiểm tra capacity.');
+ensure(capacityChecks.every(item => item.status === 202), 'Không tạo đủ sáu job kiểm tra hàng đợi.');
 const leased = await claim(4);
 ensure(leased.value.jobs?.length === 4, `Phải lease bốn job, hiện có ${leased.value.jobs?.length || 0}.`);
-const blocked = await claim(4);
-ensure(blocked.value.jobs?.length === 0, 'API đã lease vượt giới hạn bốn job toàn hệ thống.');
-for (const job of leased.value.jobs) ensure((await fail(job)).status === 200, 'Không đóng được job capacity.');
 const remaining = await claim(4);
-ensure(remaining.value.jobs?.length === 2, 'Không lấy đúng hai job còn lại sau khi giải phóng capacity.');
+ensure(remaining.value.jobs?.length === 2, 'API vẫn đang chặn các job còn lại ở giới hạn bốn.');
+for (const job of leased.value.jobs) ensure((await fail(job)).status === 200, 'Không đóng được job capacity.');
 for (const job of remaining.value.jobs) ensure((await fail(job)).status === 200, 'Không đóng được job capacity còn lại.');
 
 console.log(JSON.stringify({
@@ -186,6 +184,6 @@ console.log(JSON.stringify({
   syntheticStudents: students.length,
   dynamicFields: responseKeys.length,
   repeatedChecks: rapid.length,
-  maximumLeased: leased.value.jobs.length,
+  leasedWithoutApiCap: leased.value.jobs.length + remaining.value.jobs.length,
   teacherAggregatePollingSeconds: 5
 }));

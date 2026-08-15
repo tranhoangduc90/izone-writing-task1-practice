@@ -13,7 +13,7 @@ function pick(source, keys) {
   return Object.fromEntries(keys.map(key => [key, typeof source?.[key] === 'string' ? source[key] : '']));
 }
 
-export function createLessonPracticeService({ pool, now = () => Date.now() }) {
+export function createLessonPracticeService({ pool, provisionalService = null, now = () => Date.now() }) {
   async function definitions(activityId, client = pool) {
     const result = await client.query(`SELECT section_key AS section, title, sort_order AS "sortOrder",
       input_fields AS "inputFields", context_fields AS "contextFields", required_fields AS "requiredFields",
@@ -25,7 +25,8 @@ export function createLessonPracticeService({ pool, now = () => Date.now() }) {
 
   async function sessionDetails(sessionRef, client = pool) {
     const session = await client.query(`SELECT session.id, session.public_id AS "sessionRef",
-      session.activity_id AS "activityId", session.response_data AS responses,
+      session.activity_id AS "activityId", jsonb_strip_nulls(COALESCE(session.response_data,'{}'::jsonb)||jsonb_build_object(
+        'overview',session.overview,'body1',session.body1,'body2',session.body2,'draft1',session.draft1,'draft2',session.draft2)) AS responses,
       session.draft_version AS "draftVersion", session.updated_at AS "updatedAt",
       activity.slug AS "activitySlug", activity.title
       FROM writing_practice.activity_session session
@@ -64,9 +65,11 @@ export function createLessonPracticeService({ pool, now = () => Date.now() }) {
     return { ...row, sections: sectionStates, sectionDefinitions: sectionDefs, comments: comments.rows, attempts: attempts.rows };
   }
 
-  async function openSession({ activitySlug, classRef, studentRef }) {
-    return withTransaction(pool, async client => {
-      const roster = await client.query(`SELECT activity.id AS activity_id, scope.id AS class_id
+  async function openSession({ activitySlug, classRef, studentRef, accessCode }) {
+    const result = await withTransaction(pool, async client => {
+      const identity = provisionalService ? await provisionalService.resolveStudent(client, { activitySlug, classRef, studentRef, accessCode, lesson: true }) : null;
+      if (identity?.accessError) return { accessError: identity.accessError };
+      const roster = identity ? { rowCount: 1, rows: [{ activity_id: identity.activityId, class_id: identity.classId, student_ref: identity.studentRef }] } : await client.query(`SELECT activity.id AS activity_id, scope.id AS class_id, roster.student_public_id AS student_ref
         FROM writing_practice.activity activity
         JOIN writing_practice.activity_class_scope scope ON scope.activity_id=activity.id
           AND scope.public_id=$2 AND scope.status='active' AND scope.end_date>=CURRENT_DATE
@@ -76,20 +79,23 @@ export function createLessonPracticeService({ pool, now = () => Date.now() }) {
         FOR KEY SHARE`, [activitySlug, classRef, studentRef]);
       if (!roster.rowCount) throw new ApiError(404, 'SESSION_NOT_ALLOWED', 'Học viên không thuộc lớp đang hoạt động.');
       const row = roster.rows[0];
+      const canonicalStudentRef = row.student_ref || studentRef;
       const sectionDefs = await definitions(row.activity_id, client);
       if (!sectionDefs.length) throw new ApiError(409, 'LESSON_NOT_CONFIGURED', 'Handout chưa được cấu hình đầy đủ.');
       await client.query(`INSERT INTO writing_practice.activity_session(activity_id,activity_class_id,student_public_id,last_seen_at)
         VALUES($1,$2,$3,now()) ON CONFLICT(activity_id,student_public_id)
         DO UPDATE SET updated_at=now(),last_seen_at=now()`,
-      [row.activity_id, row.class_id, studentRef]);
+      [row.activity_id, row.class_id, canonicalStudentRef]);
       const session = await client.query(`SELECT id,public_id FROM writing_practice.activity_session
-        WHERE activity_id=$1 AND student_public_id=$2`, [row.activity_id, studentRef]);
+        WHERE activity_id=$1 AND student_public_id=$2`, [row.activity_id, canonicalStudentRef]);
       for (const section of sectionDefs) {
         await client.query(`INSERT INTO writing_practice.session_section(session_id,section_key)
           VALUES($1,$2) ON CONFLICT DO NOTHING`, [session.rows[0].id, section.section]);
       }
       return sessionDetails(session.rows[0].public_id, client);
     });
+    if (result?.accessError) throw new ApiError(result.accessError.status, result.accessError.code, result.accessError.message);
+    return result;
   }
 
   async function saveResponses({ sessionRef, baseVersion, requestId, responses }) {
@@ -200,19 +206,31 @@ export function createLessonPracticeService({ pool, now = () => Date.now() }) {
   }
 
   async function listLive({ activitySlug, classRef }) {
-    const roster = await pool.query(`SELECT session.public_id AS "sessionRef",
+    const [activityResult, roster] = await Promise.all([
+      pool.query(`SELECT activity.id,activity.grading_pool AS "gradingPool" FROM writing_practice.activity activity
+        WHERE activity.slug=$1 AND activity.status='active'`, [activitySlug]),
+      pool.query(`SELECT session.public_id AS "sessionRef",
       scope.public_id AS "classRef", scope.class_name_snapshot AS "className",
       roster.student_public_id AS "studentRef", roster.display_alias AS "displayName",
-      session.response_data AS responses, session.updated_at AS "savedAt",
+      jsonb_strip_nulls(COALESCE(session.response_data,'{}'::jsonb)||jsonb_build_object(
+        'overview',session.overview,'body1',session.body1,'body2',session.body2,'draft1',session.draft1,'draft2',session.draft2)) AS responses,
+      session.updated_at AS "savedAt",
       session.last_seen_at AS "lastSeenAt", session.active_field AS "activeField",
+      (provisional.status='pending') AS provisional,
+      COALESCE(provisional.status,'official') AS "reconciliationStatus",
       COALESCE(section_summary.sections,'{}'::jsonb) AS sections,
       COALESCE(attempt_summary.check_count,0)::int AS "checkCount",
-      COALESCE(attempt_summary.support_warning,false) AS "supportWarning"
+      COALESCE(attempt_summary.attempted_section_count,0)::int AS "attemptedSectionCount",
+      COALESCE(support_summary.support_sections,'[]'::jsonb) AS "supportSections"
       FROM writing_practice.activity activity
       JOIN writing_practice.activity_class_scope scope ON scope.activity_id=activity.id AND scope.status='active'
       JOIN writing_practice.activity_roster roster ON roster.activity_class_id=scope.id AND roster.active
+      LEFT JOIN writing_practice.activity_student_alias identity_alias ON identity_alias.activity_class_id=scope.id
+        AND identity_alias.alias_student_public_id=roster.student_public_id
+      LEFT JOIN writing_practice.provisional_student provisional ON provisional.activity_class_id=scope.id
+        AND provisional.student_public_id=COALESCE(identity_alias.canonical_student_public_id,roster.student_public_id)
       LEFT JOIN writing_practice.activity_session session ON session.activity_id=activity.id
-        AND session.student_public_id=roster.student_public_id
+        AND session.student_public_id=COALESCE(identity_alias.canonical_student_public_id,roster.student_public_id)
       LEFT JOIN LATERAL (
         SELECT jsonb_object_agg(section.section_key,jsonb_build_object(
           'status',CASE WHEN section.locked THEN 'passed'
@@ -237,22 +255,47 @@ export function createLessonPracticeService({ pool, now = () => Date.now() }) {
         WHERE section.session_id=session.id
       ) section_summary ON true
       LEFT JOIN LATERAL (
-        SELECT count(*) AS check_count,
-          bool_or(attempt.result_status='needs_revision' AND state.fail_streak>0 AND state.fail_streak%3=0) AS support_warning
-        FROM writing_practice.check_attempt attempt
-        JOIN writing_practice.session_section state ON state.session_id=attempt.session_id
-          AND state.section_key=attempt.section_key
+        SELECT count(*) AS check_count,count(DISTINCT attempt.section_key) AS attempted_section_count FROM writing_practice.check_attempt attempt
         WHERE attempt.session_id=session.id
       ) attempt_summary ON true
+      LEFT JOIN LATERAL (
+        SELECT jsonb_agg(jsonb_build_object('section',state.section_key,'commentNumber',state.fail_streak,
+          'warningAt',warning.completed_at) ORDER BY state.fail_streak DESC,warning.completed_at) AS support_sections
+        FROM writing_practice.session_section state
+        JOIN LATERAL (SELECT attempt.comment_number,attempt.completed_at
+          FROM writing_practice.check_attempt attempt WHERE attempt.session_id=state.session_id
+            AND attempt.section_key=state.section_key AND attempt.round_number=state.round_number
+            AND attempt.status='completed' AND attempt.result_status='needs_revision'
+          ORDER BY attempt.completed_at DESC LIMIT 1) warning ON true
+        WHERE state.session_id=session.id AND NOT state.locked AND state.fail_streak>0 AND state.fail_streak%3=0
+      ) support_summary ON true
       WHERE activity.slug=$1 AND activity.status='active'
         AND ($2::uuid IS NULL OR scope.public_id=$2::uuid)
-      ORDER BY scope.class_name_snapshot,roster.display_alias`, [activitySlug, classRef || null]);
+      ORDER BY scope.class_name_snapshot,roster.display_alias`, [activitySlug, classRef || null])
+    ]);
+    if (!activityResult.rowCount) throw new ApiError(404, 'ACTIVITY_NOT_FOUND', 'Hoạt động chưa được mở.');
+    const activity = activityResult.rows[0];
+    const sectionDefs = activity.gradingPool === 'task1' ? [
+      { section: 'overview', requiredFields: ['overview'] },
+      { section: 'outline', requiredFields: ['body1', 'body2'] },
+      { section: 'draft', requiredFields: ['draft1', 'draft2'] }
+    ] : await definitions(activity.id);
+    const requiredFields = [...new Set(sectionDefs.flatMap(item => stringArray(item.requiredFields)))];
     const cutoff = now() - 60_000;
-    const students = roster.rows.map(student => ({
-      ...student,
-      online: Boolean(student.lastSeenAt && Date.parse(student.lastSeenAt) >= cutoff),
-      responses: student.responses || {}
-    }));
+    const students = roster.rows.map(student => {
+      const responses = student.responses || {};
+      const filledFields = requiredFields.filter(field => Boolean(meaningfulText(responses[field]))).length;
+      const sections = student.sections || {};
+      const passedSectionCount = Object.values(sections).filter(item => item.status === 'passed').length;
+      const attemptedSectionCount = Number(student.attemptedSectionCount || 0);
+      const hasStarted = filledFields > 0 || Number(student.checkCount) > 0;
+      const supportSections = student.supportSections || [];
+      return { ...student, responses, sections, filledFields, totalFields: requiredFields.length,
+        progressPercent: requiredFields.length ? Math.round(filledFields * 100 / requiredFields.length) : 0,
+        passedSectionCount, attemptedSectionCount, hasStarted,
+        supportRequired: supportSections.length > 0, supportSections,
+        online: Boolean(student.lastSeenAt && Date.parse(student.lastSeenAt) >= cutoff) };
+    });
     return { activitySlug, generatedAt: new Date(now()).toISOString(), students };
   }
 

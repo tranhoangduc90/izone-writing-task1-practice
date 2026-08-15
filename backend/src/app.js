@@ -12,7 +12,10 @@ const responseMap=z.record(z.string().regex(/^[a-z0-9][a-z0-9_]{1,79}$/),z.strin
 });
 const meaningfulText = (value) => value.replace(/[\s\u200B-\u200D\u2060\uFEFF]/gu, '');
 const draft=z.object({overview:z.string().max(20_000),body1:z.string().max(20_000),body2:z.string().max(20_000),draft1:z.string().max(20_000).optional(),draft2:z.string().max(20_000).optional(),draft2Unlocked:z.boolean().optional()});
-const open=z.object({activitySlug:z.string().regex(/^[a-z0-9][a-z0-9-]{1,79}$/),classRef:uuid,studentRef:uuid});
+const activitySlug=z.string().regex(/^[a-z0-9][a-z0-9-]{1,79}$/);
+const open=z.object({activitySlug,classRef:uuid,studentRef:uuid,accessCode:z.string().regex(/^\d{4}$/).optional()});
+const provisionalCreate=z.object({classRef:uuid,displayName:z.string().min(2).max(100),pin:z.string().regex(/^\d{4}$/),requestId:uuid,duplicateConfirmed:z.boolean().default(false)});
+const reconcile=z.object({officialStudentRef:uuid});
 const save=z.object({baseVersion:z.number().int().min(0),requestId:uuid,...draft.shape});
 const check=z.object({section,requestId:uuid,snapshot:draft}).superRefine((value,context)=>{
  if(value.section==='overview'&&!meaningfulText(value.snapshot.overview))context.addIssue({code:'custom',path:['snapshot','overview'],message:'Overview trống.'});
@@ -34,17 +37,24 @@ const parse=(schema,value,code='INVALID_REQUEST')=>{const r=schema.safeParse(val
 const asyncRoute=fn=>(req,res,next)=>Promise.resolve(fn(req,res,next)).catch(next);
 function sameSecret(actual,expected){const a=Buffer.from(String(actual||'')),b=Buffer.from(String(expected||''));return a.length>0&&a.length===b.length&&crypto.timingSafeEqual(a,b);}
 function cors(config){return(req,res,next)=>{const origin=req.get('origin');if(origin&&!config.allowedOrigins.has(origin))return res.status(403).json({ok:false,error:'ORIGIN_NOT_ALLOWED'});if(origin){res.set('Access-Control-Allow-Origin',origin);res.set('Vary','Origin');}res.set('Access-Control-Allow-Methods','GET, POST, PUT, OPTIONS');res.set('Access-Control-Allow-Headers','Authorization, Content-Type, If-None-Match, If-Match');res.set('Cache-Control','no-store');return req.method==='OPTIONS'?res.status(204).end():next();};}
+function csvCell(value){const text=String(value??'');return /[",\r\n]/.test(text)?`"${text.replaceAll('"','""')}"`:text;}
 
-export function createApp({config,pool,service,lessonService=service,adminAuth=(_q,r)=>r.status(503).json({ok:false,error:'ADMIN_AUTH_NOT_CONFIGURED'})}){
+export function createApp({config,pool,service,lessonService=service,provisionalService=null,adminAuth=(_q,r)=>r.status(503).json({ok:false,error:'ADMIN_AUTH_NOT_CONFIGURED'})}){
  const app=express();app.disable('x-powered-by');app.set('trust proxy',config.trustProxyHops);app.use(helmet());app.use(cors(config));
  // Một lớp có thể dùng chung một địa chỉ mạng. Ngưỡng đọc này vẫn chịu được 40 học viên polling 2 giây/lần.
  app.use(rateLimit({windowMs:60_000,limit:2400,standardHeaders:'draft-8',legacyHeaders:false,message:{ok:false,error:'RATE_LIMITED'}}));app.use(express.json({limit:'96kb',strict:true}));
  app.get('/health',(_q,r)=>r.json({ok:true}));app.get('/ready',asyncRoute(async(_q,r)=>{await pool.query('SELECT 1');r.json({ok:true});}));const writes=rateLimit({windowMs:60_000,limit:240,standardHeaders:'draft-8',legacyHeaders:false,message:{ok:false,error:'RATE_LIMITED'}});
+ const provisionalWrites=rateLimit({windowMs:10*60_000,limit:60,standardHeaders:'draft-8',legacyHeaders:false,message:{ok:false,error:'PROVISIONAL_REGISTRATION_RATE_LIMITED'}});
  app.get('/api/v1/activities/:slug/roster',asyncRoute(async(q,r)=>r.json({ok:true,...await service.getRoster(q.params.slug)})));
+ app.post('/api/v1/activities/:slug/provisional-students',provisionalWrites,asyncRoute(async(q,r)=>{
+   if(!provisionalService)throw new ApiError(503,'PROVISIONAL_STUDENTS_NOT_CONFIGURED','Chức năng học viên tạm chưa được cấu hình.');
+   r.status(201).json({ok:true,student:await provisionalService.createStudent({activitySlug:parse(activitySlug,q.params.slug),...parse(provisionalCreate,q.body)})});
+ }));
  app.post('/api/v1/sessions',writes,asyncRoute(async(q,r)=>r.status(201).json({ok:true,session:await service.openSession(parse(open,q.body))})));
  app.get('/api/v1/sessions/:sessionRef',asyncRoute(async(q,r)=>r.json({ok:true,session:await service.sessionDetails(parse(uuid,q.params.sessionRef))})));
  app.put('/api/v1/sessions/:sessionRef/draft',writes,asyncRoute(async(q,r)=>r.json({ok:true,session:await service.saveDraft({sessionRef:parse(uuid,q.params.sessionRef),...parse(save,q.body)})})));
  app.post('/api/v1/sessions/:sessionRef/checks',writes,asyncRoute(async(q,r)=>r.status(202).json({ok:true,attempt:await service.submitCheck({sessionRef:parse(uuid,q.params.sessionRef),...parse(check,q.body)})})));
+ app.put('/api/v1/sessions/:sessionRef/live',writes,asyncRoute(async(q,r)=>r.json({ok:true,...await service.publishLive({sessionRef:parse(uuid,q.params.sessionRef)})})));
  app.post('/api/v1/lesson-sessions',writes,asyncRoute(async(q,r)=>r.status(201).json({ok:true,session:await lessonService.openSession(parse(open,q.body))})));
  app.get('/api/v1/lesson-sessions/:sessionRef',asyncRoute(async(q,r)=>r.json({ok:true,session:await lessonService.sessionDetails(parse(uuid,q.params.sessionRef))})));
  app.put('/api/v1/lesson-sessions/:sessionRef/responses',writes,asyncRoute(async(q,r)=>r.json({ok:true,session:await lessonService.saveResponses({sessionRef:parse(uuid,q.params.sessionRef),...parse(lessonSave,q.body)})})));
@@ -58,9 +68,14 @@ export function createApp({config,pool,service,lessonService=service,adminAuth=(
  app.post('/api/v1/internal/grading-jobs/:jobRef/fail',internal,asyncRoute(async(q,r)=>r.json({ok:true,job:await service.failJob({jobRef:parse(uuid,q.params.jobRef),...parse(fail,q.body)})})));
  app.post('/api/v1/internal/grading-jobs/recover',internal,asyncRoute(async(_q,r)=>r.json({ok:true,jobs:await service.recoverJobs()})));
  app.post('/api/v1/admin/sessions/:sessionRef/sections/:section/reopen',adminAuth,asyncRoute(async(q,r)=>r.json({ok:true,session:await service.reopenSection({sessionRef:parse(uuid,q.params.sessionRef),section:parse(section,q.params.section),actorRef:q.reviewer.email,...parse(reopen,q.body)})})));
- app.get('/api/v1/admin/live/activities/:slug',adminAuth,asyncRoute(async(q,r)=>r.json({ok:true,...await lessonService.listLive({activitySlug:parse(open.shape.activitySlug,q.params.slug),classRef:q.query.classRef?parse(uuid,q.query.classRef):null})})));
+ app.get('/api/v1/admin/live/activities/:slug',adminAuth,asyncRoute(async(q,r)=>r.json({ok:true,...await lessonService.listLive({activitySlug:parse(activitySlug,q.params.slug),classRef:q.query.classRef?parse(uuid,q.query.classRef):null})})));
+ app.get('/api/v1/admin/activities/:slug/provisional-students',adminAuth,asyncRoute(async(q,r)=>r.json({ok:true,students:await provisionalService.listPending({activitySlug:parse(activitySlug,q.params.slug),classRef:q.query.classRef?parse(uuid,q.query.classRef):null})})));
+ app.post('/api/v1/admin/provisional-students/:studentRef/reset-code',adminAuth,asyncRoute(async(q,r)=>r.json({ok:true,...await provisionalService.resetCode({studentRef:parse(uuid,q.params.studentRef),actorRef:q.reviewer.email})})));
+ app.post('/api/v1/admin/provisional-students/:studentRef/reconcile',adminAuth,asyncRoute(async(q,r)=>r.json({ok:true,...await provisionalService.reconcile({studentRef:parse(uuid,q.params.studentRef),actorRef:q.reviewer.email,...parse(reconcile,q.body)})})));
+ app.get('/api/v1/admin/activities/:slug/export.csv',adminAuth,asyncRoute(async(q,r)=>{const data=await lessonService.listLive({activitySlug:parse(activitySlug,q.params.slug),classRef:q.query.classRef?parse(uuid,q.query.classRef):null});const header=['Họ và tên','Lớp','Tiến trình (%)','Số ô đã làm','Số phần đã đạt','Số lần Check','Cần hỗ trợ','Học viên tạm','Trạng thái đối soát'];const lines=[header,...data.students.map(s=>[s.displayName,s.className,s.progressPercent,s.filledFields,s.passedSectionCount,s.checkCount,s.supportRequired?'Có':'Không',s.provisional?'Có':'Không',s.reconciliationStatus||'official'])].map(row=>row.map(csvCell).join(','));r.type('text/csv; charset=utf-8').set('Content-Disposition',`attachment; filename="${q.params.slug}-progress.csv"`).send(`\ufeff${lines.join('\r\n')}`);}));
+ app.get('/api/v1/admin/live/sessions/:sessionRef',adminAuth,asyncRoute(async(q,r)=>{const ref=parse(uuid,q.params.sessionRef);try{return r.json({ok:true,session:await lessonService.sessionDetails(ref)});}catch(error){if(error.code!=='SESSION_NOT_FOUND')throw error;return r.json({ok:true,session:await service.sessionDetails(ref)});}}));
  app.get('/api/v1/admin/live/lesson-sessions/:sessionRef',adminAuth,asyncRoute(async(q,r)=>r.json({ok:true,session:await lessonService.sessionDetails(parse(uuid,q.params.sessionRef))})));
  app.post('/api/v1/admin/attempts/:attemptRef/retry',writes,adminAuth,asyncRoute(async(q,r)=>r.status(202).json({ok:true,attempt:await lessonService.retryFailedAttempt({attemptRef:parse(uuid,q.params.attemptRef),actorRef:q.reviewer.email})})));
  app.post('/api/v1/admin/lesson-sessions/:sessionRef/sections/:section/reopen',adminAuth,asyncRoute(async(q,r)=>r.json({ok:true,session:await lessonService.reopenSection({sessionRef:parse(uuid,q.params.sessionRef),section:parse(lessonSection,q.params.section),actorRef:q.reviewer.email,...parse(reopen,q.body)})})));
- app.use((_q,r)=>r.status(404).json({ok:false,error:'NOT_FOUND'}));app.use((error,_q,r,_n)=>{if(error instanceof ApiError)return r.status(error.status).json({ok:false,error:error.code,message:error.message,...(error.current?{current:error.current}:{})});const requestId=crypto.randomUUID();console.error(`Writing Task 1 API error request_id=${requestId} type=${error?.name||'Error'}`);return r.status(500).json({ok:false,error:'INTERNAL_ERROR',requestId});});return app;
+ app.use((_q,r)=>r.status(404).json({ok:false,error:'NOT_FOUND'}));app.use((error,_q,r,_n)=>{if(error instanceof ApiError)return r.status(error.status).json({ok:false,error:error.code,message:error.message,...(error.current?{current:error.current}:{})});const requestId=crypto.randomUUID();console.error(`Writing Task 1 API error request_id=${requestId} type=${error?.name||'Error'} code=${error?.code||'none'}`);return r.status(500).json({ok:false,error:'INTERNAL_ERROR',requestId});});return app;
 }

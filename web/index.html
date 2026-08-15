@@ -18,7 +18,18 @@
         <form id="identity-form" novalidate>
           <label>Lớp<select id="class-id" required><option value="">Chọn lớp của bạn</option></select></label>
           <label>Họ và tên<select id="student-name" name="studentName" required disabled><option value="">Chọn họ và tên của bạn</option></select></label>
+          <label id="access-code-row" hidden>Mã 4 số<input id="access-code" inputmode="numeric" autocomplete="one-time-code" maxlength="4" pattern="[0-9]{4}" /></label>
+          <button id="show-provisional" class="link-button" type="button">Không thấy tên trong danh sách?</button>
+          <section id="provisional-panel" class="provisional-panel" hidden aria-labelledby="provisional-title">
+            <h2 id="provisional-title">Đăng ký học viên tạm</h2>
+            <p>Nhập đúng họ tên và tự đặt mã 4 số để vào lại bài trên thiết bị khác. Không chia sẻ mã này.</p>
+            <label>Họ và tên<input id="provisional-name" maxlength="100" autocomplete="name" /></label>
+            <div class="pin-grid"><label>Mã 4 số<input id="provisional-pin" inputmode="numeric" maxlength="4" autocomplete="new-password" /></label><label>Nhập lại mã<input id="provisional-pin-confirm" inputmode="numeric" maxlength="4" autocomplete="new-password" /></label></div>
+            <label id="duplicate-confirm-row" class="checkbox-row" hidden><input id="duplicate-confirm" type="checkbox" /> Tôi là người khác cùng tên</label>
+            <button id="create-provisional" class="secondary" type="button">Tạo hồ sơ và làm bài ngay</button>
+          </section>
           <p id="identity-error" class="form-error" role="alert" hidden></p><button class="primary" type="submit">Mở bài làm</button>
+          <button id="resume-recent" class="secondary" type="button" hidden>Tiếp tục bài gần nhất trên thiết bị</button>
         </form>
       </section>
       <section id="workspace" class="workspace" hidden aria-live="polite">

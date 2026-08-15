@@ -1,6 +1,6 @@
 import { createApi } from "./api.js";
 import { SECTION_KEYS, canUnlockDraft2, createRequestId, draftPrerequisitesPassed, hasMeaningfulText, isConflict, normalizeProgress, pollingDelay, safeHttpUrl, safeLmsUrl, terminalResult, wordCount } from "./core.js";
-import { getDraft, putDraft } from "./idb.js";
+import { getDraft, getLatestDraft, putDraft } from "./idb.js";
 import { appendInlineMarkdown, appendMarkdown } from "./markdown.js";
 
 const $ = (id) => document.getElementById(id);
@@ -9,7 +9,7 @@ const SECTION_INFO = {
   outline: { title: "Outline", kicker: "Phần 2", fields: [{ key: "body1", label: "Body 1", placeholder: "Nhóm số liệu thứ nhất…" }, { key: "body2", label: "Body 2", placeholder: "Nhóm số liệu thứ hai…" }] },
   draft: { title: "Draft 1 → Draft 2", kicker: "Phần 3", fields: [{ key: "draft1", label: "Draft 1", placeholder: "Viết liên tục phần Overview và Body 1…" }, { key: "draft2", label: "Draft 2", placeholder: "Sửa bản sao Draft 1 thành tiếng Anh hoàn chỉnh…" }] },
 };
-const app = { manifest: null, activitySlug: null, api: null, roster: null, identity: null, sessionRef: null, state: null, dirty: false, idbTimer: null, saveTimer: null, pollTimer: null, pendingAttempts: new Map(), conflict: false };
+const app = { manifest: null, activitySlug: null, api: null, roster: null, identity: null, sessionRef: null, state: null, dirty: false, idbTimer: null, saveTimer: null, pollTimer: null, heartbeatTimer: null, pendingAttempts: new Map(), conflict: false };
 
 function setSaveState(text) { $("save-state").textContent = text; }
 function showNotice(text = "") { const node = $("network-notice"); node.hidden = !text; node.textContent = text; }
@@ -125,14 +125,53 @@ function updateStudentOptions() {
     const option = document.createElement("option");
     option.value = student.studentRef || student.ref;
     option.textContent = student.alias || student.name;
+    option.dataset.requiresAccessCode = student.requiresAccessCode ? "true" : "false";
     select.append(option);
   }
+  $("access-code-row").hidden = true;
 }
 
 function studentFromInput() {
   const studentRef = $("student-name").value;
   const student = studentsForClass($("class-id").value).find((item) => (item.studentRef || item.ref) === studentRef);
-  return student ? { studentRef: student.studentRef || student.ref, label: student.alias || student.name } : null;
+  return student ? { studentRef: student.studentRef || student.ref, label: student.alias || student.name,
+    provisional: Boolean(student.provisional), requiresAccessCode: Boolean(student.requiresAccessCode) } : null;
+}
+
+function updateAccessCode() {
+  const selected = studentFromInput();
+  $("access-code-row").hidden = !selected?.requiresAccessCode;
+  if (!selected?.requiresAccessCode) $("access-code").value = "";
+}
+
+async function createProvisionalStudent() {
+  const error = $("identity-error");
+  const button = $("create-provisional");
+  const classRef = $("class-id").value;
+  const name = $("provisional-name").value;
+  const pin = $("provisional-pin").value;
+  const confirmPin = $("provisional-pin-confirm").value;
+  if (!classRef) { error.hidden = false; error.textContent = "Hãy chọn lớp trước."; return; }
+  if (!/^\d{4}$/.test(pin) || pin !== confirmPin) { error.hidden = false; error.textContent = "Hai ô mã phải giống nhau và gồm đúng 4 số."; return; }
+  button.disabled = true;
+  try {
+    const result = await app.api.registerProvisional(app.activitySlug, classRef, name, pin, $("duplicate-confirm").checked, createRequestId());
+    const student = result.data.student;
+    const group = (app.roster.classes || []).find((item) => (item.classRef || item.ref) === classRef);
+    group.students.push({ ...student, displayName: student.displayName, requiresAccessCode: true, provisional: true });
+    updateStudentOptions(); $("student-name").value = student.studentRef; updateAccessCode(); $("access-code").value = pin;
+    $("provisional-panel").hidden = true; error.hidden = false; error.textContent = "Đã tạo hồ sơ tạm. Hãy bấm Mở bài làm.";
+  } catch (requestError) {
+    if (requestError.data?.error === "PROVISIONAL_STUDENT_EXISTS" && requestError.data.current) {
+      const existing = requestError.data.current;
+      const group = (app.roster.classes || []).find((item) => (item.classRef || item.ref) === classRef);
+      if (!group.students.some((item) => item.studentRef === existing.studentRef)) group.students.push({ ...existing, provisional: true, requiresAccessCode: true });
+      updateStudentOptions(); $("student-name").value = existing.studentRef; updateAccessCode();
+      $("duplicate-confirm-row").hidden = false;
+    }
+    if (requestError.data?.error === "DUPLICATE_STUDENT_NAME") $("duplicate-confirm-row").hidden = false;
+    error.hidden = false; error.textContent = requestError.message;
+  } finally { button.disabled = false; }
 }
 
 function mergeServer(payload) {
@@ -364,13 +403,36 @@ async function openSession(event) {
   if (!classRef || !student) { error.hidden = false; error.textContent = "Hãy chọn đúng lớp và tên có trong danh sách."; return; }
   error.hidden = true; app.identity = { classRef, studentRef: student.studentRef, label: student.label };
   try {
-    const result = await app.api.createSession(app.activitySlug, classRef, student.studentRef); const payload = result.data.session || result.data;
+    const accessCode = student.requiresAccessCode ? $("access-code").value : undefined;
+    if (student.requiresAccessCode && !/^\d{4}$/.test(accessCode)) throw new Error("Hãy nhập đúng mã 4 số của hồ sơ tạm.");
+    const result = await app.api.createSession(app.activitySlug, classRef, student.studentRef, accessCode); const payload = result.data.session || result.data;
     app.sessionRef = payload.sessionRef || payload.ref || payload.id;
     if (!app.sessionRef) throw new Error("API không trả mã phiên làm bài.");
     const session = await app.api.session(app.sessionRef); app.state = normalizeProgress(session.data.session || session.data); app.state.updatedAt = session.data.updatedAt || session.data.session?.updatedAt || null; await restoreLocal();
     $("student-label").textContent = `${student.label} · ${$("class-id").selectedOptions[0].textContent}`; $("setup-card").hidden = true; $("workspace").hidden = false; renderAll(); setSaveState(app.dirty ? "Đã khôi phục bản lưu cục bộ" : "Đã tải bài làm");
     renderTaskContent(); for (const attempt of app.state.attempts) registerAttempt(attempt); schedulePoll();
+    schedulePresence(); clearInterval(app.heartbeatTimer); app.heartbeatTimer = setInterval(schedulePresence, 30_000);
   } catch (requestError) { error.hidden = false; error.textContent = requestError.message; }
+}
+
+function schedulePresence() {
+  if (!app.sessionRef || document.hidden) return;
+  app.api.publishLive(app.sessionRef).catch(() => {});
+}
+
+async function resumeRecent() {
+  const local = await getLatestDraft(`${app.activitySlug}:`);
+  if (!local) return;
+  const error = $("identity-error"); error.hidden = true;
+  try {
+    app.identity = local.identity; app.sessionRef = local.sessionRef;
+    const result = await app.api.session(app.sessionRef); app.state = normalizeProgress(result.data.session || result.data); await restoreLocal();
+    const className = (app.roster.classes || []).find(item => (item.classRef || item.ref) === app.identity.classRef)?.className || "Lớp đã chọn";
+    $("student-label").textContent = `${app.identity.label || "Bài gần nhất"} · ${className}`;
+    $("setup-card").hidden = true; $("workspace").hidden = false; renderAll(); renderTaskContent();
+    for (const attempt of app.state.attempts) registerAttempt(attempt); schedulePoll(); schedulePresence();
+    clearInterval(app.heartbeatTimer); app.heartbeatTimer = setInterval(schedulePresence, 30_000);
+  } catch (requestError) { error.hidden = false; error.textContent = `Chưa thể tiếp tục bài gần nhất: ${requestError.message}`; }
 }
 
 function closeWithKeepalive() {
@@ -382,10 +444,14 @@ function closeWithKeepalive() {
 async function init() {
   try {
     await loadManifest(); const roster = await app.api.roster(app.activitySlug); app.roster = roster.data; renderClassOptions();
-    $("class-id").addEventListener("change", updateStudentOptions); $("identity-form").addEventListener("submit", openSession);
+    $("resume-recent").hidden = !(await getLatestDraft(`${app.activitySlug}:`));
+    $("class-id").addEventListener("change", updateStudentOptions); $("student-name").addEventListener("change", updateAccessCode); $("identity-form").addEventListener("submit", openSession);
+    $("show-provisional").addEventListener("click", () => { $("provisional-panel").hidden = !$("provisional-panel").hidden; });
+    $("create-provisional").addEventListener("click", createProvisionalStudent);
+    $("resume-recent").addEventListener("click", resumeRecent);
     $("manual-save").addEventListener("click", () => saveRemote()); $("save-close").addEventListener("click", async () => { if (!(await saveRemote("close"))) return; window.close(); setTimeout(() => showNotice("Đã lưu an toàn, bạn có thể đóng tab"), 250); });
     $("reload-server").addEventListener("click", () => location.reload()); $("keep-local").addEventListener("click", () => { app.conflict = false; $("conflict-card").hidden = true; showNotice("Bản cục bộ vẫn an toàn. Hãy tải bản mới nhất để so sánh trước khi lưu lại."); });
-    document.addEventListener("visibilitychange", () => document.hidden ? clearTimeout(app.pollTimer) : schedulePoll());
+    document.addEventListener("visibilitychange", () => document.hidden ? clearTimeout(app.pollTimer) : (schedulePoll(), schedulePresence()));
     window.addEventListener("beforeunload", (event) => { if (app.dirty) { closeWithKeepalive(); event.preventDefault(); event.returnValue = ""; } });
   } catch (error) { $("task-summary").textContent = error.message; $("identity-form").querySelector("button").disabled = true; setSaveState("Không thể khởi động bài luyện"); }
 }

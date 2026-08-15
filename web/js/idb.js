@@ -19,5 +19,10 @@ function transaction(mode, action) {
 }
 
 export const getDraft = (key) => transaction("readonly", (store) => store.get(key));
+export async function getLatestDraft(prefix) {
+  const values = await transaction("readonly", (store) => store.getAll());
+  return values.filter(item => String(item.key || "").startsWith(prefix) && item.sessionRef && item.identity)
+    .sort((left, right) => Number(right.savedAt || 0) - Number(left.savedAt || 0))[0] || null;
+}
 export const putDraft = (value) => transaction("readwrite", (store) => store.put(value));
 export const deleteDraft = (key) => transaction("readwrite", (store) => store.delete(key));

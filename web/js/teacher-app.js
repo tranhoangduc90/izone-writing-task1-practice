@@ -3,10 +3,25 @@ import { hasMeaningfulText } from "./core.js";
 import { sectionDefinitions } from "./lesson-core.js";
 import { appendMarkdown } from "./markdown.js";
 import { commentsForSection, isBackdropClick, latestVocabularyRows } from "./teacher-detail-core.js";
+import { groupStudents } from "./teacher-progress.js";
 
 const $ = (id) => document.getElementById(id);
 const state = { token: "", api: null, manifest: null, activitySlug: "", students: [], pollTimer: null,
-  selectedStudent: null, detailRequestId: 0 };
+  selectedStudent: null, detailRequestId: 0, focusSection: "", pending: [] };
+
+function teacherDefinitions() {
+  const dynamic = sectionDefinitions(state.manifest);
+  if (dynamic.length) return dynamic;
+  return [
+    { key: "overview", title: "Overview", kicker: "Task 1", instruction: "Tổng quan nổi bật", fields: [{ key: "overview", label: "Overview" }] },
+    { key: "outline", title: "Body Outline", kicker: "Task 1", instruction: "Dàn ý hai thân bài", fields: [{ key: "body1", label: "Body 1" }, { key: "body2", label: "Body 2" }] },
+    { key: "draft", title: "Draft", kicker: "Task 1", instruction: "Draft 1 và Draft 2", fields: [{ key: "draft1", label: "Draft 1" }, { key: "draft2", label: "Draft 2" }] }
+  ];
+}
+
+function teacherBodies() {
+  return state.manifest.bodies?.length ? state.manifest.bodies : [{ key: "task1", title: "Bài làm Task 1", description: "", sectionKeys: teacherDefinitions().map(item => item.key) }];
+}
 
 function showLoginError(value = "") { const node = $("teacher-login-error"); node.hidden = !value; node.textContent = value; }
 function showDashboardError(value = "") { const node = $("teacher-error"); node.hidden = !value; node.textContent = value; }
@@ -44,6 +59,10 @@ function populateClasses(students) {
 function renderSummary(students) {
   const root = $("teacher-summary");
   root.replaceChildren();
+  const support = document.createElement("button"); support.type = "button"; support.className = "teacher-summary-card"; support.dataset.state = "support";
+  const supportCount = document.createElement("strong"); supportCount.textContent = String(students.filter(item => item.supportRequired).length);
+  const supportLabel = document.createElement("span"); supportLabel.textContent = "Cần hỗ trợ"; support.append(supportCount, supportLabel);
+  support.addEventListener("click", () => document.querySelector('[data-group="support"]')?.scrollIntoView({ behavior: "smooth", block: "start" })); root.append(support);
   const statuses = ["not_started", "writing", "queued", "technical_error", "revision", "passed"];
   for (const status of statuses) {
     const card = document.createElement("article");
@@ -61,12 +80,18 @@ function renderStudents(students) {
   if (!students.length) {
     const empty = document.createElement("p"); empty.className = "card muted"; empty.textContent = "Chưa có học viên trong phạm vi đã chọn."; root.append(empty); return;
   }
-  for (const student of students) {
+  for (const group of groupStudents(students)) {
+    if (!group.students.length) continue;
+    const section = document.createElement("section"); section.className = "teacher-group"; section.dataset.group = group.key;
+    const groupTitle = document.createElement("h2"); groupTitle.className = "teacher-group-title"; groupTitle.textContent = `${group.title} · ${group.students.length}`; section.append(groupTitle);
+    for (const student of group.students) {
     const status = studentStatus(student);
     const card = document.createElement("button");
     card.type = "button";
     card.className = "teacher-student-card";
     card.dataset.state = status;
+    card.dataset.priority = student.supportRequired ? "support" : "normal";
+    card.dataset.started = String(Boolean(student.hasStarted));
     const header = document.createElement("span"); header.className = "teacher-student-header";
     const name = document.createElement("strong"); name.textContent = student.displayName;
     const badge = document.createElement("span"); badge.className = "section-status"; badge.dataset.state = status; badge.textContent = statusLabel(status);
@@ -74,12 +99,21 @@ function renderStudents(students) {
     const className = document.createElement("span"); className.className = "muted"; className.textContent = student.className;
     const meta = document.createElement("span"); meta.className = "teacher-student-meta";
     meta.textContent = `${student.online ? "Đang hoạt động" : "Không hoạt động"} · Lưu gần nhất: ${formatTime(student.savedAt)} · ${student.checkCount || 0} lần Check`;
-    card.append(header, className, meta);
-    if (student.supportWarning) {
-      const warning = document.createElement("span"); warning.className = "teacher-support-warning"; warning.textContent = "Cần hỗ trợ"; card.append(warning);
+    const progress = document.createElement("span"); progress.className = "teacher-progress";
+    const track = document.createElement("span"); track.className = "teacher-progress-track"; const fill = document.createElement("span"); fill.className = "teacher-progress-fill"; fill.style.width = `${student.progressPercent || 0}%`; track.append(fill);
+    const progressText = document.createElement("span"); progressText.textContent = `${student.progressPercent || 0}%`; progress.append(track, progressText);
+    const metrics = document.createElement("span"); metrics.className = "muted"; metrics.textContent = `${student.filledFields || 0}/${student.totalFields || 0} ô · ${student.passedSectionCount || 0} phần đạt · ${student.checkCount || 0} lần Check`;
+    const badges = document.createElement("span"); badges.className = "teacher-badges";
+    if (student.supportRequired) {
+      for (const item of student.supportSections || []) { const warning = document.createElement("span"); warning.className = "teacher-support-warning"; warning.textContent = `⚠ Cần liên hệ giảng viên · ${item.section} · Comment lần ${item.commentNumber}`; badges.append(warning); }
     }
-    card.addEventListener("click", () => showStudentDetail(student));
-    root.append(card);
+    if (student.provisional) { const provisional = document.createElement("span"); provisional.className = "teacher-provisional-badge"; provisional.textContent = "Học viên tạm · Cần đối soát"; badges.append(provisional); }
+    if (!student.hasStarted) { const blank = document.createElement("span"); blank.className = "teacher-not-started-badge"; blank.textContent = "Chưa làm"; badges.append(blank); }
+    card.append(header, className, progress, metrics, meta, badges);
+    card.addEventListener("click", () => showStudentDetail(student, student.supportSections?.[0]?.section || ""));
+    section.append(card);
+    }
+    root.append(section);
   }
 }
 
@@ -155,15 +189,16 @@ function renderStudentDetail(student, { loading = false, error = "" } = {}) {
   const promptText = document.createElement("div"); promptText.className = "markdown-body";
   appendMarkdown(promptText, state.manifest.task?.statement || "");
   prompt.append(promptLabel, promptTitle, promptText); root.append(prompt);
-  for (const body of state.manifest.bodies || []) {
+  for (const body of teacherBodies()) {
     const bodySection = document.createElement("section"); bodySection.className = "teacher-detail-body";
     const bodyTitle = document.createElement("h3"); bodyTitle.textContent = body.title;
     const bodyDescription = document.createElement("p"); bodyDescription.className = "muted"; bodyDescription.textContent = body.description || "";
     bodySection.append(bodyTitle, bodyDescription);
     for (const sectionKey of body.sectionKeys || []) {
-      const definition = sectionDefinitions(state.manifest).find((item) => item.key === sectionKey);
+      const definition = teacherDefinitions().find((item) => item.key === sectionKey);
       if (!definition) continue;
       const section = document.createElement("article"); section.className = "teacher-detail-section";
+      section.dataset.sectionKey = sectionKey;
       const sectionKicker = document.createElement("p"); sectionKicker.className = "section-kicker"; sectionKicker.textContent = definition.kicker || "";
       const sectionTitle = document.createElement("h4");
       const sectionInfo = student.sections?.[sectionKey] || {};
@@ -216,6 +251,7 @@ function renderStudentDetail(student, { loading = false, error = "" } = {}) {
     const message = document.createElement("p"); message.className = "notice"; message.textContent = error; root.prepend(message);
   }
   if (dialog.open) requestAnimationFrame(() => { dialog.scrollTop = previousScroll; });
+  if (state.focusSection) requestAnimationFrame(() => root.querySelector(`[data-section-key="${CSS.escape(state.focusSection)}"]`)?.scrollIntoView({ block: "center" }));
 }
 
 async function loadStudentDetail(student) {
@@ -238,12 +274,31 @@ async function loadStudentDetail(student) {
   }
 }
 
-function showStudentDetail(student) {
+function showStudentDetail(student, focusSection = "") {
   state.selectedStudent = student;
+  state.focusSection = focusSection;
   renderStudentDetail(student, { loading: Boolean(student.sessionRef) });
   const dialog = $("teacher-detail");
   if (!dialog.open) dialog.showModal();
   void loadStudentDetail(student);
+}
+
+function renderReconciliation() {
+  const panel = $("teacher-reconciliation"); const root = $("teacher-reconciliation-list"); root.replaceChildren();
+  panel.hidden = !state.pending.length;
+  for (const item of state.pending) {
+    const row = document.createElement("article"); row.className = "teacher-student-card";
+    const title = document.createElement("strong"); title.textContent = `${item.displayName} · ${item.className}`;
+    const candidates = state.students.filter(student => student.classRef === item.classRef && !student.provisional);
+    const select = document.createElement("select"); const placeholder = document.createElement("option"); placeholder.value = ""; placeholder.textContent = "Chọn hồ sơ chính thức"; select.append(placeholder);
+    for (const candidate of candidates) { const option = document.createElement("option"); option.value = candidate.studentRef; option.textContent = candidate.displayName; select.append(option); }
+    const actions = document.createElement("span"); actions.className = "actions";
+    const reset = document.createElement("button"); reset.type = "button"; reset.className = "secondary"; reset.textContent = "Đặt lại mã";
+    reset.addEventListener("click", async () => { const result = await state.api.resetProvisionalCode(item.studentRef); alert(`Mã mới của ${item.displayName}: ${result.data.accessCode}\nMã chỉ hiển thị lần này.`); });
+    const match = document.createElement("button"); match.type = "button"; match.className = "primary"; match.textContent = "Ghép hồ sơ";
+    match.addEventListener("click", async () => { if (!select.value) return; try { await state.api.reconcileProvisional(item.studentRef, select.value); await refresh(); } catch (error) { showDashboardError(error.message); } });
+    actions.append(reset, match); row.append(title, select, actions); root.append(row);
+  }
 }
 
 async function refresh() {
@@ -252,9 +307,12 @@ async function refresh() {
   try {
     const result = await state.api.liveActivity(state.activitySlug, $("teacher-class").value);
     state.students = result.data.students || [];
+    const pendingResult = await state.api.provisionalStudents(state.activitySlug, $("teacher-class").value);
+    state.pending = pendingResult.data.students || [];
     populateClasses(state.students);
     renderSummary(state.students);
     renderStudents(state.students);
+    renderReconciliation();
     $("teacher-updated").textContent = `Cập nhật lúc ${formatTime(result.data.generatedAt)}`;
     showDashboardError();
     if ($("teacher-detail").open && state.selectedStudent) {
@@ -310,6 +368,7 @@ async function init() {
     state.api = createTeacherApi(config.apiBase || "", () => state.token);
     $("teacher-title").textContent = state.manifest.activity?.title || "Theo dõi bài làm";
     $("teacher-class").addEventListener("change", refresh);
+    $("teacher-export").addEventListener("click", async () => { const blob = await state.api.exportProgress(state.activitySlug, $("teacher-class").value); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = `${state.activitySlug}-progress.csv`; link.click(); URL.revokeObjectURL(url); });
     const detail = $("teacher-detail");
     detail.addEventListener("click", (event) => {
       if (event.target === detail && isBackdropClick(event, detail.getBoundingClientRect())) detail.close();

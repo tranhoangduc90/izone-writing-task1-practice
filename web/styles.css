@@ -163,7 +163,7 @@ textarea { resize:vertical; min-height:10rem; line-height:1.55; }
 .teacher-summary-card[data-state="technical_error"] { border-color:#d58b36; background:#fff4e8; }
 .teacher-summary-card[data-state="revision"] { border-color:#efaaa2; background:var(--revision-surface); }
 .teacher-summary-card[data-state="passed"] { border-color:#8fd0aa; background:var(--passed-surface); }
-.teacher-students { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:.85rem; }
+.teacher-students { display:grid; grid-template-columns:minmax(0,1fr); gap:.85rem; }
 .teacher-student-card { display:grid; gap:.35rem; min-height:150px; padding:1rem; border:1px solid var(--line); border-radius:12px; background:#fff; color:var(--ink); text-align:left; box-shadow:0 1px 2px rgb(15 23 42/.04); }
 .teacher-student-card:hover { border-color:#8aaed7; box-shadow:0 6px 18px rgb(20 33 61/.08); }
 .teacher-student-card[data-state="queued"] { border-left:5px solid var(--warning); }
@@ -173,6 +173,28 @@ textarea { resize:vertical; min-height:10rem; line-height:1.55; }
 .teacher-student-header { display:flex; justify-content:space-between; gap:.6rem; align-items:flex-start; }
 .teacher-student-meta { color:#526078; font-size:.84rem; }
 .teacher-support-warning { justify-self:start; padding:.2rem .5rem; border-radius:999px; background:#fee4e2; color:var(--danger); font-size:.78rem; font-weight:800; }
+.link-button { min-height:44px; padding:.4rem 0; border:0; background:transparent; color:#0759b5; text-align:left; text-decoration:underline; font-weight:750; }
+.provisional-panel { display:grid; gap:.75rem; margin:.5rem 0; padding:1rem; border:1px solid #e0a63d; border-radius:12px; background:#fff9e8; }
+.provisional-panel h2,.provisional-panel p { margin:0; }
+.pin-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.75rem; }
+.checkbox-row { display:flex!important; flex-direction:row!important; align-items:center; gap:.55rem; }
+.checkbox-row input { width:20px; height:20px; }
+.teacher-group { display:grid; gap:.75rem; }
+.teacher-group-title { margin:1rem 0 0; padding-bottom:.45rem; border-bottom:2px solid var(--line); font-size:1.15rem; }
+.teacher-group[data-group="support"] .teacher-group-title { color:var(--danger); border-color:#e99a93; }
+.teacher-student-card[data-priority="support"] { border:2px solid #d92d20; background:#fff4f3; }
+.teacher-student-card[data-started="false"] { border-style:dashed; background:#f3f4f6; }
+.teacher-badges { display:flex; flex-wrap:wrap; gap:.4rem; }
+.teacher-provisional-badge,.teacher-not-started-badge { justify-self:start; padding:.22rem .55rem; border-radius:999px; font-size:.78rem; font-weight:800; }
+.teacher-provisional-badge { color:#855300; background:#ffefba; }
+.teacher-not-started-badge { color:#475467; background:#e4e7ec; }
+.teacher-progress { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:.6rem; }
+.teacher-progress-track { height:9px; overflow:hidden; border-radius:999px; background:#e4e7ec; }
+.teacher-progress-fill { height:100%; background:#2b6cb0; }
+.teacher-summary-card[data-state="support"] { border:2px solid #d92d20; background:#fff4f3; cursor:pointer; }
+.reconciliation-panel { display:grid; gap:.75rem; margin-top:1rem; padding:1rem; border:1px solid #e0a63d; border-radius:12px; background:#fff9e8; }
+@media(max-width:560px){.pin-grid{grid-template-columns:1fr}.teacher-student-meta{line-height:1.5}}
+[hidden] { display:none!important; }
 .teacher-detail { width:min(1420px,calc(100% - 2rem)); max-height:90vh; padding:1.25rem; border:0; border-radius:16px; color:var(--ink); box-shadow:0 25px 60px rgb(15 23 42/.28); }
 .teacher-detail::backdrop { background:rgb(15 23 42/.52); }
 .dialog-close { float:right; width:44px; height:44px; border:1px solid var(--line); border-radius:50%; background:#fff; color:var(--ink); font-size:1.5rem; }
@@ -200,7 +222,7 @@ textarea { resize:vertical; min-height:10rem; line-height:1.55; }
 .teacher-ai-recovery p { flex:1 1 320px; margin:0; color:#7a3d0c; }
 
 @media (min-width:760px) {
-  .teacher-summary { grid-template-columns:repeat(6,minmax(0,1fr)); }
+  .teacher-summary { grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); }
 }
 @media (min-width:920px) {
   .teacher-detail-section-layout { grid-template-columns:minmax(0,1fr) minmax(380px,.9fr); }

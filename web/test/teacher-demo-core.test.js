@@ -1,14 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { advanceLiveDemo, createLiveDemoState, demoMetrics, forceNextAiFailures, MAX_AI_CONCURRENCY } from "../js/teacher-demo-core.js";
+import { advanceLiveDemo, createLiveDemoState, demoMetrics, forceNextAiFailures } from "../js/teacher-demo-core.js";
 
-test("live demo starts with 40 synthetic students and never exceeds four AI jobs", () => {
+test("live demo starts every queued AI job without a fixed four-job cap", () => {
   const state = createLiveDemoState();
   assert.equal(state.students.length, 40);
-  for (let index = 0; index < 30; index += 1) {
-    advanceLiveDemo(state);
-    assert.ok(demoMetrics(state).running <= MAX_AI_CONCURRENCY);
-  }
+  const queuedBefore = demoMetrics(state).waiting;
+  assert.ok(queuedBefore > 4);
+  advanceLiveDemo(state);
+  assert.equal(demoMetrics(state).running, queuedBefore);
 });
 
 test("a transient AI failure retries the same Comment while database saves continue", () => {

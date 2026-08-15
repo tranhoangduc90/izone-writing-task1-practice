@@ -1,4 +1,4 @@
-import { advanceLiveDemo, createLiveDemoState, demoMetrics, demoStatusLabel, forceNextAiFailures, MAX_AI_CONCURRENCY } from "./teacher-demo-core.js";
+import { advanceLiveDemo, createLiveDemoState, demoMetrics, demoStatusLabel, forceNextAiFailures } from "./teacher-demo-core.js";
 
 const $ = (id) => document.getElementById(id);
 let state = createLiveDemoState();
@@ -15,7 +15,7 @@ function renderMetrics() {
   const values = [
     ["Đang hoạt động", metrics.online, "writing"],
     ["Đã có bản lưu", metrics.saved, "passed"],
-    ["AI đang chấm", `${metrics.running}/${MAX_AI_CONCURRENCY}`, "queued"],
+    ["AI đang chấm", String(metrics.running), "queued"],
     ["Đang chờ", metrics.waiting, "queued"],
     ["Lỗi chấm", metrics.counts.technical_error, "technical_error"],
     ["Tổng lượt lưu", metrics.totalDatabaseSaves, "not_started"],

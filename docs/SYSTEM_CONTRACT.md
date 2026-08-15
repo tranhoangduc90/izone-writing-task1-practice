@@ -61,7 +61,7 @@ Base path: `/api/v1/internal/grading-jobs`. Mọi request dùng Bearer token ri�
 
 `claim` không chứa tên học viên. Nó trả task, section, snapshot và lịch sử Comment. Overview/Outline còn nhận `promptRegistryKey`, `promptRecordId` và `promptVersion` đã ghim cho phiên đó.
 
-Prompt Registry của app dùng `prompt_overview` và `prompt_outline_body`. Draft được chuyển bằng webhook có xác thực sang workflow **06b. Draft 2 - Task 1**, dùng luồng chấm từng câu hiện có rồi trả một link LMS; prompt Draft không được đưa vào GitHub Pages hoặc response công khai.
+Prompt Registry của app dùng `prompt_overview` và `prompt_outline_body`. Draft được workflow hàng đợi chuyển nội bộ sang workflow **06b. Draft 2 - Task 1**, dùng luồng chấm từng câu hiện có rồi trả một link LMS. Không mở thêm webhook Draft công khai; prompt Draft không được đưa vào GitHub Pages hoặc response công khai.
 
 ## Quy tắc đếm và khóa
 

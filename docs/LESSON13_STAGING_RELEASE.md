@@ -1,5 +1,7 @@
 # Cổng thử nghiệm Lesson 13 — đã hoàn tất
 
+> Ghi chú hiện hành: giới hạn bốn lượt chấm trong bản staging này đã được bỏ khỏi API production. n8n là nơi duy nhất điều tiết tải; `maxJobs` chỉ giới hạn kích thước một lần lấy hàng đợi.
+
 ## Trạng thái hiện tại
 
 - Staging PostgreSQL thật đã kiểm thử 40 học viên giả, 18 ô nhập, xung đột phiên bản, chống Check trùng và giới hạn bốn lượt chấm đồng thời.

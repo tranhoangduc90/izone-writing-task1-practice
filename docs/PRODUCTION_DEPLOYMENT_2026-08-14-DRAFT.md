@@ -1,5 +1,7 @@
 # Phát hành phần Draft ngày 2026-08-14
 
+> Trạng thái hiện hành: bản feedback trực tiếp này đã được thay bằng bản trả một link LMS ngày 2026-08-15. API production hiện không còn giới hạn bốn job leased; xem `PRODUCTION_DEPLOYMENT_2026-08-15-DRAFT-LMS.md`.
+
 ## Kết quả
 
 - Commit phát hành: `a63295801fa07864d5f7e07f7c7dffec51fa001d`.

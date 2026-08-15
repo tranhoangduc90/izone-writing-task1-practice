@@ -1,5 +1,3 @@
-export const MAX_AI_CONCURRENCY = 4;
-
 const STATUS_LABELS = {
   not_started: "Chưa làm",
   writing: "Đang viết",
@@ -137,14 +135,11 @@ function finishRunningJobs(state) {
 }
 
 function startQueuedJobs(state) {
-  let available = MAX_AI_CONCURRENCY - state.jobs.filter((job) => job.status === "running").length;
   for (const job of state.jobs) {
-    if (available <= 0) break;
     if (job.status !== "queued") continue;
     job.status = "running";
     job.startedTick = state.tick;
     state.students[job.studentIndex].status = "running";
-    available -= 1;
   }
 }
 

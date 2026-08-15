@@ -28,6 +28,18 @@ test("pilot manifest contains the released chart and six approved routes", () =>
   assert.doesNotMatch(JSON.stringify(manifest), /grader.?prompt|credential|api.?key|student.?data|Bearer /i);
 });
 
+test("record 90 manifest contains its released chart, two routes and vocabulary", () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifests", "australian-destinations-1999-2009.json"), "utf8"));
+  assert.equal(manifest.schema_version, "task1-web-manifest-v1");
+  assert.equal(manifest.activity.slug, "australian-destinations-1999-2009");
+  assert.equal(manifest.task.chart_image.url, "assets/task1-australian-destinations-1999-2009.jpeg");
+  assert.equal(manifest.routes.length, 2);
+  assert.equal(manifest.routes.filter((route) => route.recommended).length, 1);
+  assert.equal(manifest.vocabulary.routes.length, manifest.routes.length);
+  assert.ok(manifest.vocabulary.overview.naming.length >= 9);
+  assert.doesNotMatch(JSON.stringify(manifest), /grader.?prompt|credential|api.?key|student.?data|Bearer /i);
+});
+
 test("public config only contains non-secret browser configuration", () => {
   const config = JSON.parse(fs.readFileSync(path.join(root, "config.json"), "utf8"));
   assert.deepEqual(Object.keys(config), ["apiBase", "googleClientId"]);

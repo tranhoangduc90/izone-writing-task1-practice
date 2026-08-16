@@ -5,6 +5,7 @@ import { createWritingPracticeService } from './service.js';
 import { createLessonPracticeService } from './lesson-service.js';
 import { createTeacherAuthMiddleware } from './teacher-auth.js';
 import { createProvisionalStudentService } from './provisional-service.js';
+import { createTeacherCommentService } from './teacher-comment-service.js';
 
 const config = loadConfig();
 const pool = createDatabasePool(config);
@@ -15,6 +16,7 @@ const app = createApp({
   service: createWritingPracticeService({ pool, provisionalService }),
   lessonService: createLessonPracticeService({ pool, provisionalService }),
   provisionalService,
+  teacherCommentService: createTeacherCommentService({ pool }),
   adminAuth: createTeacherAuthMiddleware({ config, pool })
 });
 const server = app.listen(config.port, '0.0.0.0', () => console.log(`Writing Task 1 API đang lắng nghe tại cổng ${config.port}.`));

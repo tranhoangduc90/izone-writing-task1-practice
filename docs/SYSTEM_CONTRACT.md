@@ -46,6 +46,18 @@ Hỗ trợ `If-None-Match`; chưa đổi trả `304`.
 
 Đưa lỗi kỹ thuật về hàng đợi trên cùng Comment khi lượt đó chưa dùng hết ba lần thử.
 
+## Comment trực tiếp của giảng viên
+
+Đây là luồng độc lập với Comment AI. Nó không tạo Check, không gọi n8n/Gemini, không tăng `failStreak` và không thay đổi trạng thái section.
+
+- `GET /api/v1/sessions/:sessionRef/teacher-comments`: học viên đọc toàn bộ thread, gồm cả thread đã đánh dấu xử lý; hỗ trợ `ETag/304`.
+- `POST /api/v1/sessions/:sessionRef/teacher-comments/:threadRef/replies`: học viên chỉ được thêm câu trả lời.
+- `POST /api/v1/admin/live/sessions/:sessionRef/teacher-comments`: giảng viên bôi một đoạn đã lưu và tạo thread mới.
+- `POST /api/v1/admin/teacher-comments/:threadRef/replies`: giảng viên trả lời thread.
+- `POST /api/v1/admin/teacher-comments/:threadRef/status`: giảng viên chuyển `open|addressed`; đổi trạng thái không ẩn hoặc xóa nội dung.
+
+Không có endpoint sửa, xóa, chấp thuận hoặc ẩn comment. Nếu học viên sửa đoạn được neo, hệ thống tìm lại bằng quote và ngữ cảnh; nếu không còn tìm thấy, thread chuyển thành “đoạn gốc đã thay đổi” nhưng vẫn tồn tại. Tất cả request ghi dùng UUID idempotency riêng.
+
 ### `POST /api/v1/admin/sessions/:sessionRef/sections/:section/reopen`
 
 Yêu cầu Google ID token của giảng viên có quyền; mở vòng mới và ghi audit, không xóa lịch sử cũ.

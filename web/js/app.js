@@ -2,6 +2,7 @@ import { createApi } from "./api.js";
 import { SECTION_KEYS, canUnlockDraft2, createRequestId, draftPrerequisitesPassed, hasMeaningfulText, isConflict, normalizeProgress, pollingDelay, rebaseLocalProgress, safeHttpUrl, safeLmsUrl, terminalResult, wordCount } from "./core.js";
 import { getDraft, getLatestDraft, putDraft } from "./idb.js";
 import { appendInlineMarkdown, appendMarkdown } from "./markdown.js";
+import { renderStudentFieldComments } from "./teacher-comments-ui.js";
 
 const $ = (id) => document.getElementById(id);
 const SECTION_INFO = {
@@ -9,7 +10,7 @@ const SECTION_INFO = {
   outline: { title: "Outline", kicker: "Phần 2", fields: [{ key: "body1", label: "Body 1", placeholder: "Nhóm số liệu thứ nhất…" }, { key: "body2", label: "Body 2", placeholder: "Nhóm số liệu thứ hai…" }] },
   draft: { title: "Draft 1 → Draft 2", kicker: "Phần 3", fields: [{ key: "draft1", label: "Draft 1", placeholder: "Viết liên tục phần Overview và Body 1…" }, { key: "draft2", label: "Draft 2", placeholder: "Sửa bản sao Draft 1 thành tiếng Anh hoàn chỉnh…" }] },
 };
-const app = { manifest: null, activitySlug: null, api: null, roster: null, identity: null, sessionRef: null, state: null, dirty: false, idbTimer: null, saveTimer: null, pollTimer: null, heartbeatTimer: null, pendingAttempts: new Map(), conflict: false, conflictServer: null };
+const app = { manifest: null, activitySlug: null, api: null, roster: null, identity: null, sessionRef: null, state: null, dirty: false, idbTimer: null, saveTimer: null, pollTimer: null, heartbeatTimer: null, pendingAttempts: new Map(), conflict: false, conflictServer: null, teacherComments: [], teacherCommentsEtag: null, teacherCommentTimer: null };
 
 function setSaveState(text) { $("save-state").textContent = text; }
 function showNotice(text = "") { const node = $("network-notice"); node.hidden = !text; node.textContent = text; }
@@ -193,13 +194,53 @@ function addDraftGuidance(card) {
 }
 
 function addTextarea(card, section, field, disabled) {
+  const fieldRoot = document.createElement("div"); fieldRoot.className = "practice-field"; fieldRoot.dataset.fieldKey = field.key;
   const label = document.createElement("label"); label.textContent = field.label;
   const textarea = document.createElement("textarea"); textarea.name = field.key; textarea.rows = section === "overview" ? 7 : section === "draft" ? 10 : 5; textarea.maxLength = 5000; textarea.placeholder = field.placeholder; textarea.value = app.state.texts[field.key]; textarea.disabled = disabled;
+  const teacherComments = document.createElement("section"); teacherComments.className = "student-teacher-comments"; teacherComments.dataset.teacherCommentField = field.key;
   textarea.addEventListener("input", () => {
     app.state.texts[field.key] = textarea.value; markDirty(); refreshSection(card, section);
+    renderTeacherCommentsForField(teacherComments, field.key);
     const unlock = card.querySelector(".unlock-draft2"); if (unlock) unlock.disabled = disabled || !canUnlockDraft2(app.state.texts);
   });
-  label.append(textarea); card.querySelector(".text-fields").append(label);
+  label.append(textarea); fieldRoot.append(label, teacherComments); card.querySelector(".text-fields").append(fieldRoot);
+  renderTeacherCommentsForField(teacherComments, field.key);
+}
+
+function renderTeacherCommentsForField(root, fieldKey) {
+  renderStudentFieldComments(root, {
+    fieldKey,
+    text: app.state?.texts?.[fieldKey] || "",
+    threads: app.teacherComments,
+    onReply: async (thread, body) => {
+      await app.api.replyTeacherComment(app.sessionRef, thread.threadRef, body);
+      await refreshTeacherComments(true);
+    },
+  });
+}
+
+function renderTeacherCommentPanels() {
+  for (const root of document.querySelectorAll("[data-teacher-comment-field]")) renderTeacherCommentsForField(root, root.dataset.teacherCommentField);
+}
+
+function scheduleTeacherComments() {
+  clearTimeout(app.teacherCommentTimer);
+  if (app.sessionRef && !document.hidden) app.teacherCommentTimer = setTimeout(() => refreshTeacherComments(), 15_000);
+}
+
+async function refreshTeacherComments(force = false) {
+  clearTimeout(app.teacherCommentTimer);
+  if (!app.sessionRef || document.hidden) return;
+  if (!force && document.activeElement?.closest?.(".teacher-comment-reply")) { scheduleTeacherComments(); return; }
+  try {
+    const result = await app.api.teacherComments(app.sessionRef, force ? null : app.teacherCommentsEtag);
+    if (!result.notModified) {
+      app.teacherComments = result.data.threads || [];
+      app.teacherCommentsEtag = result.etag || null;
+      renderTeacherCommentPanels();
+    }
+  } catch { /* Comment giảng viên độc lập; lỗi tải không được làm gián đoạn viết bài hoặc Check. */ }
+  scheduleTeacherComments();
 }
 
 function renderDraftFields(card, locked, prerequisitesPassed) {
@@ -421,7 +462,7 @@ async function openSession(event) {
     // Mã chỉ dùng để mở phiên hồ sơ tạm; xóa khỏi DOM ngay sau khi xác thực thành công.
     $("access-code").value = ""; $("provisional-pin").value = ""; $("provisional-pin-confirm").value = "";
     $("student-label").textContent = `${student.label} · ${$("class-id").selectedOptions[0].textContent}`; $("setup-card").hidden = true; $("workspace").hidden = false; renderAll(); setSaveState(app.dirty ? "Đã khôi phục bản lưu cục bộ" : "Đã tải bài làm");
-    renderTaskContent(); for (const attempt of app.state.attempts) registerAttempt(attempt); schedulePoll();
+    renderTaskContent(); for (const attempt of app.state.attempts) registerAttempt(attempt); schedulePoll(); void refreshTeacherComments(true);
     schedulePresence(); clearInterval(app.heartbeatTimer); app.heartbeatTimer = setInterval(schedulePresence, 30_000);
   } catch (requestError) { error.hidden = false; error.textContent = requestError.message; }
 }
@@ -441,7 +482,7 @@ async function resumeRecent() {
     const className = (app.roster.classes || []).find(item => (item.classRef || item.ref) === app.identity.classRef)?.className || "Lớp đã chọn";
     $("student-label").textContent = `${app.identity.label || "Bài gần nhất"} · ${className}`;
     $("setup-card").hidden = true; $("workspace").hidden = false; renderAll(); renderTaskContent(); setSaveState(app.dirty ? "Đã khôi phục bản lưu cục bộ" : "Đã tải bài làm");
-    for (const attempt of app.state.attempts) registerAttempt(attempt); schedulePoll(); schedulePresence();
+    for (const attempt of app.state.attempts) registerAttempt(attempt); schedulePoll(); schedulePresence(); void refreshTeacherComments(true);
     clearInterval(app.heartbeatTimer); app.heartbeatTimer = setInterval(schedulePresence, 30_000);
   } catch (requestError) { error.hidden = false; error.textContent = `Chưa thể tiếp tục bài gần nhất: ${requestError.message}`; }
 }
@@ -476,7 +517,7 @@ async function init() {
         if (await saveRemote("manual")) showNotice("Đã lưu an toàn bản trên thiết bị lên hệ thống. Bây giờ bạn có thể Check.");
       } catch { app.conflict = true; $("conflict-card").hidden = false; renderAll(); showNotice("Chưa đồng bộ được. Bản trên thiết bị vẫn an toàn; hãy thử lại khi mạng ổn định."); }
     });
-    document.addEventListener("visibilitychange", () => document.hidden ? clearTimeout(app.pollTimer) : (schedulePoll(), schedulePresence()));
+    document.addEventListener("visibilitychange", () => document.hidden ? (clearTimeout(app.pollTimer), clearTimeout(app.teacherCommentTimer)) : (schedulePoll(), schedulePresence(), refreshTeacherComments()));
     window.addEventListener("beforeunload", (event) => { if (app.dirty) { closeWithKeepalive(); event.preventDefault(); event.returnValue = ""; } });
   } catch (error) { $("task-summary").textContent = error.message; $("identity-form").querySelector("button").disabled = true; setSaveState("Không thể khởi động bài luyện"); }
 }

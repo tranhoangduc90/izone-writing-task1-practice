@@ -44,6 +44,8 @@ export function createApi(base = "") {
     }, revision == null ? {} : { "if-match": String(revision) })),
     attempt: (attemptRef, etag) => fetchJson(endpoint(root, `attempts/${encodeURIComponent(attemptRef)}`), { headers: etag ? { "if-none-match": etag } : {} }),
     retryAttempt: (attemptRef) => fetchJson(endpoint(root, `attempts/${encodeURIComponent(attemptRef)}/retry`), jsonOptions("POST", {})),
+    teacherComments: (sessionRef, etag) => fetchJson(endpoint(root, `sessions/${encodeURIComponent(sessionRef)}/teacher-comments`), { headers: etag ? { "if-none-match": etag } : {} }),
+    replyTeacherComment: (sessionRef, threadRef, body, requestId = createRequestId()) => fetchJson(endpoint(root, `sessions/${encodeURIComponent(sessionRef)}/teacher-comments/${encodeURIComponent(threadRef)}/replies`), jsonOptions("POST", { body, requestId })),
     publishLive: (sessionRef) => fetchJson(endpoint(root, `sessions/${encodeURIComponent(sessionRef)}/live`), jsonOptions("PUT", {}, {}, true)),
     beaconUrl: (sessionRef) => endpoint(root, `sessions/${encodeURIComponent(sessionRef)}/draft`),
   };
@@ -75,6 +77,8 @@ export function createLessonApi(base = "") {
     }, {}, true)),
     attempt: (attemptRef, etag) => fetchJson(endpoint(root, `attempts/${encodeURIComponent(attemptRef)}`), { headers: etag ? { "if-none-match": etag } : {} }),
     retryAttempt: (attemptRef) => fetchJson(endpoint(root, `attempts/${encodeURIComponent(attemptRef)}/retry`), jsonOptions("POST", {})),
+    teacherComments: (sessionRef, etag) => fetchJson(endpoint(root, `sessions/${encodeURIComponent(sessionRef)}/teacher-comments`), { headers: etag ? { "if-none-match": etag } : {} }),
+    replyTeacherComment: (sessionRef, threadRef, body, requestId = createRequestId()) => fetchJson(endpoint(root, `sessions/${encodeURIComponent(sessionRef)}/teacher-comments/${encodeURIComponent(threadRef)}/replies`), jsonOptions("POST", { body, requestId })),
     beaconUrl: (sessionRef) => endpoint(root, `lesson-sessions/${encodeURIComponent(sessionRef)}/responses`),
   };
 }
@@ -94,6 +98,10 @@ export function createTeacherApi(base = "", getToken = () => "") {
     reconcileProvisional: (studentRef, officialStudentRef) => fetchJson(endpoint(root, `admin/provisional-students/${encodeURIComponent(studentRef)}/reconcile`), jsonOptions("POST", { officialStudentRef }, authorized())),
     exportProgress: async (slug, classRef = "") => { const url = new URL(endpoint(root, `admin/activities/${encodeURIComponent(slug)}/export.csv`)); if (classRef) url.searchParams.set("classRef", classRef); const response = await fetch(url, { headers: authorized() }); if (!response.ok) throw new Error(`Không thể tải CSV (${response.status}).`); return response.blob(); },
     retryFailedAttempt: (attemptRef) => fetchJson(endpoint(root, `admin/attempts/${encodeURIComponent(attemptRef)}/retry`), jsonOptions("POST", {}, authorized())),
+    teacherComments: (sessionRef, etag) => fetchJson(endpoint(root, `admin/live/sessions/${encodeURIComponent(sessionRef)}/teacher-comments`), { headers: { ...authorized(), ...(etag ? { "if-none-match": etag } : {}) } }),
+    createTeacherComment: (sessionRef, payload) => fetchJson(endpoint(root, `admin/live/sessions/${encodeURIComponent(sessionRef)}/teacher-comments`), jsonOptions("POST", payload, authorized())),
+    replyTeacherComment: (threadRef, body, requestId = createRequestId()) => fetchJson(endpoint(root, `admin/teacher-comments/${encodeURIComponent(threadRef)}/replies`), jsonOptions("POST", { body, requestId }, authorized())),
+    setTeacherCommentStatus: (threadRef, status, requestId = createRequestId()) => fetchJson(endpoint(root, `admin/teacher-comments/${encodeURIComponent(threadRef)}/status`), jsonOptions("POST", { status, requestId }, authorized())),
     reopenSection: (sessionRef, section, reason) => fetchJson(endpoint(root, `admin/lesson-sessions/${encodeURIComponent(sessionRef)}/sections/${encodeURIComponent(section)}/reopen`), jsonOptions("POST", { reason }, authorized())),
   };
 }

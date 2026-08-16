@@ -3,6 +3,7 @@ import { createRequestId, isConflict, pollingDelay, terminalResult, wordCount } 
 import { getDraft, getLatestDraft, putDraft } from "./idb.js";
 import { fieldDefinitions, normalizeLessonProgress, sectionDefinitions, sectionIsFilled } from "./lesson-core.js";
 import { appendMarkdown } from "./markdown.js";
+import { renderStudentFieldComments } from "./teacher-comments-ui.js";
 
 const $ = (id) => document.getElementById(id);
 const app = {
@@ -23,6 +24,9 @@ const app = {
   changeSequence: 0,
   savingPromise: null,
   pendingAttempts: new Map(),
+  teacherComments: [],
+  teacherCommentsEtag: null,
+  teacherCommentTimer: null,
 };
 
 function setSaveState(value) { $("lesson-save-state").textContent = value; }
@@ -204,6 +208,7 @@ function schedulePresence(activeField = app.activeField) {
 }
 
 function addTextarea(card, section, field, locked) {
+  const fieldRoot = document.createElement("div"); fieldRoot.className = "practice-field"; fieldRoot.dataset.fieldKey = field.key;
   const label = document.createElement("label");
   label.textContent = field.label;
   const textarea = document.createElement("textarea");
@@ -213,10 +218,12 @@ function addTextarea(card, section, field, locked) {
   textarea.placeholder = field.placeholder || "";
   textarea.value = app.state.responses[field.key] || "";
   textarea.disabled = locked;
+  const teacherComments = document.createElement("section"); teacherComments.className = "student-teacher-comments"; teacherComments.dataset.teacherCommentField = field.key;
   textarea.addEventListener("input", () => {
     app.state.responses[field.key] = textarea.value;
     markDirty();
     updateWordCount(card, section);
+    renderTeacherCommentsForField(teacherComments, field.key);
   });
   textarea.addEventListener("focus", () => { app.activeField = field.key; schedulePresence(); });
   textarea.addEventListener("blur", () => {
@@ -225,7 +232,45 @@ function addTextarea(card, section, field, locked) {
     if (app.dirty) saveRemote("field").catch(() => {});
   });
   label.append(textarea);
-  card.querySelector(".text-fields").append(label);
+  fieldRoot.append(label, teacherComments);
+  card.querySelector(".text-fields").append(fieldRoot);
+  renderTeacherCommentsForField(teacherComments, field.key);
+}
+
+function renderTeacherCommentsForField(root, fieldKey) {
+  renderStudentFieldComments(root, {
+    fieldKey,
+    text: app.state?.responses?.[fieldKey] || "",
+    threads: app.teacherComments,
+    onReply: async (thread, body) => {
+      await app.api.replyTeacherComment(app.sessionRef, thread.threadRef, body);
+      await refreshTeacherComments(true);
+    },
+  });
+}
+
+function renderTeacherCommentPanels() {
+  for (const root of document.querySelectorAll("[data-teacher-comment-field]")) renderTeacherCommentsForField(root, root.dataset.teacherCommentField);
+}
+
+function scheduleTeacherComments() {
+  clearTimeout(app.teacherCommentTimer);
+  if (app.sessionRef && !document.hidden) app.teacherCommentTimer = setTimeout(() => refreshTeacherComments(), 15_000);
+}
+
+async function refreshTeacherComments(force = false) {
+  clearTimeout(app.teacherCommentTimer);
+  if (!app.sessionRef || document.hidden) return;
+  if (!force && document.activeElement?.closest?.(".teacher-comment-reply")) { scheduleTeacherComments(); return; }
+  try {
+    const result = await app.api.teacherComments(app.sessionRef, force ? null : app.teacherCommentsEtag);
+    if (!result.notModified) {
+      app.teacherComments = result.data.threads || [];
+      app.teacherCommentsEtag = result.etag || null;
+      renderTeacherCommentPanels();
+    }
+  } catch { /* Comment trực tiếp độc lập; lỗi tải không được làm gián đoạn luồng Check. */ }
+  scheduleTeacherComments();
 }
 
 function updateWordCount(card, section) {
@@ -484,6 +529,7 @@ async function openSession(event) {
     $("lesson-setup").hidden = true;
     $("lesson-workspace").hidden = false;
     renderBodies();
+    void refreshTeacherComments(true);
     setSaveState(app.dirty ? "Đã khôi phục bản lưu trên thiết bị" : "Đã tải bài làm");
     for (const attempt of app.state.attempts) registerAttempt(attempt);
     schedulePresence();
@@ -502,7 +548,7 @@ async function resumeRecent() {
     const result = await app.api.session(app.sessionRef); app.state = normalizeLessonProgress(result.data.session || result.data, app.manifest); await restoreLocal();
     const className = app.roster.classes?.find(item => item.classRef === app.identity.classRef)?.className || "Lớp đã chọn";
     $("lesson-student-label").textContent = `${app.identity.label || "Bài gần nhất"} · ${className}`;
-    $("lesson-setup").hidden = true; $("lesson-workspace").hidden = false; renderBodies();
+    $("lesson-setup").hidden = true; $("lesson-workspace").hidden = false; renderBodies(); void refreshTeacherComments(true);
     for (const attempt of app.state.attempts) registerAttempt(attempt); schedulePresence();
     clearInterval(app.heartbeatTimer); app.heartbeatTimer = setInterval(schedulePresence, 30_000);
   } catch (error) { errorNode.hidden = false; errorNode.textContent = `Chưa thể tiếp tục bài gần nhất: ${error.message}`; }
@@ -535,8 +581,8 @@ async function init() {
     });
     $("lesson-reload").addEventListener("click", () => location.reload());
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden) clearTimeout(app.pollTimer);
-      else { schedulePoll(); schedulePresence(); }
+      if (document.hidden) { clearTimeout(app.pollTimer); clearTimeout(app.teacherCommentTimer); }
+      else { schedulePoll(); schedulePresence(); refreshTeacherComments(); }
     });
     window.addEventListener("beforeunload", (event) => {
       if (!app.dirty) return;

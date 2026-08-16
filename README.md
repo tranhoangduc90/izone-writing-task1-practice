@@ -20,6 +20,8 @@ Repo cũng có bản nháp **Writing trên lớp 67 – Lesson 13**, gộp hai h
 5. Overview/Outline dùng Prompt Registry + Gemini Hub. Draft dùng workflow chấm từng câu hiện có; khi LMS tạo xong trang kết quả, app hiện một link duy nhất và khóa section Draft.
 6. Giao diện kiểm tra trạng thái theo nhịp 2/5/10 giây và dừng khi có kết quả.
 
+Comment trực tiếp của giảng viên là một lớp riêng: giảng viên bôi đoạn chữ trong dashboard, tạo thread và trả lời; học viên xem phần được đánh dấu và trả lời ngay trong handout. Thread không có thao tác xóa/ẩn và không làm thay đổi số lần Check, `failStreak`, trạng thái section hay hàng đợi n8n.
+
 ## Lesson 13 và dashboard giảng viên
 
 - Trang học viên: `web/lesson.html?task=writing-lesson13-young-leaders`.

@@ -1,4 +1,5 @@
 import http from "node:http";
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,6 +18,16 @@ let draft = {
 };
 let attemptVersion = 1;
 const provisionalRef = "66666666-6666-4666-8666-666666666666";
+const teacherThreadRef = "77777777-7777-4777-8777-777777777777";
+const teacherThreads = [{
+  threadRef: teacherThreadRef,
+  sectionKey: "overview",
+  fieldKey: "overview",
+  status: "open",
+  anchor: { start: 0, end: 7, quote: "Overall", detached: false },
+  createdAt: "2026-08-16T01:00:00.000Z",
+  messages: [{ messageRef: "88888888-8888-4888-8888-888888888888", authorRole: "teacher", authorLabel: "Giảng viên", body: "Em hãy đối chiếu rõ hai nhóm ứng dụng trong câu này.", createdAt: "2026-08-16T01:00:00.000Z" }]
+}];
 
 function session() {
   return {
@@ -75,6 +86,12 @@ const server = http.createServer(async (request, response) => {
   if (url.pathname === "/api/v1/admin/activities/pie-app-users-by-age/provisional-students") return json(response, 200, { ok: true, students: [{ studentRef: "70000000-0000-4000-8000-000000000003", displayName: "Học viên tạm mốc 3", classRef: "11111111-1111-4111-8111-111111111111", className: "Lớp thử giao diện", reconciliationStatus: "pending" }] });
   if (url.pathname === "/api/v1/sessions" && request.method === "POST") return json(response, 201, { ok: true, session: session() });
   if (url.pathname === `/api/v1/sessions/${sessionRef}` && request.method === "GET") return json(response, 200, { ok: true, session: session() });
+  if (url.pathname === `/api/v1/sessions/${sessionRef}/live` && request.method === "PUT") return json(response, 200, { ok: true, accepted: true });
+  if (url.pathname === `/api/v1/sessions/${sessionRef}/teacher-comments` && request.method === "GET") return json(response, 200, { ok: true, threads: teacherThreads }, { etag: `"teacher-comments-${teacherThreads[0].messages.length}"` });
+  if (url.pathname === `/api/v1/sessions/${sessionRef}/teacher-comments/${teacherThreadRef}/replies` && request.method === "POST") {
+    const value = await body(request); teacherThreads[0].messages.push({ messageRef: crypto.randomUUID(), authorRole: "student", authorLabel: "Học viên", body: value.body, createdAt: new Date().toISOString() });
+    return json(response, 201, { ok: true, thread: teacherThreads[0] });
+  }
   if (url.pathname === `/api/v1/sessions/${sessionRef}/draft` && request.method === "PUT") {
     const value = await body(request); draft = { overview: value.overview, body1: value.body1, body2: value.body2, draft1: value.draft1, draft2: value.draft2, draft2Unlocked: value.draft2Unlocked }; draftVersion += 1;
     return json(response, 200, { ok: true, session: session() });

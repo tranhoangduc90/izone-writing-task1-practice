@@ -1,10 +1,12 @@
 import { createTeacherApi } from "./api.js";
-import { hasMeaningfulText } from "./core.js";
+import { createRequestId, hasMeaningfulText } from "./core.js";
 import { sectionDefinitions } from "./lesson-core.js";
 import { appendMarkdown } from "./markdown.js";
 import { commentsForSection, isBackdropClick, latestVocabularyRows } from "./teacher-detail-core.js";
 import { groupStudents } from "./teacher-progress.js";
 import { teacherAuthFailure } from "./teacher-auth-ui.js";
+import { selectionOffsets, threadsForField } from "./teacher-comments-core.js";
+import { createTeacherCommentThreadCard, renderAnnotatedText } from "./teacher-comments-ui.js";
 
 const $ = (id) => document.getElementById(id);
 const state = { token: "", api: null, manifest: null, activitySlug: "", students: [], pollTimer: null,
@@ -175,6 +177,74 @@ function renderVocabulary(bodySection, student, bodyKey, loading) {
   table.append(tbody); tableRoot.append(table); vocabulary.append(tableRoot); bodySection.append(vocabulary);
 }
 
+async function reloadSelectedStudent() {
+  if (state.selectedStudent?.sessionRef) await loadStudentDetail(state.selectedStudent);
+}
+
+function renderTeacherResponseField(responseColumn, student, definition, field) {
+  const fieldRoot = document.createElement("div"); fieldRoot.className = "teacher-response-field";
+  if (student.activeField === field.key && student.online) fieldRoot.dataset.active = "true";
+  const label = document.createElement("strong"); label.textContent = field.label;
+  const value = document.createElement("div"); value.className = "teacher-annotatable-text"; value.tabIndex = 0;
+  value.setAttribute("aria-label", `${field.label}. Bôi đen một đoạn để thêm comment.`);
+  const responseText = student.responses?.[field.key] || "";
+  const fieldThreads = threadsForField(student.teacherComments || [], field.key, responseText);
+  const threads = document.createElement("div"); threads.className = "teacher-comment-thread-list teacher-comment-thread-list-dashboard";
+  const focusThread = (threadRef) => threads.querySelector(`[data-thread-ref="${CSS.escape(threadRef)}"]`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  if (responseText) renderAnnotatedText(value, responseText, fieldThreads, focusThread);
+  else { value.textContent = "Chưa viết"; value.classList.add("muted"); }
+
+  const composer = document.createElement("form"); composer.className = "teacher-comment-composer"; composer.hidden = true;
+  const selectedQuote = document.createElement("blockquote");
+  const input = document.createElement("textarea"); input.rows = 3; input.maxLength = 5000; input.placeholder = "Viết comment cho đoạn đã chọn…"; input.setAttribute("aria-label", "Nội dung comment mới");
+  const actions = document.createElement("div"); actions.className = "actions";
+  const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "secondary compact"; cancel.textContent = "Hủy";
+  const submit = document.createElement("button"); submit.type = "submit"; submit.className = "primary compact"; submit.textContent = "Comment";
+  actions.append(cancel, submit); composer.append(selectedQuote, input, actions);
+  let selected = null;
+  const captureSelection = () => {
+    if (!responseText) return;
+    const next = selectionOffsets(value);
+    if (!next || next.end - next.start > 2000) return;
+    selected = next; selectedQuote.textContent = next.quote; composer.hidden = false; input.focus();
+  };
+  value.addEventListener("mouseup", captureSelection);
+  value.addEventListener("keyup", (event) => { if (event.key === "Shift" || event.key.startsWith("Arrow")) captureSelection(); });
+  cancel.addEventListener("click", () => { selected = null; input.value = ""; composer.hidden = true; });
+  composer.addEventListener("submit", async (event) => {
+    event.preventDefault(); const body = input.value.trim(); if (!selected || !body) return;
+    submit.disabled = true; submit.textContent = "Đang lưu…";
+    try {
+      await state.api.createTeacherComment(student.sessionRef, {
+        sectionKey: definition.key,
+        fieldKey: field.key,
+        start: selected.start,
+        end: selected.end,
+        baseVersion: student.draftVersion,
+        body,
+        requestId: createRequestId(),
+      });
+      await reloadSelectedStudent();
+    } catch (error) {
+      submit.disabled = false; submit.textContent = "Comment";
+      showDashboardError(error.message || "Chưa lưu được comment. Bài có thể vừa thay đổi; hãy bôi lại đoạn chữ.");
+    }
+  });
+
+  for (const thread of fieldThreads) {
+    threads.append(createTeacherCommentThreadCard(thread, {
+      allowStatus: true,
+      onReply: async (item, body) => { await state.api.replyTeacherComment(item.threadRef, body); await reloadSelectedStudent(); },
+      onStatus: async (item, status) => { await state.api.setTeacherCommentStatus(item.threadRef, status); await reloadSelectedStudent(); },
+    }));
+  }
+  const empty = document.createElement("p"); empty.className = "muted teacher-comment-empty"; empty.textContent = responseText ? "Bôi đen một đoạn trong bài để thêm comment." : "Học viên chưa viết ô này.";
+  empty.hidden = fieldThreads.length > 0;
+  const layout = document.createElement("div"); layout.className = "teacher-response-comment-layout";
+  const response = document.createElement("div"); response.className = "teacher-response-comment-source"; response.append(value, composer, empty);
+  layout.append(response, threads); fieldRoot.append(label, layout); responseColumn.append(fieldRoot);
+}
+
 function renderStudentDetail(student, { loading = false, error = "" } = {}) {
   const dialog = $("teacher-detail");
   const previousScroll = dialog.scrollTop;
@@ -240,11 +310,7 @@ function renderStudentDetail(student, { loading = false, error = "" } = {}) {
         responseColumn.append(recovery);
       }
       for (const field of definition.fields || []) {
-        const fieldRoot = document.createElement("div"); fieldRoot.className = "teacher-response-field";
-        if (student.activeField === field.key && student.online) fieldRoot.dataset.active = "true";
-        const label = document.createElement("strong"); label.textContent = field.label;
-        const value = document.createElement("p"); value.textContent = student.responses?.[field.key] || "Chưa viết";
-        fieldRoot.append(label, value); responseColumn.append(fieldRoot);
+        renderTeacherResponseField(responseColumn, student, definition, field);
       }
       sectionLayout.append(responseColumn, renderCommentTimeline(student, definition, loading));
       section.append(sectionLayout);
@@ -268,11 +334,11 @@ async function loadStudentDetail(student) {
   }
   const requestId = ++state.detailRequestId;
   try {
-    const result = await state.api.liveSession(student.sessionRef);
+    const [result, commentResult] = await Promise.all([state.api.liveSession(student.sessionRef), state.api.teacherComments(student.sessionRef)]);
     if (requestId !== state.detailRequestId || !$("teacher-detail").open) return;
     const session = result.data.session || result.data;
     const sections = { ...(session.sections || {}), ...(student.sections || {}) };
-    state.selectedStudent = { ...student, ...session, sections };
+    state.selectedStudent = { ...student, ...session, sections, teacherComments: commentResult.data.threads || [] };
     renderStudentDetail(state.selectedStudent);
   } catch (error) {
     if (requestId !== state.detailRequestId || !$("teacher-detail").open) return;
@@ -329,7 +395,7 @@ async function refresh() {
     $("teacher-updated").textContent = `Cập nhật lúc ${formatTime(result.data.generatedAt)}`;
     showLoginError();
     showDashboardError();
-    if ($("teacher-detail").open && state.selectedStudent) {
+    if ($("teacher-detail").open && state.selectedStudent && !$("teacher-detail").querySelector(".teacher-comment-composer textarea:focus, .teacher-comment-reply textarea:focus")) {
       const updated = state.students.find((student) => student.studentRef === state.selectedStudent.studentRef);
       if (updated) await loadStudentDetail({ ...state.selectedStudent, ...updated });
     }

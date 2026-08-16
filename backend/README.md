@@ -21,6 +21,9 @@ Nguồn quyết định là [SYSTEM_CONTRACT.md](../docs/SYSTEM_CONTRACT.md). C�
 - `POST /api/v1/sessions/:sessionRef/checks` nhận `section: overview|outline|draft`, `requestId`, `snapshot`. Draft chỉ được chấm khi Overview và Outline đã đạt, Draft 2 đã mở, hai Draft không trống và bản gửi trùng với bản vừa lưu.
 - `GET /api/v1/attempts/:attemptRef` dùng `ETag`/`If-None-Match`.
 - `POST /api/v1/attempts/:attemptRef/retry` chỉ mở lại lỗi kỹ thuật khi lượt đó chưa dùng hết ba lần thử.
+- `GET /api/v1/sessions/:sessionRef/teacher-comments` trả comment trực tiếp của giảng viên bằng UUID công khai và hỗ trợ `ETag/304`.
+- `POST /api/v1/sessions/:sessionRef/teacher-comments/:threadRef/replies` chỉ cho học viên trả lời; không có endpoint xóa, chấp thuận hoặc ẩn thread.
+- API giảng viên dưới `/api/v1/admin/.../teacher-comments` cho mọi tài khoản teacher đã xác minh tạo comment, trả lời và đánh dấu đã xử lý. Trạng thái đã xử lý vẫn luôn được trả về và hiển thị.
 - API n8n là `/api/v1/internal/grading-jobs/{claim,:jobRef/complete,:jobRef/fail,recover}` với `Authorization: Bearer …`; claim nhận lease 420 giây, riêng Draft được API gia hạn thành 1.200 giây, và không trả tên học viên. API không áp trần concurrency toàn cục; n8n kiểm soát số lượt chạy đồng thời. `maxJobs` chỉ là kích thước một lần lấy hàng đợi.
 
 `needs_revision` mới tăng `failStreak`; lần 3, 6, 9… trả `supportWarning`. `passed` khóa đúng section và đưa `failStreak` về 0. Riêng Draft chỉ được hoàn tất khi callback chứa link HTTPS đúng host `practice.izone.edu.vn` và đường dẫn `/shared/writing-essays/`; API lưu link vào `result_artifacts` rồi khóa Draft. Endpoint mở lại section yêu cầu Google ID token của giảng viên có quyền toàn hệ thống trong `mapping.reviewer_account` và ghi audit.

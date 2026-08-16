@@ -22,6 +22,7 @@ Manifest dùng contract `task1-web-manifest-v1` do Content Factory xuất: đị
 3. Bản nháp được ghi IndexedDB sau 500 ms; khi có thay đổi sẽ tự lưu database sau 10 phút, hoặc khi bấm **Lưu ngay**, gửi Check, **Lưu & đóng**, hay rời tab.
 4. Một phần đạt sẽ bị khóa. Sau phản hồi cần sửa lần thứ 3, 6, 9…, giao diện hiện cảnh báo hỗ trợ.
 5. Sau khi Overview và Outline đạt, học viên viết Draft 1, bấm chuyển để copy xuống Draft 2 rồi tự sửa. Nút **Gửi chấm từng câu** tạo một lượt duy nhất; app chờ link LMS, hiện trong một ô kết quả và khóa Draft khi link hợp lệ xuất hiện.
+6. Comment trực tiếp của giảng viên xuất hiện trong khung riêng dưới đúng ô viết, có highlight đoạn được nhận xét và thread trả lời. Học viên không có nút xóa, chấp thuận hoặc ẩn comment; trạng thái “đã xử lý” vẫn giữ toàn bộ lịch sử.
 
 ## Adapter API
 

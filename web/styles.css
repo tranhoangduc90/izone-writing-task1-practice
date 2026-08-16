@@ -256,3 +256,41 @@ textarea { resize:vertical; min-height:10rem; line-height:1.55; }
 .live-demo-events strong { color:#344054; font-size:.78rem; }
 @media (min-width:1180px) { .live-demo-layout { grid-template-columns:minmax(0,1fr) minmax(320px,.34fr); } }
 @media (max-width:620px) { .live-demo-safety { grid-template-columns:1fr; } .live-demo-controls { display:grid; grid-template-columns:1fr; } .live-demo-event-panel { position:static; } }
+
+/* Comment trực tiếp của giảng viên: độc lập với timeline Check/AI. */
+.practice-field { display:grid; gap:.65rem; }
+.student-teacher-comments { display:grid; gap:.7rem; margin:.15rem 0 .8rem; padding:.8rem; border:1px solid #f0c74b; border-radius:10px; background:#fffdf2; }
+.student-teacher-comments h4 { margin:0; color:#5d4700; font-size:.96rem; }
+.teacher-comment-preview,.teacher-annotatable-text { min-height:48px; padding:.7rem .8rem; border:1px solid #cad4e0; border-radius:8px; background:#fff; white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.62; }
+.teacher-annotatable-text { cursor:text; user-select:text; }
+.teacher-comment-highlight { padding:.04em .08em; border-bottom:2px solid #c48b00; border-radius:3px; background:#ffe785; color:inherit; cursor:pointer; }
+.teacher-comment-highlight:focus { outline:3px solid rgb(37 99 235/.28); outline-offset:2px; }
+.teacher-comment-thread-list { display:grid; gap:.75rem; }
+.teacher-comment-thread { display:grid; gap:.6rem; padding:.75rem; border:1px solid #e4bc45; border-radius:10px; background:#fff; box-shadow:0 1px 2px rgb(15 23 42/.05); }
+.teacher-comment-thread[data-status="addressed"] { border-color:#aab4c1; background:#f5f7f9; }
+.teacher-comment-thread-header { display:grid; gap:.4rem; }
+.teacher-comment-thread blockquote,.teacher-comment-composer blockquote { margin:0; padding:.45rem .65rem; border-left:4px solid #d6a900; background:#fff8d6; color:#504000; font-size:.9rem; white-space:pre-wrap; }
+.teacher-comment-status { justify-self:start; padding:.15rem .45rem; border-radius:999px; background:#fff0ad; color:#6b5000; font-size:.75rem; font-weight:800; }
+.teacher-comment-thread[data-status="addressed"] .teacher-comment-status { background:#e4e7ec; color:#475467; }
+.teacher-comment-detached { margin:0; color:#8a4b0f; font-size:.84rem; font-weight:700; }
+.teacher-comment-messages { display:grid; gap:.5rem; margin:0; padding:0; list-style:none; }
+.teacher-comment-messages li { padding:.55rem .65rem; border-radius:8px; background:#eef5ff; }
+.teacher-comment-messages li[data-author-role="student"] { margin-left:1.1rem; background:#f0f3f6; }
+.teacher-comment-message-meta { margin-bottom:.18rem; color:#526078; font-size:.76rem; font-weight:800; }
+.teacher-comment-messages p { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.teacher-comment-reply,.teacher-comment-composer { display:grid; gap:.5rem; }
+.teacher-comment-reply textarea,.teacher-comment-composer textarea { min-height:72px; }
+.teacher-comment-status-action { min-height:36px; justify-self:start; }
+.teacher-response-comment-layout { display:grid; gap:.75rem; margin-top:.45rem; }
+.teacher-response-comment-source { display:grid; gap:.55rem; min-width:0; }
+.teacher-comment-composer { padding:.7rem; border:1px solid #d6a900; border-radius:9px; background:#fffdf2; }
+.teacher-comment-empty { margin:.35rem 0 0!important; }
+
+@media (min-width:1100px) {
+  .teacher-response-comment-layout { grid-template-columns:minmax(0,1fr) minmax(320px,.62fr); align-items:start; }
+  .teacher-comment-thread-list-dashboard { max-height:520px; overflow:auto; padding-right:.2rem; }
+}
+@media (max-width:620px) {
+  .student-teacher-comments { padding:.65rem; }
+  .teacher-comment-messages li[data-author-role="student"] { margin-left:.45rem; }
+}

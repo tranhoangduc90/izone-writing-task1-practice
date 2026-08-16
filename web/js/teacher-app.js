@@ -8,7 +8,7 @@ import { teacherAuthFailure } from "./teacher-auth-ui.js";
 
 const $ = (id) => document.getElementById(id);
 const state = { token: "", api: null, manifest: null, activitySlug: "", students: [], pollTimer: null,
-  selectedStudent: null, detailRequestId: 0, focusSection: "", pending: [] };
+  selectedStudent: null, detailRequestId: 0, focusSection: "", pending: [], canManage: false };
 
 function teacherDefinitions() {
   const dynamic = sectionDefinitions(state.manifest);
@@ -214,7 +214,11 @@ function renderStudentDetail(student, { loading = false, error = "" } = {}) {
         const recovery = document.createElement("div");
         recovery.className = "teacher-ai-recovery";
         const message = document.createElement("p");
-        message.textContent = "AI đã lỗi sau ba lần thử. Bài viết vẫn được lưu an toàn; bạn có thể xếp lại chính Comment này.";
+        message.textContent = state.canManage
+          ? "AI đã lỗi sau ba lần thử. Bài viết vẫn được lưu an toàn; bạn có thể xếp lại chính Comment này."
+          : "AI đã lỗi sau ba lần thử. Bài viết vẫn được lưu an toàn; hãy báo tài khoản quản trị để xếp chấm lại.";
+        recovery.append(message);
+        if (state.canManage) {
         const retry = document.createElement("button");
         retry.type = "button";
         retry.className = "secondary";
@@ -231,7 +235,8 @@ function renderStudentDetail(student, { loading = false, error = "" } = {}) {
             showDashboardError(error.message || "Chưa thể xếp chấm lại. Hệ thống sẽ giữ nguyên bài làm.");
           }
         });
-        recovery.append(message, retry);
+        recovery.append(retry);
+        }
         responseColumn.append(recovery);
       }
       for (const field of definition.fields || []) {
@@ -290,6 +295,10 @@ function renderReconciliation() {
   for (const item of state.pending) {
     const row = document.createElement("article"); row.className = "teacher-student-card";
     const title = document.createElement("strong"); title.textContent = `${item.displayName} · ${item.className}`;
+    if (!state.canManage) {
+      const note = document.createElement("span"); note.className = "muted"; note.textContent = "Chỉ xem · Tài khoản quản trị sẽ đối soát hồ sơ này.";
+      row.append(title, note); root.append(row); continue;
+    }
     const candidates = state.students.filter(student => student.classRef === item.classRef && !student.provisional);
     const select = document.createElement("select"); const placeholder = document.createElement("option"); placeholder.value = ""; placeholder.textContent = "Chọn hồ sơ chính thức"; select.append(placeholder);
     for (const candidate of candidates) { const option = document.createElement("option"); option.value = candidate.studentRef; option.textContent = candidate.displayName; select.append(option); }
@@ -308,6 +317,7 @@ async function refresh() {
   try {
     const result = await state.api.liveActivity(state.activitySlug, $("teacher-class").value);
     state.students = result.data.students || [];
+    state.canManage = result.data.permissions?.canManage === true;
     const pendingResult = await state.api.provisionalStudents(state.activitySlug, $("teacher-class").value);
     state.pending = pendingResult.data.students || [];
     populateClasses(state.students);

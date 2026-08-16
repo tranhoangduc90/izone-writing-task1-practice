@@ -21,8 +21,14 @@ export function createTeacherAuthMiddleware({ config, pool, verifyGoogleToken })
       SET google_subject=COALESCE(google_subject,$2),last_login_at=now(),updated_at=now()
       WHERE email=$1 AND status='active' AND (google_subject IS NULL OR google_subject=$2)
       RETURNING email,role,can_access_all_classes`, [email, subject]);
-    if (account.rowCount !== 1 || (account.rows[0].role !== 'admin' && account.rows[0].can_access_all_classes !== true)) return res.status(403).json({ ok: false, error: 'ACCESS_DENIED' });
-    req.reviewer = { email: account.rows[0].email, role: account.rows[0].role, canAccessAllClasses: Boolean(account.rows[0].can_access_all_classes) };
+    if (account.rowCount !== 1 || !['admin', 'teacher'].includes(account.rows[0].role)) return res.status(403).json({ ok: false, error: 'ACCESS_DENIED' });
+    const canManage = account.rows[0].role === 'admin' || account.rows[0].can_access_all_classes === true;
+    req.reviewer = {
+      email: account.rows[0].email,
+      role: account.rows[0].role,
+      canAccessAllClasses: Boolean(account.rows[0].can_access_all_classes),
+      canManage
+    };
     return next();
   };
 }

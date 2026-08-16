@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 
 import { teacherAuthFailure } from "../js/teacher-auth-ui.js";
@@ -19,4 +20,11 @@ test("dashboard nói rõ tài khoản Google không có quyền thay vì báo l�
 test("lỗi tạm thời không bị hiểu nhầm thành lỗi đăng nhập", () => {
   assert.equal(teacherAuthFailure(429), null);
   assert.equal(teacherAuthFailure(500), null);
+});
+
+test("tài khoản chỉ xem không được hiện nút quản trị học viên", () => {
+  const source = fs.readFileSync(new URL("../js/teacher-app.js", import.meta.url), "utf8");
+  assert.match(source, /if \(state\.canManage\)/);
+  assert.match(source, /Chỉ xem · Tài khoản quản trị sẽ đối soát hồ sơ này/);
+  assert.match(source, /result\.data\.permissions\?\.canManage === true/);
 });

@@ -52,12 +52,21 @@ export function safeLmsUrl(value) {
 }
 export function draftPrerequisitesPassed(sections = {}) { return sections.overview?.status === "passed" && sections.outline?.status === "passed"; }
 export function canUnlockDraft2(texts = {}) { return hasMeaningfulText(texts.draft1); }
+export function rebaseLocalProgress(local = {}, current = {}) {
+  const server = normalizeProgress(current);
+  return {
+    ...server,
+    updatedAt: current.updatedAt || current.updated_at || null,
+    texts: { ...server.texts, ...(local.texts || {}) },
+    draft2Unlocked: Boolean(local.draft2Unlocked),
+  };
+}
 export function pollingDelay(elapsedSinceSubmitMs) {
   if (elapsedSinceSubmitMs <= 20000) return 2000;
   if (elapsedSinceSubmitMs <= 120000) return 5000;
   return 10000;
 }
-export function isConflict(error) { return error?.status === 409; }
+export function isConflict(error) { return error?.status === 409 && error?.data?.error === "DRAFT_VERSION_CONFLICT"; }
 export function terminalResult(attempt) {
   const outcome = attempt?.resultStatus || attempt?.status;
   if (attempt?.status === "failed") return true;

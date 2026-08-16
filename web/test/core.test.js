@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { canUnlockDraft2, draftPrerequisitesPassed, hasMeaningfulText, normalizeProgress, pollingDelay, safeHttpUrl, safeLmsUrl, terminalResult, wordCount } from "../js/core.js";
+import { canUnlockDraft2, draftPrerequisitesPassed, hasMeaningfulText, isConflict, normalizeProgress, pollingDelay, rebaseLocalProgress, safeHttpUrl, safeLmsUrl, terminalResult, wordCount } from "../js/core.js";
 
 test("normalizes public session data into three section states", () => {
   const result = normalizeProgress({ draftVersion: 4, draft: { overview: "A", body1: "B", body2: "C", draft1: "D1", draft2: "D2", draft2Unlocked: true }, sectionStates: { overview: { status: "passed" }, outline: { status: "revision", attemptsWithoutPass: 3 } } });
@@ -55,6 +55,21 @@ test("Draft 2 only unlocks after meaningful Draft 1 and passed prerequisites", (
   assert.equal(canUnlockDraft2({ draft1: "Overview and Body 1" }), true);
   assert.equal(draftPrerequisitesPassed({ overview: { status: "passed" }, outline: { status: "passed" } }), true);
   assert.equal(draftPrerequisitesPassed({ overview: { status: "passed" }, outline: { status: "revision" } }), false);
+});
+
+test("chỉ xung đột phiên bản lưu mới mở thẻ xung đột", () => {
+  assert.equal(isConflict({ status: 409, data: { error: "DRAFT_VERSION_CONFLICT" } }), true);
+  assert.equal(isConflict({ status: 409, data: { error: "DRAFT2_NOT_UNLOCKED" } }), false);
+  assert.equal(isConflict({ status: 409, data: { error: "DRAFT_NOT_SAVED" } }), false);
+});
+
+test("dùng bản trên thiết bị giữ nguyên bài nhưng nhận phiên bản server mới", () => {
+  const local = normalizeProgress({ draftVersion: 4, draft1: "Bài dài trên máy", draft2: "Bản sửa trên máy", draft2Unlocked: true });
+  const rebased = rebaseLocalProgress(local, { draftVersion: 7, draft1: "Bản server", draft2: "", draft2Unlocked: false, updatedAt: "2026-08-16T04:10:00Z" });
+  assert.equal(rebased.revision, 7);
+  assert.equal(rebased.texts.draft1, "Bài dài trên máy");
+  assert.equal(rebased.texts.draft2, "Bản sửa trên máy");
+  assert.equal(rebased.draft2Unlocked, true);
 });
 
 test("public manifest URLs only allow HTTP and HTTPS", () => {

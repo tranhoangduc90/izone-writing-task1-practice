@@ -1,5 +1,5 @@
 import { createApi } from "./api.js";
-import { SECTION_KEYS, canUnlockDraft2, createRequestId, draftPrerequisitesPassed, hasMeaningfulText, isConflict, normalizeProgress, pollingDelay, safeHttpUrl, safeLmsUrl, terminalResult, wordCount } from "./core.js";
+import { SECTION_KEYS, canUnlockDraft2, createRequestId, draftPrerequisitesPassed, hasMeaningfulText, isConflict, normalizeProgress, pollingDelay, rebaseLocalProgress, safeHttpUrl, safeLmsUrl, terminalResult, wordCount } from "./core.js";
 import { getDraft, getLatestDraft, putDraft } from "./idb.js";
 import { appendInlineMarkdown, appendMarkdown } from "./markdown.js";
 
@@ -9,7 +9,7 @@ const SECTION_INFO = {
   outline: { title: "Outline", kicker: "Phần 2", fields: [{ key: "body1", label: "Body 1", placeholder: "Nhóm số liệu thứ nhất…" }, { key: "body2", label: "Body 2", placeholder: "Nhóm số liệu thứ hai…" }] },
   draft: { title: "Draft 1 → Draft 2", kicker: "Phần 3", fields: [{ key: "draft1", label: "Draft 1", placeholder: "Viết liên tục phần Overview và Body 1…" }, { key: "draft2", label: "Draft 2", placeholder: "Sửa bản sao Draft 1 thành tiếng Anh hoàn chỉnh…" }] },
 };
-const app = { manifest: null, activitySlug: null, api: null, roster: null, identity: null, sessionRef: null, state: null, dirty: false, idbTimer: null, saveTimer: null, pollTimer: null, heartbeatTimer: null, pendingAttempts: new Map(), conflict: false };
+const app = { manifest: null, activitySlug: null, api: null, roster: null, identity: null, sessionRef: null, state: null, dirty: false, idbTimer: null, saveTimer: null, pollTimer: null, heartbeatTimer: null, pendingAttempts: new Map(), conflict: false, conflictServer: null };
 
 function setSaveState(text) { $("save-state").textContent = text; }
 function showNotice(text = "") { const node = $("network-notice"); node.hidden = !text; node.textContent = text; }
@@ -231,7 +231,7 @@ function renderSections() {
     status.textContent = section === "draft" && !prerequisitesPassed ? "Chờ phần trước" : statusLabel(app.state.sections[section].status); status.dataset.state = app.state.sections[section].status;
     if (section === "draft") renderDraftFields(card, locked, prerequisitesPassed);
     else for (const field of info.fields) addTextarea(card, section, field, locked);
-    const button = card.querySelector(".submit-section"); button.hidden = section === "draft" && !app.state.draft2Unlocked; button.disabled = locked; button.textContent = app.state.sections[section].status === "queued" ? (section === "draft" ? "Đang tạo link LMS" : "Đang chấm") : locked && app.state.sections[section].status === "passed" ? (section === "draft" ? "Đã có kết quả LMS" : "Phần này đã đạt") : section === "draft" ? "Gửi chấm từng câu" : "Gửi để nhận xét"; button.addEventListener("click", () => submitSection(section, card));
+    const button = card.querySelector(".submit-section"); button.hidden = section === "draft" && !app.state.draft2Unlocked; button.disabled = locked || app.conflict; button.textContent = app.conflict ? "Xử lý xung đột bản lưu trước" : app.state.sections[section].status === "queued" ? (section === "draft" ? "Đang tạo link LMS" : "Đang chấm") : locked && app.state.sections[section].status === "passed" ? (section === "draft" ? "Đã có kết quả LMS" : "Phần này đã đạt") : section === "draft" ? "Gửi chấm từng câu" : "Gửi để nhận xét"; button.addEventListener("click", () => submitSection(section, card));
     refreshSection(card, section); root.append(workspace);
   }
 }
@@ -301,13 +301,18 @@ async function restoreLocal() {
 }
 
 async function saveRemote(reason = "manual") {
-  if (!app.dirty || app.conflict) return true;
+  if (app.conflict) {
+    setSaveState("Cần xử lý xung đột bản lưu");
+    showNotice("Bài chưa được lưu lên hệ thống. Hãy chọn một phương án trong thẻ xung đột trước khi Check.");
+    return false;
+  }
+  if (!app.dirty) return true;
   setSaveState(reason === "close" ? "Đang lưu trước khi đóng…" : "Đang lưu…");
   try {
     const result = await app.api.saveDraft(app.sessionRef, app.state);
     mergeServer(result.data.session || result.data); app.dirty = false; resetAutosave(); await saveLocal(); setSaveState(`Đã lưu lúc ${new Date().toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}`); renderAll(); return true;
   } catch (error) {
-    if (isConflict(error)) { app.conflict = true; $("conflict-card").hidden = false; setSaveState("Cần xử lý xung đột bản lưu"); return false; }
+    if (isConflict(error)) { app.conflict = true; app.conflictServer = error.data?.current || null; $("conflict-card").hidden = false; setSaveState("Cần xử lý xung đột bản lưu"); renderAll(); return false; }
     showNotice("Chưa thể lưu vào hệ thống. Bản trên thiết bị vẫn được giữ và sẽ thử lại khi bạn lưu."); setSaveState("Chưa đồng bộ"); return false;
   }
 }
@@ -316,7 +321,8 @@ async function submitSection(section, card) {
   const content = sectionContent(section); const filled = section === "overview" ? hasMeaningfulText(content.overview) : section === "outline" ? Object.values(content).some(hasMeaningfulText) : app.state.draft2Unlocked && Object.values(content).every(hasMeaningfulText);
   const errorNode = card.querySelector(".field-error"); errorNode.hidden = filled;
   if (!filled) { errorNode.textContent = section === "overview" ? "Bạn cần viết Overview trước khi gửi." : section === "outline" ? "Bạn cần viết ít nhất một trong hai ô Body trước khi gửi." : "Bạn cần hoàn thành Draft 1, mở Draft 2 và sửa Draft 2 trước khi Check."; return; }
-  if (!(await saveRemote("check"))) return;
+  const submitButton = card.querySelector(".submit-section"); submitButton.disabled = true; submitButton.textContent = "Đang lưu trước khi gửi…";
+  if (!(await saveRemote("check"))) { renderAll(); return; }
   const previousStatus = app.state.sections[section].status;
   app.state.sections[section].status = "queued";
   renderAll();
@@ -332,8 +338,7 @@ async function submitSection(section, card) {
   } catch (error) {
     app.state.sections[section].status = previousStatus;
     renderAll();
-    if (isConflict(error)) { app.conflict = true; $("conflict-card").hidden = false; }
-    else { const currentError = document.querySelector(`[data-section="${section}"] .field-error`); if (currentError) { currentError.hidden = false; currentError.textContent = error.message; } }
+    const currentError = document.querySelector(`[data-section="${section}"] .field-error`); if (currentError) { currentError.hidden = false; currentError.textContent = error.message; }
   }
 }
 
@@ -456,7 +461,21 @@ async function init() {
     $("create-provisional").addEventListener("click", createProvisionalStudent);
     $("resume-recent").addEventListener("click", resumeRecent);
     $("manual-save").addEventListener("click", () => saveRemote()); $("save-close").addEventListener("click", async () => { if (!(await saveRemote("close"))) return; window.close(); setTimeout(() => showNotice("Đã lưu an toàn, bạn có thể đóng tab"), 250); });
-    $("reload-server").addEventListener("click", () => location.reload()); $("keep-local").addEventListener("click", () => { app.conflict = false; $("conflict-card").hidden = true; showNotice("Bản cục bộ vẫn an toàn. Hãy tải bản mới nhất để so sánh trước khi lưu lại."); });
+    $("reload-server").addEventListener("click", async () => {
+      try {
+        const result = await app.api.session(app.sessionRef); app.state = normalizeProgress(result.data.session || result.data); app.state.updatedAt = result.data.updatedAt || result.data.session?.updatedAt || null;
+        app.conflict = false; app.conflictServer = null; app.dirty = false; $("conflict-card").hidden = true; renderAll(); setSaveState("Đã tải bản trên hệ thống"); showNotice("Đã dùng bản trên hệ thống. Bản cục bộ cũ vẫn còn an toàn trên thiết bị.");
+      } catch { showNotice("Chưa tải được bản trên hệ thống. Bản trên thiết bị vẫn an toàn; hãy thử lại khi mạng ổn định."); }
+    });
+    $("keep-local").addEventListener("click", async () => {
+      if (!confirm("Dùng bản trên thiết bị và lưu đè bản cũ trên hệ thống?")) return;
+      try {
+        let current = app.conflictServer;
+        if (!current) { const result = await app.api.session(app.sessionRef); current = result.data.session || result.data; }
+        app.state = rebaseLocalProgress(app.state, current); app.conflict = false; app.conflictServer = null; app.dirty = true; $("conflict-card").hidden = true; await saveLocal(); renderAll();
+        if (await saveRemote("manual")) showNotice("Đã lưu an toàn bản trên thiết bị lên hệ thống. Bây giờ bạn có thể Check.");
+      } catch { app.conflict = true; $("conflict-card").hidden = false; renderAll(); showNotice("Chưa đồng bộ được. Bản trên thiết bị vẫn an toàn; hãy thử lại khi mạng ổn định."); }
+    });
     document.addEventListener("visibilitychange", () => document.hidden ? clearTimeout(app.pollTimer) : (schedulePoll(), schedulePresence()));
     window.addEventListener("beforeunload", (event) => { if (app.dirty) { closeWithKeepalive(); event.preventDefault(); event.returnValue = ""; } });
   } catch (error) { $("task-summary").textContent = error.message; $("identity-form").querySelector("button").disabled = true; setSaveState("Không thể khởi động bài luyện"); }

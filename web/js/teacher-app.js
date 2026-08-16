@@ -4,6 +4,7 @@ import { sectionDefinitions } from "./lesson-core.js";
 import { appendMarkdown } from "./markdown.js";
 import { commentsForSection, isBackdropClick, latestVocabularyRows } from "./teacher-detail-core.js";
 import { groupStudents } from "./teacher-progress.js";
+import { teacherAuthFailure } from "./teacher-auth-ui.js";
 
 const $ = (id) => document.getElementById(id);
 const state = { token: "", api: null, manifest: null, activitySlug: "", students: [], pollTimer: null,
@@ -313,21 +314,31 @@ async function refresh() {
     renderSummary(state.students);
     renderStudents(state.students);
     renderReconciliation();
+    $("teacher-login").hidden = true;
+    $("teacher-dashboard").hidden = false;
     $("teacher-updated").textContent = `Cập nhật lúc ${formatTime(result.data.generatedAt)}`;
+    showLoginError();
     showDashboardError();
     if ($("teacher-detail").open && state.selectedStudent) {
       const updated = state.students.find((student) => student.studentRef === state.selectedStudent.studentRef);
       if (updated) await loadStudentDetail({ ...state.selectedStudent, ...updated });
     }
   } catch (error) {
-    if (error.status === 401) {
+    const authFailure = teacherAuthFailure(error.status);
+    if (authFailure) {
       state.token = "";
       $("teacher-dashboard").hidden = true;
       $("teacher-login").hidden = false;
-      showLoginError("Phiên đăng nhập đã hết hạn. Hãy đăng nhập lại.");
+      $("teacher-updated").textContent = authFailure.header;
+      showLoginError(authFailure.message);
+      globalThis.google?.accounts?.id?.disableAutoSelect?.();
       return;
     }
-    showDashboardError("Chưa thể cập nhật dữ liệu lớp. Hệ thống sẽ tự thử lại.");
+    if ($("teacher-dashboard").hidden) {
+      showLoginError("Đã đăng nhập nhưng chưa thể tải dữ liệu lớp. Hệ thống sẽ tự thử lại.");
+    } else {
+      showDashboardError("Chưa thể cập nhật dữ liệu lớp. Hệ thống sẽ tự thử lại.");
+    }
   }
   state.pollTimer = setTimeout(refresh, 5_000);
 }
@@ -335,9 +346,11 @@ async function refresh() {
 function handleCredential(response) {
   if (!response?.credential) return showLoginError("Không nhận được thông tin đăng nhập.");
   state.token = response.credential;
-  $("teacher-login").hidden = true;
-  $("teacher-dashboard").hidden = false;
-  refresh();
+  $("teacher-login").hidden = false;
+  $("teacher-dashboard").hidden = true;
+  $("teacher-updated").textContent = "Đang xác minh quyền…";
+  showLoginError("Đang xác minh quyền truy cập…");
+  void refresh();
 }
 
 async function waitForGoogle(clientId) {

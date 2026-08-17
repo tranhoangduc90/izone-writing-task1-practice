@@ -3,7 +3,7 @@ import { SECTION_KEYS, canUnlockDraft2, createRequestId, draftPrerequisitesPasse
 import { getDraft, getLatestDraft, putDraft } from "./idb.js";
 import { appendInlineMarkdown, appendMarkdown } from "./markdown.js";
 import { renderStudentFieldComments } from "./teacher-comments-ui.js";
-import { renderLmsDraftResult } from "./lms-draft-result.js";
+import { renderLmsDraftResult } from "./lms-draft-result.js?v=20260818-teacher-lms-vocab";
 import { createVocabularySection, manifestVocabularyRows } from "./vocabulary-ui.js";
 
 const $ = (id) => document.getElementById(id);

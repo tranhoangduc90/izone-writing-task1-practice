@@ -179,9 +179,7 @@ export function renderLmsDraftResult(root, payload, { updatedAt = null } = {}) {
   const summaryText = documentRef.createElement("div");
   const heading = documentRef.createElement("h4");
   heading.textContent = `${essays.length} thẻ cần xem`;
-  const note = documentRef.createElement("p");
-  note.textContent = "Chỉ hiển thị góp ý theo từng câu; phần nhận xét TR và CC không được đưa vào đây.";
-  summaryText.append(heading, note);
+  summaryText.append(heading);
   if (updatedAt) {
     const time = documentRef.createElement("time");
     time.dateTime = updatedAt;

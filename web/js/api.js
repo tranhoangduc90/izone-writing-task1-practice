@@ -27,6 +27,7 @@ export function createApi(base = "") {
     registerProvisional: (activitySlug, classRef, displayName, pin, duplicateConfirmed = false, requestId = createRequestId()) => fetchJson(endpoint(root, `activities/${encodeURIComponent(activitySlug)}/provisional-students`), jsonOptions("POST", { classRef, displayName, pin, duplicateConfirmed, requestId })),
     createSession: (activitySlug, classRef, studentRef, accessCode) => fetchJson(endpoint(root, "sessions"), jsonOptions("POST", { activitySlug, classRef, studentRef, ...(accessCode ? { accessCode } : {}), requestId: createRequestId() })),
     session: (sessionRef) => fetchJson(endpoint(root, `sessions/${encodeURIComponent(sessionRef)}`)),
+    draftResult: (sessionRef) => fetchJson(endpoint(root, `sessions/${encodeURIComponent(sessionRef)}/draft-result`)),
     saveDraft: (sessionRef, progress, keepalive = false) => fetchJson(endpoint(root, `sessions/${encodeURIComponent(sessionRef)}/draft`), jsonOptions("PUT", {
       baseVersion: progress.revision,
       overview: progress.texts.overview,

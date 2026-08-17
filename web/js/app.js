@@ -3,6 +3,7 @@ import { SECTION_KEYS, canUnlockDraft2, createRequestId, draftPrerequisitesPasse
 import { getDraft, getLatestDraft, putDraft } from "./idb.js";
 import { appendInlineMarkdown, appendMarkdown } from "./markdown.js";
 import { renderStudentFieldComments } from "./teacher-comments-ui.js";
+import { renderLmsDraftResult } from "./lms-draft-result.js";
 
 const $ = (id) => document.getElementById(id);
 const SECTION_INFO = {
@@ -10,7 +11,7 @@ const SECTION_INFO = {
   outline: { title: "Outline", kicker: "Phần 2", fields: [{ key: "body1", label: "Body 1", placeholder: "Nhóm số liệu thứ nhất…" }, { key: "body2", label: "Body 2", placeholder: "Nhóm số liệu thứ hai…" }] },
   draft: { title: "Draft 1 → Draft 2", kicker: "Phần 3", fields: [{ key: "draft1", label: "Draft 1", placeholder: "Viết liên tục phần Overview và Body 1…" }, { key: "draft2", label: "Draft 2", placeholder: "Sửa bản sao Draft 1 thành tiếng Anh hoàn chỉnh…" }] },
 };
-const app = { manifest: null, activitySlug: null, api: null, roster: null, identity: null, sessionRef: null, state: null, dirty: false, idbTimer: null, saveTimer: null, pollTimer: null, heartbeatTimer: null, pendingAttempts: new Map(), conflict: false, conflictServer: null, teacherComments: [], teacherCommentsEtag: null, teacherCommentTimer: null };
+const app = { manifest: null, activitySlug: null, api: null, roster: null, identity: null, sessionRef: null, state: null, dirty: false, idbTimer: null, saveTimer: null, pollTimer: null, heartbeatTimer: null, pendingAttempts: new Map(), conflict: false, conflictServer: null, teacherComments: [], teacherCommentsEtag: null, teacherCommentTimer: null, draftResult: { key: null, status: "idle", data: null } };
 
 function setSaveState(text) { $("save-state").textContent = text; }
 function showNotice(text = "") { const node = $("network-notice"); node.hidden = !text; node.textContent = text; }
@@ -289,9 +290,32 @@ function renderDraftResult(workspace, sectionComments) {
   const meta = document.createElement("div"); meta.className = "comment-meta"; meta.textContent = latest.createdAt ? `Cập nhật ${new Date(latest.createdAt).toLocaleString("vi-VN")}` : "Kết quả Draft 2";
   const lmsUrl = safeLmsUrl(latest.artifacts?.lmsUrl || latest.feedback);
   if (lmsUrl) {
-    const link = document.createElement("a"); const label = document.createElement("strong"); const address = document.createElement("span");
-    link.className = "lms-result-link"; link.href = lmsUrl; link.target = "_blank"; link.rel = "noopener noreferrer";
-    label.textContent = "Mở kết quả chấm trên LMS"; address.textContent = lmsUrl; link.append(label, address); item.append(meta, link);
+    const key = `${app.sessionRef}:${lmsUrl}`;
+    const inline = document.createElement("div"); inline.className = "lms-inline-result";
+    item.append(meta, inline);
+    if (app.draftResult.key !== key) {
+      app.draftResult = { key, status: "loading", data: null };
+      void app.api.draftResult(app.sessionRef).then(({ data }) => {
+        if (app.draftResult.key !== key) return;
+        app.draftResult = { key, status: "loaded", data: data.result };
+        renderComments();
+      }).catch(() => {
+        if (app.draftResult.key !== key) return;
+        app.draftResult = { key, status: "error", data: null };
+        renderComments();
+      });
+    }
+    if (app.draftResult.status === "loaded") {
+      renderLmsDraftResult(inline, app.draftResult.data, { updatedAt: app.draftResult.data?.updatedAt || latest.createdAt });
+    } else {
+      const message = document.createElement("p"); message.className = "draft-result-message";
+      message.textContent = app.draftResult.status === "error" ? "Chưa tải được các thẻ nhận xét từ LMS." : "Đang tải các thẻ nhận xét…";
+      inline.append(message);
+    }
+    const link = document.createElement("a");
+    link.className = "lms-result-link lms-result-fallback"; link.href = lmsUrl; link.target = "_blank"; link.rel = "noopener noreferrer";
+    link.textContent = app.draftResult.status === "error" ? "Mở kết quả trên LMS" : "Mở bản gốc trên LMS";
+    item.append(link);
   } else {
     const message = document.createElement("p"); message.className = "draft-result-message";
     message.textContent = latest.status === "queued" ? "Hệ thống đang chấm từng câu và tạo link LMS…" : latest.status === "technical_error" ? (latest.feedback || "Tạm thời chưa tạo được link LMS.") : "Kết quả đã cập nhật nhưng link LMS chưa hợp lệ. Vui lòng báo giảng viên.";

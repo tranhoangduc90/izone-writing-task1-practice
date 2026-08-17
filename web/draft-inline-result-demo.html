@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#14213d" />
+    <title>Demo hiển thị kết quả Draft trong handout</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2314213d'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-size='34' font-family='Arial' font-weight='700' fill='white'%3ED%3C/text%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="./styles.css?v=20260818-pager2" />
+  </head>
+  <body>
+    <a class="skip-link" href="#demo-inline-result">Đi tới kết quả chấm</a>
+    <header class="topbar">
+      <a class="brand" href="./?task=pie-app-users-by-age">iZONE · Writing Task 1</a>
+      <p class="save-state">Demo cục bộ · không gọi LMS, n8n hoặc database</p>
+    </header>
+    <main class="page-shell demo-inline-result-page">
+      <section class="demo-hero">
+        <p class="eyebrow">Bản demo mới</p>
+        <h1>Kết quả chấm Draft hiển thị ngay trong handout</h1>
+        <p>Mỗi lần chỉ hiện một thẻ từ trang LMS; dùng nút Trang trước/Tiếp theo để chuyển câu.</p>
+      </section>
+
+      <section class="section-workspace demo-inline-result-workspace" data-section="draft" data-state="passed" aria-labelledby="demo-draft-title">
+        <article class="section-card">
+          <div class="section-heading">
+            <div><p class="section-kicker">Phần 3</p><h2 id="demo-draft-title">Draft 1 → Draft 2</h2></div>
+            <span class="section-status" data-state="passed">Đã đạt</span>
+          </div>
+          <div class="draft-guidance markdown-body">
+            <h3>Bài đã được chấm</h3>
+            <p>Draft 2 được khóa như hiện tại. Học viên đọc từng thẻ kết quả ở bên cạnh và bấm Tiếp theo, không cần mở tab LMS mới.</p>
+          </div>
+          <label>Draft 1<textarea id="demo-draft1" readonly></textarea></label>
+          <p class="draft-copy-banner">Draft 1 đã được copy xuống và sửa thành Draft 2</p>
+          <label>Draft 2<textarea id="demo-draft2" readonly></textarea></label>
+        </article>
+
+        <aside class="comments-panel draft-result-panel" aria-labelledby="demo-result-title">
+          <div class="comments-heading">
+            <div><p class="eyebrow">Kết quả Draft</p><h2 id="demo-result-title">Chấm từng câu</h2></div>
+            <span id="demo-result-count" class="polling-state">Đang tải…</span>
+          </div>
+          <div id="demo-inline-result" aria-live="polite"></div>
+        </aside>
+      </section>
+    </main>
+    <script type="module" src="./js/draft-inline-result-demo.js?v=20260818-pager2"></script>
+  </body>
+</html>

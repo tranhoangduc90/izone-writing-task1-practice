@@ -34,6 +34,7 @@ textarea { resize:vertical; min-height:10rem; line-height:1.55; }
 .conflict h2 { margin-bottom:.3rem; }
 .conflict p { margin:0 0 .75rem; }
 .practice-layout,.sections,.section-workspace { display:grid; gap:1rem; }
+.section-workspace > *,.comments-panel,.comment-list,.draft-result-box,.lms-inline-result { min-width:0; }
 .task-content { display:grid; gap:1rem; margin-bottom:1rem; }
 .task-content:empty { display:none; }
 .task-content > * { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:1rem; }
@@ -88,7 +89,41 @@ textarea { resize:vertical; min-height:10rem; line-height:1.55; }
 .lms-result-link { display:grid; gap:.28rem; margin-top:.65rem; padding:.85rem; border:1px solid #8eb6e8; border-radius:9px; background:#eef6ff; color:#174ea6; text-decoration:none; }
 .lms-result-link:hover { border-color:#4e88cf; background:#e5f1ff; }
 .lms-result-link span { color:#526078; font-size:.78rem; font-weight:500; overflow-wrap:anywhere; }
+.lms-result-fallback { display:inline-flex; margin-top:.8rem; padding:.55rem .7rem; font-size:.8rem; font-weight:700; }
+.lms-inline-result { margin-top:.7rem; }
 .draft-result-message { margin:.6rem 0 0; }
+.lms-draft-summary { display:flex; justify-content:space-between; gap:.75rem; margin:.25rem 0 .9rem; padding:.75rem; border:1px solid #b8cbe3; border-radius:10px; background:#eef6ff; }
+.lms-draft-summary h4,.lms-draft-summary p { margin:0; }
+.lms-draft-summary p { margin-top:.2rem; color:#526078; font-size:.82rem; }
+.lms-draft-summary time { flex:0 0 auto; color:#526078; font-size:.75rem; }
+.lms-sentence-cards { display:grid; }
+.lms-sentence-card { container-type:inline-size; overflow:hidden; border:1px solid #c8d5e5; border-radius:12px; background:#fff; box-shadow:0 2px 7px rgb(20 33 61/.06); }
+.lms-sentence-card[hidden] { display:none; }
+.lms-sentence-card:nth-child(even) { border-color:#b7cbe1; background:#fbfdff; }
+.lms-sentence-header { display:flex; align-items:center; justify-content:space-between; gap:.6rem; padding:.7rem .8rem; border-bottom:1px solid #d8e1ec; background:#eef3f9; }
+.lms-sentence-header h4 { margin:0; color:var(--navy); font-size:.95rem; }
+.lms-sentence-header span { padding:.15rem .45rem; border-radius:999px; background:#fff; color:#526078; font-size:.73rem; font-weight:750; }
+.lms-comparison { display:grid; gap:.65rem; padding:.75rem; }
+.lms-version { overflow:hidden; border:1px solid #dbe2ea; border-radius:9px; background:#fff; }
+.lms-version[data-kind="original"] { border-color:#efc4be; background:#fffafa; }
+.lms-version[data-kind="suggested"] { border-color:#a7d5b9; background:#f8fffa; }
+.lms-version-label { margin:0; padding:.48rem .65rem; border-bottom:1px solid currentColor; color:#526078; font-size:.78rem; }
+.lms-version[data-kind="original"] .lms-version-label { color:#9d2d24; background:#fff0ee; }
+.lms-version[data-kind="suggested"] .lms-version-label { color:#11643b; background:#eaf8ef; }
+.lms-prosemirror { padding:.65rem; color:#26334d; font-size:.9rem; line-height:1.58; }
+.lms-prosemirror p,.lms-prosemirror ul,.lms-prosemirror ol { margin:.35rem 0; }
+.lms-change-highlight { padding:.06rem .1rem; border-radius:3px; color:inherit; text-decoration:underline dashed; text-underline-offset:3px; }
+.lms-change-highlight[data-kind="original"] { background:#ffe0dc; text-decoration-color:#c24136; }
+.lms-change-highlight[data-kind="suggested"] { background:#dff5e7; text-decoration-color:#167044; }
+.lms-sentence-review { padding:.75rem; border-top:1px solid #d8e1ec; background:#f7f9fc; }
+.lms-sentence-review > h5 { margin:0 0 .45rem; color:#344054; font-size:.8rem; text-transform:uppercase; letter-spacing:.04em; }
+.lms-sentence-review-body { color:#344054; font-size:.88rem; }
+.lms-sentence-review-body p,.lms-sentence-review-body ul,.lms-sentence-review-body ol,.lms-sentence-review-body blockquote { margin:.4rem 0; }
+.lms-sentence-review-body blockquote { padding:.45rem .65rem; border-left:3px solid #7ba5d6; background:#fff; }
+.lms-draft-pager { display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); gap:.75rem; align-items:center; margin-top:.9rem; padding-top:.9rem; border-top:1px solid #d8e1ec; }
+.lms-page-button { min-width:0; }
+.lms-page-button:last-child { justify-self:stretch; }
+.lms-page-status { min-width:5.7rem; color:#344054; text-align:center; white-space:nowrap; }
 .markdown-body { color:var(--ink); overflow-wrap:anywhere; }
 .markdown-body > :first-child { margin-top:0; }
 .markdown-body > :last-child { margin-bottom:0; }
@@ -108,6 +143,7 @@ textarea { resize:vertical; min-height:10rem; line-height:1.55; }
 @media (min-width:840px) { .page-shell { padding:1.5rem; } .section-workspace { grid-template-columns:minmax(0,1fr) minmax(300px,.72fr); align-items:start; } .comments-panel { max-height:620px; overflow:auto; } }
 @media (min-width:1280px) { .practice-layout { grid-template-columns:minmax(490px,.9fr) minmax(700px,1.35fr); align-items:start; } .task-content { position:sticky; top:1rem; max-height:calc(100vh - 90px); overflow:auto; padding-right:.25rem; } .section-workspace { grid-template-columns:minmax(390px,1fr) minmax(300px,.78fr); } }
 @media (max-width:620px) { .task-header { display:grid; } .task-header .actions { display:grid; grid-template-columns:1fr 1fr; } .task-header button { padding-inline:.45rem; } }
+@media (max-width:520px) { .lms-draft-pager { grid-template-columns:1fr 1fr; } .lms-page-status { grid-column:1/-1; grid-row:1; } .lms-page-button { grid-row:2; padding-inline:.55rem; } }
 .demo-page { max-width:1680px; }
 .demo-hero { margin:.5rem 0 1rem; padding:1rem; border:1px solid var(--line); border-radius:14px; background:#fff; }
 .demo-hero p { margin:.35rem 0; }
@@ -119,6 +155,12 @@ textarea { resize:vertical; min-height:10rem; line-height:1.55; }
 .demo-field p { margin:.25rem 0 0; }
 .demo-draft-workspace textarea { min-height:13rem; }
 .demo-draft-workspace .comments-panel { max-height:none; }
+.demo-inline-result-page { max-width:1500px; }
+.demo-inline-result-workspace { align-items:start; }
+.demo-inline-result-workspace textarea { min-height:15rem; }
+.demo-inline-result-workspace .comments-panel { max-height:none; overflow:visible; }
+@container (min-width:540px) { .lms-comparison { grid-template-columns:minmax(0,1fr) minmax(0,1fr); } }
+@media (min-width:840px) { .demo-inline-result-workspace { grid-template-columns:minmax(360px,.78fr) minmax(520px,1.22fr); } }
 @media (min-width:1280px) { .demo-layout { grid-template-columns:minmax(520px,.9fr) minmax(820px,1.5fr); } }
 
 /* Handout Writing Lesson 13 */

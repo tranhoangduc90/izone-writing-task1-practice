@@ -40,6 +40,8 @@ Mọi chi tiết API nằm trong [js/api.js](js/api.js). Adapter hiện gọi h�
 
 Link kết quả Draft chỉ được render nếu dùng HTTPS, đúng host `practice.izone.edu.vn` và đúng đường dẫn `/shared/writing-essays/`. API và workflow n8n lặp lại cùng kiểm tra trước khi khóa bài.
 
+Bản demo `draft-inline-result-demo.html` dùng dữ liệu band 6.0 giả theo đúng response `essays` của Quick Aid để hiển thị từng thẻ chấm câu ngay trong handout. Mỗi lần chỉ có một thẻ được hiện; học viên dùng nút Trang trước/Tiếp theo như LMS Writing. Comment dạng Markdown dùng cùng bộ render production nên các mục `1.` cách nhau bởi dòng trống vẫn hiển thị liên tục thành `1, 2, 3`. Demo cố ý bỏ qua hai trường `content` và `feedback`, tức màn tổng hợp TR/CC, đồng thời không gọi API, LMS, n8n hay database.
+
 ## Lưu ý triển khai
 
 `fetch(..., { keepalive: true })` chỉ là phương án dự phòng khi đóng tab; API vẫn áp dụng cùng kiểm tra phiên bản/idempotency như `PUT draft`. GitHub Pages không bảo vệ API: backend vẫn phải kiểm tra UUID, CORS origin allow-list và rate limit.

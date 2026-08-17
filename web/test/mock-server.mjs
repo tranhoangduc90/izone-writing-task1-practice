@@ -86,6 +86,10 @@ const server = http.createServer(async (request, response) => {
   if (url.pathname === "/api/v1/admin/activities/pie-app-users-by-age/provisional-students") return json(response, 200, { ok: true, students: [{ studentRef: "70000000-0000-4000-8000-000000000003", displayName: "Học viên tạm mốc 3", classRef: "11111111-1111-4111-8111-111111111111", className: "Lớp thử giao diện", reconciliationStatus: "pending" }] });
   if (url.pathname === "/api/v1/sessions" && request.method === "POST") return json(response, 201, { ok: true, session: session() });
   if (url.pathname === `/api/v1/sessions/${sessionRef}` && request.method === "GET") return json(response, 200, { ok: true, session: session() });
+  if (url.pathname === `/api/v1/sessions/${sessionRef}/draft-result` && request.method === "GET") {
+    const fixture = JSON.parse(await fs.readFile(path.join(root, "demo-lms-draft-result.json"), "utf8"));
+    return json(response, 200, { ok: true, result: { ...fixture.lmsResponse, updatedAt: "2026-08-18T01:00:00.000Z" } });
+  }
   if (url.pathname === `/api/v1/sessions/${sessionRef}/live` && request.method === "PUT") return json(response, 200, { ok: true, accepted: true });
   if (url.pathname === `/api/v1/sessions/${sessionRef}/teacher-comments` && request.method === "GET") return json(response, 200, { ok: true, threads: teacherThreads }, { etag: `"teacher-comments-${teacherThreads[0].messages.length}"` });
   if (url.pathname === `/api/v1/sessions/${sessionRef}/teacher-comments/${teacherThreadRef}/replies` && request.method === "POST") {

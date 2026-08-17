@@ -69,6 +69,8 @@ textarea { resize:vertical; min-height:10rem; line-height:1.55; }
 .section-actions { justify-content:space-between; margin-top:.65rem; }
 .draft-guidance { margin-bottom:1rem; padding:.9rem; border:1px solid #b9cce4; border-radius:10px; background:#eef6ff; }
 .draft-guidance h3 { margin-top:0; }
+.draft-vocabulary { margin:0 0 1rem; padding:.85rem; border:1px solid #b9cce4; border-radius:10px; background:#f8fbff; }
+.draft-vocabulary h3 { margin:0 0 .65rem; color:var(--navy); }
 .draft-prerequisite { margin:0; padding:.8rem; border-left:4px solid var(--warning); border-radius:6px; background:#fff7e6; color:#6b4500; font-weight:650; }
 .unlock-draft2 { width:100%; margin-top:.25rem; }
 .draft-unlock-hint { margin:.35rem 0 0; font-size:.84rem; }
@@ -257,6 +259,7 @@ textarea { resize:vertical; min-height:10rem; line-height:1.55; }
 .teacher-comment-timeline h4 { margin:.2rem 0 0; color:var(--navy); }
 .teacher-detail-vocabulary { margin-top:1rem; border:1px solid var(--line); border-radius:10px; background:#f8fafc; }
 .teacher-detail-vocabulary h4 { margin:0 0 .65rem; color:var(--navy); }
+.teacher-draft-vocabulary { margin:.85rem 0 0; background:#f8fbff; }
 .teacher-response-field { margin:.55rem 0; padding:.7rem .8rem; border-radius:8px; background:#f6f8fb; }
 .teacher-response-field[data-active="true"] { box-shadow:inset 4px 0 #2563eb; background:#edf5ff; }
 .teacher-response-field p { margin:.25rem 0 0; white-space:pre-wrap; }

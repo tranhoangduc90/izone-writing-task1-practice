@@ -161,7 +161,11 @@ function versionCard(documentRef, title, kind, blocks) {
   return section;
 }
 
-export function renderLmsDraftResult(root, payload, { updatedAt = null } = {}) {
+export function renderLmsDraftResult(root, payload, {
+  updatedAt = null,
+  initialIndex = 0,
+  onPageChange = null,
+} = {}) {
   const { essays } = normalizeLmsDraftPayload(payload);
   const documentRef = root.ownerDocument;
   root.replaceChildren();
@@ -265,15 +269,15 @@ export function renderLmsDraftResult(root, payload, { updatedAt = null } = {}) {
     pageStatus.textContent = `Thẻ ${state.position} / ${state.total}`;
     if (moveFocus) {
       const activeCard = cardElements[currentIndex];
-      activeCard.scrollIntoView({ behavior: "smooth", block: "start" });
       activeCard.querySelector("h4")?.focus({ preventScroll: true });
     }
+    if (typeof onPageChange === "function") onPageChange(currentIndex);
     return state;
   };
 
   previous.addEventListener("click", () => showPage(currentIndex - 1, { moveFocus: true }));
   next.addEventListener("click", () => showPage(currentIndex + 1, { moveFocus: true }));
   root.append(cards, pager);
-  showPage(0);
+  showPage(initialIndex);
   return { count: essays.length, showPage };
 }

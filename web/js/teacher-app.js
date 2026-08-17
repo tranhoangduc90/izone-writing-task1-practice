@@ -1,5 +1,5 @@
 import { createTeacherApi } from "./api.js";
-import { createRequestId, hasMeaningfulText } from "./core.js";
+import { createRequestId, hasMeaningfulText, safeLmsUrl } from "./core.js";
 import { sectionDefinitions } from "./lesson-core.js";
 import { appendMarkdown } from "./markdown.js";
 import { commentsForSection, isBackdropClick, latestVocabularyRows } from "./teacher-detail-core.js";
@@ -7,10 +7,12 @@ import { groupStudents } from "./teacher-progress.js";
 import { teacherAuthFailure } from "./teacher-auth-ui.js";
 import { selectionOffsets, threadsForField } from "./teacher-comments-core.js";
 import { createTeacherCommentThreadCard, renderAnnotatedText } from "./teacher-comments-ui.js";
+import { renderLmsDraftResult } from "./lms-draft-result.js";
+import { createVocabularySection, manifestVocabularyRows } from "./vocabulary-ui.js";
 
 const $ = (id) => document.getElementById(id);
 const state = { token: "", api: null, manifest: null, activitySlug: "", students: [], pollTimer: null,
-  selectedStudent: null, detailRequestId: 0, focusSection: "", pending: [], canManage: false };
+  selectedStudent: null, detailRequestId: 0, focusSection: "", pending: [], canManage: false, draftResults: new Map() };
 
 function teacherDefinitions() {
   const dynamic = sectionDefinitions(state.manifest);
@@ -131,6 +133,42 @@ function renderCommentTimeline(student, definition, loading) {
   headingText.append(eyebrow, title); heading.append(headingText); timeline.append(heading);
   const comments = commentsForSection(student.comments || [], definition.key);
   const list = document.createElement("ol"); list.className = "comment-list";
+  const latest = comments[0];
+  const lmsUrl = definition.key === "draft" ? safeLmsUrl(latest?.artifacts?.lmsUrl || latest?.feedback) : null;
+  if (lmsUrl) {
+    timeline.classList.add("draft-result-panel"); list.classList.add("draft-result-list");
+    const item = document.createElement("li"); item.className = "draft-result-box"; item.dataset.status = latest.status || "completed";
+    const meta = document.createElement("div"); meta.className = "comment-meta";
+    meta.textContent = latest.createdAt ? `Cập nhật ${new Date(latest.createdAt).toLocaleString("vi-VN")}` : "Kết quả Draft 2";
+    const inline = document.createElement("div"); inline.className = "lms-inline-result"; item.append(meta, inline);
+    const key = `${student.sessionRef}:${lmsUrl}`;
+    const cached = state.draftResults.get(key);
+    if (!cached) {
+      state.draftResults.set(key, { status: "loading", data: null, pageIndex: 0 });
+      void state.api.draftResult(student.sessionRef).then(({ data }) => {
+        state.draftResults.set(key, { status: "loaded", data: data.result, pageIndex: 0 });
+        if (state.selectedStudent?.sessionRef === student.sessionRef && $("teacher-detail").open) renderStudentDetail(state.selectedStudent);
+      }).catch(() => {
+        state.draftResults.set(key, { status: "error", data: null, pageIndex: 0 });
+        if (state.selectedStudent?.sessionRef === student.sessionRef && $("teacher-detail").open) renderStudentDetail(state.selectedStudent);
+      });
+    }
+    const result = state.draftResults.get(key);
+    if (result?.status === "loaded") renderLmsDraftResult(inline, result.data, {
+      updatedAt: result.data?.updatedAt || latest.createdAt,
+      initialIndex: result.pageIndex,
+      onPageChange: (pageIndex) => { result.pageIndex = pageIndex; },
+    });
+    else {
+      const message = document.createElement("p"); message.className = "draft-result-message";
+      message.textContent = result?.status === "error" ? "Chưa tải được các thẻ nhận xét từ LMS." : "Đang tải các thẻ nhận xét…";
+      inline.append(message);
+    }
+    const link = document.createElement("a"); link.className = "lms-result-link lms-result-fallback"; link.href = lmsUrl; link.target = "_blank"; link.rel = "noopener noreferrer";
+    link.textContent = result?.status === "error" ? "Mở kết quả trên LMS" : "Mở bản gốc trên LMS";
+    item.append(link); list.append(item); timeline.append(list);
+    return timeline;
+  }
   for (const item of comments) {
     const entry = document.createElement("li"); entry.dataset.status = item.status || "completed";
     const meta = document.createElement("div"); meta.className = "comment-meta";
@@ -268,6 +306,13 @@ function renderStudentDetail(student, { loading = false, error = "" } = {}) {
     for (const sectionKey of body.sectionKeys || []) {
       const definition = teacherDefinitions().find((item) => item.key === sectionKey);
       if (!definition) continue;
+      if (sectionKey === "draft") {
+        const vocabulary = createVocabularySection(document, manifestVocabularyRows(state.manifest?.vocabulary), {
+          className: "teacher-detail-vocabulary teacher-draft-vocabulary",
+          headingTag: "h4",
+        });
+        if (vocabulary) bodySection.append(vocabulary);
+      }
       const section = document.createElement("article"); section.className = "teacher-detail-section";
       section.dataset.sectionKey = sectionKey;
       const sectionKicker = document.createElement("p"); sectionKicker.className = "section-kicker"; sectionKicker.textContent = definition.kicker || "";
@@ -316,7 +361,7 @@ function renderStudentDetail(student, { loading = false, error = "" } = {}) {
       section.append(sectionLayout);
       bodySection.append(section);
     }
-    renderVocabulary(bodySection, student, body.key, loading);
+    if (!(body.sectionKeys || []).includes("draft")) renderVocabulary(bodySection, student, body.key, loading);
     root.append(bodySection);
   }
   if (error) {

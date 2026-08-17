@@ -36,7 +36,7 @@ function session() {
     ...draft,
     updatedAt: new Date().toISOString(),
     sections: {
-      overview: { status: "revision", attemptsWithoutPass: 1 },
+      overview: { status: "passed", attemptsWithoutPass: 0 },
       outline: { status: "passed", attemptsWithoutPass: 0 },
       draft: { status: "passed", attemptsWithoutPass: 0 }
     },
@@ -76,12 +76,18 @@ const server = http.createServer(async (request, response) => {
   if (url.pathname === "/api/v1/admin/live/activities/pie-app-users-by-age") {
     const base = { classRef: "11111111-1111-4111-8111-111111111111", className: "Lớp thử giao diện", online: false, totalFields: 5, passedSectionCount: 0, attemptedSectionCount: 1, checkCount: 1, sections: { overview: { status: "revision" } }, responses: {} };
     return json(response, 200, { ok: true, generatedAt: new Date().toISOString(), students: [
-      { ...base, studentRef: "70000000-0000-4000-8000-000000000009", displayName: "Học viên mốc 9", hasStarted: true, filledFields: 3, progressPercent: 60, supportRequired: true, supportSections: [{ section: "overview", commentNumber: 9, warningAt: "2026-08-15T01:00:00Z" }] },
+      { ...base, studentRef: "70000000-0000-4000-8000-000000000009", sessionRef, displayName: "Học viên mốc 9", hasStarted: true, filledFields: 3, progressPercent: 60, supportRequired: true, supportSections: [{ section: "overview", commentNumber: 9, warningAt: "2026-08-15T01:00:00Z" }] },
       { ...base, studentRef: "70000000-0000-4000-8000-000000000003", displayName: "Học viên tạm mốc 3", provisional: true, reconciliationStatus: "pending", hasStarted: true, filledFields: 1, progressPercent: 20, supportRequired: true, supportSections: [{ section: "outline", commentNumber: 3, warningAt: "2026-08-15T00:00:00Z" }] },
       { ...base, studentRef: "70000000-0000-4000-8000-000000000010", displayName: "Tiến trình thấp", hasStarted: true, filledFields: 1, progressPercent: 20, supportRequired: false },
       { ...base, studentRef: "70000000-0000-4000-8000-000000000080", displayName: "Tiến trình cao", hasStarted: true, filledFields: 4, progressPercent: 80, passedSectionCount: 2, supportRequired: false },
       { ...base, studentRef: "70000000-0000-4000-8000-000000000000", displayName: "Chưa bắt đầu", hasStarted: false, filledFields: 0, progressPercent: 0, attemptedSectionCount: 0, checkCount: 0, sections: {}, supportRequired: false }
     ] });
+  }
+  if (url.pathname === `/api/v1/admin/live/sessions/${sessionRef}` && request.method === "GET") {
+    return json(response, 200, { ok: true, session: session() });
+  }
+  if (url.pathname === `/api/v1/admin/live/sessions/${sessionRef}/teacher-comments` && request.method === "GET") {
+    return json(response, 200, { ok: true, threads: teacherThreads }, { etag: `"teacher-comments-${teacherThreads[0].messages.length}"` });
   }
   if (url.pathname === "/api/v1/admin/activities/pie-app-users-by-age/provisional-students") return json(response, 200, { ok: true, students: [{ studentRef: "70000000-0000-4000-8000-000000000003", displayName: "Học viên tạm mốc 3", classRef: "11111111-1111-4111-8111-111111111111", className: "Lớp thử giao diện", reconciliationStatus: "pending" }] });
   if (url.pathname === "/api/v1/sessions" && request.method === "POST") return json(response, 201, { ok: true, session: session() });

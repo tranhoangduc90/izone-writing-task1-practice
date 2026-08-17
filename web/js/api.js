@@ -94,6 +94,7 @@ export function createTeacherApi(base = "", getToken = () => "") {
       return fetchJson(url, { headers: authorized() });
     },
     liveSession: (sessionRef) => fetchJson(endpoint(root, `admin/live/sessions/${encodeURIComponent(sessionRef)}`), { headers: authorized() }),
+    draftResult: (sessionRef) => fetchJson(endpoint(root, `sessions/${encodeURIComponent(sessionRef)}/draft-result`), { headers: authorized() }),
     provisionalStudents: (slug, classRef = "") => { const url = new URL(endpoint(root, `admin/activities/${encodeURIComponent(slug)}/provisional-students`)); if (classRef) url.searchParams.set("classRef", classRef); return fetchJson(url, { headers: authorized() }); },
     resetProvisionalCode: (studentRef) => fetchJson(endpoint(root, `admin/provisional-students/${encodeURIComponent(studentRef)}/reset-code`), jsonOptions("POST", {}, authorized())),
     reconcileProvisional: (studentRef, officialStudentRef) => fetchJson(endpoint(root, `admin/provisional-students/${encodeURIComponent(studentRef)}/reconcile`), jsonOptions("POST", { officialStudentRef }, authorized())),

@@ -4,6 +4,7 @@ import { getDraft, getLatestDraft, putDraft } from "./idb.js";
 import { appendInlineMarkdown, appendMarkdown } from "./markdown.js";
 import { renderStudentFieldComments } from "./teacher-comments-ui.js";
 import { renderLmsDraftResult } from "./lms-draft-result.js";
+import { createVocabularySection, manifestVocabularyRows } from "./vocabulary-ui.js";
 
 const $ = (id) => document.getElementById(id);
 const SECTION_INFO = {
@@ -11,7 +12,7 @@ const SECTION_INFO = {
   outline: { title: "Outline", kicker: "Phần 2", fields: [{ key: "body1", label: "Body 1", placeholder: "Nhóm số liệu thứ nhất…" }, { key: "body2", label: "Body 2", placeholder: "Nhóm số liệu thứ hai…" }] },
   draft: { title: "Draft 1 → Draft 2", kicker: "Phần 3", fields: [{ key: "draft1", label: "Draft 1", placeholder: "Viết liên tục phần Overview và Body 1…" }, { key: "draft2", label: "Draft 2", placeholder: "Sửa bản sao Draft 1 thành tiếng Anh hoàn chỉnh…" }] },
 };
-const app = { manifest: null, activitySlug: null, api: null, roster: null, identity: null, sessionRef: null, state: null, dirty: false, idbTimer: null, saveTimer: null, pollTimer: null, heartbeatTimer: null, pendingAttempts: new Map(), conflict: false, conflictServer: null, teacherComments: [], teacherCommentsEtag: null, teacherCommentTimer: null, draftResult: { key: null, status: "idle", data: null } };
+const app = { manifest: null, activitySlug: null, api: null, roster: null, identity: null, sessionRef: null, state: null, dirty: false, idbTimer: null, saveTimer: null, pollTimer: null, heartbeatTimer: null, pendingAttempts: new Map(), conflict: false, conflictServer: null, teacherComments: [], teacherCommentsEtag: null, teacherCommentTimer: null, draftResult: { key: null, status: "idle", data: null, pageIndex: 0 } };
 
 function setSaveState(text) { $("save-state").textContent = text; }
 function showNotice(text = "") { const node = $("network-notice"); node.hidden = !text; node.textContent = text; }
@@ -88,16 +89,6 @@ function renderTaskContent() {
   if (Array.isArray(routes) && routes.length) {
     const card = document.createElement("section"); const heading = document.createElement("h2"); const list = document.createElement("ol"); heading.textContent = "Cách triển khai gợi ý";
     [...routes].sort((a, b) => Number(Boolean(b.recommended)) - Number(Boolean(a.recommended))).forEach((route) => { const item = document.createElement("li"); const details = route.body ? `${route.body.body_1 || ""} / ${route.body.body_2 || ""}` : route.description; const text = typeof route === "string" ? route : `${route.recommended ? "**Khuyến nghị:** " : ""}**${route.name || route.title || route.label || "Cách triển khai"}**${details ? ` — ${details}` : ""}`; appendInlineMarkdown(item, text); list.append(item); }); card.append(heading, list); root.append(card);
-  }
-  const manifestVocab = manifest.vocabulary;
-  const vocab = Array.isArray(manifestVocab) ? manifestVocab : [
-    ...(manifestVocab?.overview?.naming || []), ...(manifestVocab?.overview?.insights || []),
-    ...(manifestVocab?.routes || []).flatMap(route => [...(route.naming || []), ...(route.story || [])])
-  ];
-  if (vocab.length) {
-    const card = document.createElement("section"); const heading = document.createElement("h2"); const wrapper = document.createElement("div"); const table = document.createElement("table"); const thead = document.createElement("thead"); const tbody = document.createElement("tbody"); heading.textContent = "Từ vựng hỗ trợ"; wrapper.className = "table-scroll"; table.className = "vocab-table"; const headRow = document.createElement("tr"); ["Ý tiếng Việt", "Từ, cụm từ tiếng Anh"].forEach((label) => { const th = document.createElement("th"); th.scope = "col"; th.textContent = label; headRow.append(th); }); thead.append(headRow);
-    vocab.forEach((entry) => { const row = document.createElement("tr"); const vi = document.createElement("td"); const en = document.createElement("td"); appendInlineMarkdown(vi, entry.vi || entry.meaning || entry.note || ""); appendInlineMarkdown(en, entry.en || entry.term || entry.title || entry.example || ""); row.append(vi, en); tbody.append(row); });
-    table.append(thead, tbody); wrapper.append(table); card.append(heading, wrapper); root.append(card);
   }
   const rawChatbots = manifest.chatbots || task.chatbotLinks;
   const chatbots = Array.isArray(rawChatbots) ? rawChatbots : Object.values(rawChatbots || {}).filter(bot => bot.href);
@@ -194,6 +185,13 @@ function addDraftGuidance(card) {
   card.querySelector(".text-fields").before(guidance);
 }
 
+function addDraftVocabulary(card) {
+  const section = createVocabularySection(document, manifestVocabularyRows(app.manifest?.vocabulary), {
+    className: "draft-vocabulary",
+  });
+  if (section) card.querySelector(".text-fields").append(section);
+}
+
 function addTextarea(card, section, field, disabled) {
   const fieldRoot = document.createElement("div"); fieldRoot.className = "practice-field"; fieldRoot.dataset.fieldKey = field.key;
   const label = document.createElement("label"); label.textContent = field.label;
@@ -246,6 +244,7 @@ async function refreshTeacherComments(force = false) {
 
 function renderDraftFields(card, locked, prerequisitesPassed) {
   addDraftGuidance(card);
+  addDraftVocabulary(card);
   if (!prerequisitesPassed) {
     const notice = document.createElement("p"); notice.className = "draft-prerequisite"; notice.textContent = "Hãy hoàn thành và đạt Overview cùng Outline. Sau đó ô Draft 1 sẽ tự mở."; card.querySelector(".text-fields").append(notice); return;
   }
@@ -294,19 +293,23 @@ function renderDraftResult(workspace, sectionComments) {
     const inline = document.createElement("div"); inline.className = "lms-inline-result";
     item.append(meta, inline);
     if (app.draftResult.key !== key) {
-      app.draftResult = { key, status: "loading", data: null };
+      app.draftResult = { key, status: "loading", data: null, pageIndex: 0 };
       void app.api.draftResult(app.sessionRef).then(({ data }) => {
         if (app.draftResult.key !== key) return;
-        app.draftResult = { key, status: "loaded", data: data.result };
+        app.draftResult = { key, status: "loaded", data: data.result, pageIndex: app.draftResult.pageIndex || 0 };
         renderComments();
       }).catch(() => {
         if (app.draftResult.key !== key) return;
-        app.draftResult = { key, status: "error", data: null };
+        app.draftResult = { key, status: "error", data: null, pageIndex: 0 };
         renderComments();
       });
     }
     if (app.draftResult.status === "loaded") {
-      renderLmsDraftResult(inline, app.draftResult.data, { updatedAt: app.draftResult.data?.updatedAt || latest.createdAt });
+      renderLmsDraftResult(inline, app.draftResult.data, {
+        updatedAt: app.draftResult.data?.updatedAt || latest.createdAt,
+        initialIndex: app.draftResult.pageIndex,
+        onPageChange: (pageIndex) => { app.draftResult.pageIndex = pageIndex; },
+      });
     } else {
       const message = document.createElement("p"); message.className = "draft-result-message";
       message.textContent = app.draftResult.status === "error" ? "Chưa tải được các thẻ nhận xét từ LMS." : "Đang tải các thẻ nhận xét…";

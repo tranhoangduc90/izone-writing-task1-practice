@@ -19,7 +19,11 @@ export function parseMarkdownBlocks(value) {
 
   for (const rawLine of lines) {
     const line = rawLine.replace(/\s+$/u, "");
-    if (!line.trim()) { flushParagraph(); flushList(); continue; }
+    if (!line.trim()) {
+      flushParagraph();
+      // Giữ danh sách mở để các mục có dòng trống ở giữa vẫn được đánh số liên tục.
+      continue;
+    }
 
     const heading = line.match(/^\s{0,3}(#{1,4})\s+(.+)$/u);
     if (heading) {

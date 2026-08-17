@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeLmsDraftPayload, proseMirrorBlocks } from "../js/lms-draft-result.js";
+import { draftPagerState, normalizeLmsDraftPayload, proseMirrorBlocks } from "../js/lms-draft-result.js";
 
 const paragraph = (text, highlighted = false) => ({
   type: "doc",
@@ -30,4 +30,10 @@ test("xếp thẻ theo index của LMS và giới hạn dữ liệu đầu vào"
   ] });
   assert.deepEqual(result.essays.map((item) => item.id), ["first", "later"]);
   assert.equal(result.essays[0].comments[0].length, 20_000);
+});
+
+test("pager chặn ở thẻ đầu và cuối", () => {
+  assert.deepEqual(draftPagerState(-2, 4), { index: 0, position: 1, total: 4, atStart: true, atEnd: false });
+  assert.deepEqual(draftPagerState(2, 4), { index: 2, position: 3, total: 4, atStart: false, atEnd: false });
+  assert.deepEqual(draftPagerState(20, 4), { index: 3, position: 4, total: 4, atStart: false, atEnd: true });
 });

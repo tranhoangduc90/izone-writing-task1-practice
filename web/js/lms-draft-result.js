@@ -1,3 +1,5 @@
+import { appendMarkdown } from "./markdown.js";
+
 const MAX_ESSAYS = 80;
 const MAX_COMMENT_LENGTH = 20_000;
 const ALLOWED_COMMENT_TAGS = new Set(["p", "br", "strong", "b", "em", "i", "ul", "ol", "li", "code", "blockquote"]);
@@ -126,6 +128,25 @@ function appendSanitizedComment(root, html) {
   for (const child of template.content.childNodes) root.append(copy(child));
 }
 
+function appendSafeComment(root, value) {
+  const comment = clippedText(value);
+  if (/<\/?[a-z][\s\S]*>/iu.test(comment)) {
+    appendSanitizedComment(root, comment);
+    return;
+  }
+  // AI đôi khi trả các mục "1." có dòng trống ở giữa. Bộ render Markdown giữ
+  // chúng trong cùng một danh sách để trình duyệt hiển thị liên tục 1, 2, 3.
+  appendMarkdown(root, comment);
+}
+
+export function draftPagerState(requestedIndex, total) {
+  const safeTotal = Number.isInteger(total) && total > 0 ? total : 0;
+  if (!safeTotal) return { index: 0, position: 0, total: 0, atStart: true, atEnd: true };
+  const numericIndex = Number.isFinite(requestedIndex) ? Math.trunc(requestedIndex) : 0;
+  const index = Math.min(Math.max(numericIndex, 0), safeTotal - 1);
+  return { index, position: index + 1, total: safeTotal, atStart: index === 0, atEnd: index === safeTotal - 1 };
+}
+
 function versionCard(documentRef, title, kind, blocks) {
   const section = documentRef.createElement("section");
   section.className = "lms-version";
@@ -173,6 +194,7 @@ export function renderLmsDraftResult(root, payload, { updatedAt = null } = {}) {
 
   const cards = documentRef.createElement("div");
   cards.className = "lms-sentence-cards";
+  const cardElements = [];
   essays.forEach((essay, position) => {
     const card = documentRef.createElement("article");
     card.className = "lms-sentence-card";
@@ -180,6 +202,7 @@ export function renderLmsDraftResult(root, payload, { updatedAt = null } = {}) {
     const cardHeader = documentRef.createElement("header");
     cardHeader.className = "lms-sentence-header";
     const title = documentRef.createElement("h4");
+    title.tabIndex = -1;
     title.textContent = `Thẻ ${position + 1}`;
     const counter = documentRef.createElement("span");
     counter.textContent = `${position + 1}/${essays.length}`;
@@ -202,14 +225,57 @@ export function renderLmsDraftResult(root, payload, { updatedAt = null } = {}) {
       reviewBody.className = "lms-sentence-review-body";
       for (const comment of essay.comments) {
         const commentBlock = documentRef.createElement("div");
-        appendSanitizedComment(commentBlock, comment);
+        appendSafeComment(commentBlock, comment);
         reviewBody.append(commentBlock);
       }
       review.append(reviewTitle, reviewBody);
       card.append(review);
     }
+    card.hidden = position !== 0;
+    card.setAttribute("aria-hidden", position === 0 ? "false" : "true");
+    cardElements.push(card);
     cards.append(card);
   });
-  root.append(cards);
-  return { count: essays.length };
+
+  const pager = documentRef.createElement("nav");
+  pager.className = "lms-draft-pager";
+  pager.setAttribute("aria-label", "Chuyển giữa các thẻ chấm từng câu");
+  const previous = documentRef.createElement("button");
+  previous.type = "button";
+  previous.className = "secondary lms-page-button";
+  previous.textContent = "← Trang trước";
+  const pageStatus = documentRef.createElement("strong");
+  pageStatus.className = "lms-page-status";
+  pageStatus.setAttribute("aria-live", "polite");
+  const next = documentRef.createElement("button");
+  next.type = "button";
+  next.className = "primary lms-page-button";
+  next.textContent = "Trang tiếp theo →";
+  pager.append(previous, pageStatus, next);
+
+  let currentIndex = 0;
+  const showPage = (requestedIndex, { moveFocus = false } = {}) => {
+    const state = draftPagerState(requestedIndex, cardElements.length);
+    currentIndex = state.index;
+    cardElements.forEach((card, index) => {
+      const active = index === currentIndex;
+      card.hidden = !active;
+      card.setAttribute("aria-hidden", active ? "false" : "true");
+    });
+    previous.disabled = state.atStart;
+    next.disabled = state.atEnd;
+    pageStatus.textContent = `Thẻ ${state.position} / ${state.total}`;
+    if (moveFocus) {
+      const activeCard = cardElements[currentIndex];
+      activeCard.scrollIntoView({ behavior: "smooth", block: "start" });
+      activeCard.querySelector("h4")?.focus({ preventScroll: true });
+    }
+    return state;
+  };
+
+  previous.addEventListener("click", () => showPage(currentIndex - 1, { moveFocus: true }));
+  next.addEventListener("click", () => showPage(currentIndex + 1, { moveFocus: true }));
+  root.append(cards, pager);
+  showPage(0);
+  return { count: essays.length, showPage };
 }

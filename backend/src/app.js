@@ -44,7 +44,7 @@ function sameSecret(actual,expected){const a=Buffer.from(String(actual||'')),b=B
 function cors(config){return(req,res,next)=>{const origin=req.get('origin');if(origin&&!config.allowedOrigins.has(origin))return res.status(403).json({ok:false,error:'ORIGIN_NOT_ALLOWED'});if(origin){res.set('Access-Control-Allow-Origin',origin);res.set('Vary','Origin');}res.set('Access-Control-Allow-Methods','GET, POST, PUT, OPTIONS');res.set('Access-Control-Allow-Headers','Authorization, Content-Type, If-None-Match, If-Match');res.set('Cache-Control','no-store');return req.method==='OPTIONS'?res.status(204).end():next();};}
 function csvCell(value){const text=String(value??'');return /[",\r\n]/.test(text)?`"${text.replaceAll('"','""')}"`:text;}
 
-export function createApp({config,pool,service,lessonService=service,provisionalService=null,teacherCommentService=null,adminAuth=(_q,r)=>r.status(503).json({ok:false,error:'ADMIN_AUTH_NOT_CONFIGURED'})}){
+export function createApp({config,pool,service,lessonService=service,provisionalService=null,lmsResultService=null,teacherCommentService=null,adminAuth=(_q,r)=>r.status(503).json({ok:false,error:'ADMIN_AUTH_NOT_CONFIGURED'})}){
  const app=express();app.disable('x-powered-by');app.set('trust proxy',config.trustProxyHops);app.use(helmet());app.use(cors(config));
  const teacherManage=(q,r,next)=>q.reviewer?.canManage===true?next():r.status(403).json({ok:false,error:'MANAGE_PERMISSION_REQUIRED'});
  // Một lớp có thể dùng chung một địa chỉ mạng. Ngưỡng đọc này vẫn chịu được 40 học viên polling 2 giây/lần.
@@ -58,6 +58,10 @@ export function createApp({config,pool,service,lessonService=service,provisional
  }));
  app.post('/api/v1/sessions',writes,asyncRoute(async(q,r)=>r.status(201).json({ok:true,session:await service.openSession(parse(open,q.body))})));
  app.get('/api/v1/sessions/:sessionRef',asyncRoute(async(q,r)=>r.json({ok:true,session:await service.sessionDetails(parse(uuid,q.params.sessionRef))})));
+ app.get('/api/v1/sessions/:sessionRef/draft-result',asyncRoute(async(q,r)=>{
+   if(!lmsResultService)throw new ApiError(503,'LMS_RESULT_NOT_CONFIGURED','Kết quả LMS chưa được cấu hình.');
+   r.json({ok:true,result:await lmsResultService.getDraftResult({sessionRef:parse(uuid,q.params.sessionRef)})});
+ }));
  app.put('/api/v1/sessions/:sessionRef/draft',writes,asyncRoute(async(q,r)=>r.json({ok:true,session:await service.saveDraft({sessionRef:parse(uuid,q.params.sessionRef),...parse(save,q.body)})})));
  app.post('/api/v1/sessions/:sessionRef/checks',writes,asyncRoute(async(q,r)=>r.status(202).json({ok:true,attempt:await service.submitCheck({sessionRef:parse(uuid,q.params.sessionRef),...parse(check,q.body)})})));
  app.put('/api/v1/sessions/:sessionRef/live',writes,asyncRoute(async(q,r)=>r.json({ok:true,...await service.publishLive({sessionRef:parse(uuid,q.params.sessionRef)})})));

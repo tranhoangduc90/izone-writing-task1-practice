@@ -34,6 +34,7 @@ textarea { resize:vertical; min-height:10rem; line-height:1.55; }
 .conflict h2 { margin-bottom:.3rem; }
 .conflict p { margin:0 0 .75rem; }
 .practice-layout,.sections,.section-workspace { display:grid; gap:1rem; }
+.section-workspace > *,.comments-panel,.comment-list,.draft-result-box,.lms-inline-result { min-width:0; }
 .task-content { display:grid; gap:1rem; margin-bottom:1rem; }
 .task-content:empty { display:none; }
 .task-content > * { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:1rem; }
@@ -88,6 +89,8 @@ textarea { resize:vertical; min-height:10rem; line-height:1.55; }
 .lms-result-link { display:grid; gap:.28rem; margin-top:.65rem; padding:.85rem; border:1px solid #8eb6e8; border-radius:9px; background:#eef6ff; color:#174ea6; text-decoration:none; }
 .lms-result-link:hover { border-color:#4e88cf; background:#e5f1ff; }
 .lms-result-link span { color:#526078; font-size:.78rem; font-weight:500; overflow-wrap:anywhere; }
+.lms-result-fallback { display:inline-flex; margin-top:.8rem; padding:.55rem .7rem; font-size:.8rem; font-weight:700; }
+.lms-inline-result { margin-top:.7rem; }
 .draft-result-message { margin:.6rem 0 0; }
 .lms-draft-summary { display:flex; justify-content:space-between; gap:.75rem; margin:.25rem 0 .9rem; padding:.75rem; border:1px solid #b8cbe3; border-radius:10px; background:#eef6ff; }
 .lms-draft-summary h4,.lms-draft-summary p { margin:0; }
@@ -117,7 +120,7 @@ textarea { resize:vertical; min-height:10rem; line-height:1.55; }
 .lms-sentence-review-body { color:#344054; font-size:.88rem; }
 .lms-sentence-review-body p,.lms-sentence-review-body ul,.lms-sentence-review-body ol,.lms-sentence-review-body blockquote { margin:.4rem 0; }
 .lms-sentence-review-body blockquote { padding:.45rem .65rem; border-left:3px solid #7ba5d6; background:#fff; }
-.lms-draft-pager { display:grid; grid-template-columns:minmax(140px,1fr) auto minmax(140px,1fr); gap:.75rem; align-items:center; margin-top:.9rem; padding-top:.9rem; border-top:1px solid #d8e1ec; }
+.lms-draft-pager { display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); gap:.75rem; align-items:center; margin-top:.9rem; padding-top:.9rem; border-top:1px solid #d8e1ec; }
 .lms-page-button { min-width:0; }
 .lms-page-button:last-child { justify-self:stretch; }
 .lms-page-status { min-width:5.7rem; color:#344054; text-align:center; white-space:nowrap; }

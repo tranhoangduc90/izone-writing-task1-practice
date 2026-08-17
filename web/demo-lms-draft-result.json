@@ -1,0 +1,100 @@
+{
+  "generatedFrom": "synthetic-band6-quick-aid-shape",
+  "updatedAt": "2026-08-17T02:30:00.000Z",
+  "draft1": "Overall, Twitter had the highest users in 18-34, while Facebook and YouTube were <cân bằng hơn>. On Facebook and YouTube, people aged 35-49 make up 30% and 29%. The 18-34 groups was 29% and 26%. The older groups were lower.",
+  "draft2": "Overall, Twitter had the highest proportion of users in the 18-34 group, while Facebook and YouTube were more balance. On Facebook and YouTube, people aged 35-49 made up 30% and 29% respectively. The figures for the 18-34 groups was 29% and 26%. The older age groups accounted for lower proportions.",
+  "lmsResponse": {
+    "content": "<p>NỘI DUNG TR/CC KHÔNG ĐƯỢC HIỂN THỊ TRONG DEMO NÀY.</p>",
+    "feedback": "<p>NHẬN XÉT TR/CC KHÔNG ĐƯỢC HIỂN THỊ TRONG DEMO NÀY.</p>",
+    "essays": [
+      {
+        "id": "demo-sentence-1",
+        "index": 0,
+        "content": {
+          "type": "doc",
+          "content": [{ "type": "paragraph", "content": [
+            { "type": "text", "text": "Overall, Twitter had the " },
+            { "type": "text", "marks": [{ "type": "highlight", "attrs": { "dataId": "demo-1-a" } }], "text": "highest proportion of users" },
+            { "type": "text", "text": " in the 18-34 group, while Facebook and YouTube were " },
+            { "type": "text", "marks": [{ "type": "highlight", "attrs": { "dataId": "demo-1-b" } }], "text": "more balance" },
+            { "type": "text", "text": "." }
+          ] }]
+        },
+        "suggestedContent": {
+          "type": "doc",
+          "content": [{ "type": "paragraph", "content": [
+            { "type": "text", "text": "Overall, Twitter " },
+            { "type": "text", "marks": [{ "type": "highlight", "attrs": { "dataId": "demo-1-c" } }], "text": "was most strongly concentrated among users" },
+            { "type": "text", "text": " aged 18-34, while Facebook and YouTube " },
+            { "type": "text", "marks": [{ "type": "highlight", "attrs": { "dataId": "demo-1-d" } }], "text": "had more balanced age profiles" },
+            { "type": "text", "text": "." }
+          ] }]
+        },
+        "comments": ["<p><strong>highest proportion of users</strong> chưa diễn đạt đúng ý “tập trung nhiều nhất”. Cụm <strong>was most strongly concentrated among users</strong> làm rõ đặc điểm phân bố độ tuổi.</p><p>Sau động từ <em>were</em>, em cần tính từ <strong>balanced</strong>, không dùng danh từ <em>balance</em>.</p>"]
+      },
+      {
+        "id": "demo-sentence-2",
+        "index": 1,
+        "content": {
+          "type": "doc",
+          "content": [{ "type": "paragraph", "content": [
+            { "type": "text", "text": "On Facebook and YouTube, people aged 35-49 " },
+            { "type": "text", "marks": [{ "type": "highlight", "attrs": { "dataId": "demo-2-a" } }], "text": "made up 30% and 29% respectively" },
+            { "type": "text", "text": "." }
+          ] }]
+        },
+        "suggestedContent": {
+          "type": "doc",
+          "content": [{ "type": "paragraph", "content": [
+            { "type": "text", "text": "On Facebook and YouTube, people aged 35-49 " },
+            { "type": "text", "marks": [{ "type": "highlight", "attrs": { "dataId": "demo-2-b" } }], "text": "accounted for the largest shares, at 30% and 29% respectively" },
+            { "type": "text", "text": "." }
+          ] }]
+        },
+        "comments": ["<p>Số liệu và cách dùng <strong>respectively</strong> đều đúng. Bản gợi ý thêm <em>the largest shares</em> để thể hiện rõ đây là hai tỷ lệ cao nhất của hai ứng dụng.</p>"]
+      },
+      {
+        "id": "demo-sentence-3",
+        "index": 2,
+        "content": {
+          "type": "doc",
+          "content": [{ "type": "paragraph", "content": [
+            { "type": "text", "text": "The figures for the " },
+            { "type": "text", "marks": [{ "type": "highlight", "attrs": { "dataId": "demo-3-a" } }], "text": "18-34 groups was" },
+            { "type": "text", "text": " 29% and 26%." }
+          ] }]
+        },
+        "suggestedContent": {
+          "type": "doc",
+          "content": [{ "type": "paragraph", "content": [
+            { "type": "text", "text": "The figures for " },
+            { "type": "text", "marks": [{ "type": "highlight", "attrs": { "dataId": "demo-3-b" } }], "text": "18-34-year-olds were" },
+            { "type": "text", "text": " 29% and 26%." }
+          ] }]
+        },
+        "comments": ["<p><strong>Figures</strong> là chủ ngữ số nhiều nên phải đi với <strong>were</strong>. Đồng thời, <strong>18-34-year-olds</strong> tự nhiên hơn khi nói về người dùng thuộc nhóm tuổi này.</p>"]
+      },
+      {
+        "id": "demo-sentence-4",
+        "index": 3,
+        "content": {
+          "type": "doc",
+          "content": [{ "type": "paragraph", "content": [
+            { "type": "text", "text": "The older age groups " },
+            { "type": "text", "marks": [{ "type": "highlight", "attrs": { "dataId": "demo-4-a" } }], "text": "accounted for lower proportions" },
+            { "type": "text", "text": "." }
+          ] }]
+        },
+        "suggestedContent": {
+          "type": "doc",
+          "content": [{ "type": "paragraph", "content": [
+            { "type": "text", "text": "The older age groups " },
+            { "type": "text", "marks": [{ "type": "highlight", "attrs": { "dataId": "demo-4-b" } }], "text": "made up smaller shares on both platforms" },
+            { "type": "text", "text": "." }
+          ] }]
+        },
+        "comments": ["<p>Câu gốc không sai. Bản gợi ý dùng <strong>smaller shares on both platforms</strong> để phép so sánh bám rõ hơn vào Facebook và YouTube.</p>"]
+      }
+    ]
+  }
+}

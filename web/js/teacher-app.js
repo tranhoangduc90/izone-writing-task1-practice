@@ -1,13 +1,13 @@
 import { createTeacherApi } from "./api.js?v=20260818-teacher-lms-vocab";
 import { createRequestId, hasMeaningfulText, safeLmsUrl } from "./core.js";
 import { sectionDefinitions } from "./lesson-core.js";
-import { appendMarkdown } from "./markdown.js";
+import { appendMarkdown } from "./markdown.js?v=20260818-numbering-v2";
 import { commentsForSection, isBackdropClick, latestVocabularyRows } from "./teacher-detail-core.js";
 import { groupStudents } from "./teacher-progress.js";
 import { teacherAuthFailure } from "./teacher-auth-ui.js";
 import { selectionOffsets, threadsForField } from "./teacher-comments-core.js";
 import { createTeacherCommentThreadCard, renderAnnotatedText } from "./teacher-comments-ui.js";
-import { renderLmsDraftResult } from "./lms-draft-result.js?v=20260818-teacher-lms-vocab";
+import { renderLmsDraftResult } from "./lms-draft-result.js?v=20260818-numbering-v2";
 import { createVocabularySection, manifestVocabularyRows } from "./vocabulary-ui.js";
 
 const $ = (id) => document.getElementById(id);

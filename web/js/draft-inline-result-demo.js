@@ -1,4 +1,4 @@
-import { renderLmsDraftResult } from "./lms-draft-result.js?v=20260818-pager2";
+import { renderLmsDraftResult } from "./lms-draft-result.js?v=20260818-numbering-v2";
 
 const response = await fetch("./demo-lms-draft-result.json", { cache: "no-store" });
 if (!response.ok) throw new Error("Không tải được dữ liệu demo kết quả Draft.");

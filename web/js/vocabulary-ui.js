@@ -1,4 +1,4 @@
-import { appendInlineMarkdown } from "./markdown.js";
+import { appendInlineMarkdown } from "./markdown.js?v=20260818-numbering-v2";
 
 export function manifestVocabularyRows(value) {
   const raw = Array.isArray(value) ? value : [

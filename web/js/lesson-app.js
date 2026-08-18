@@ -2,7 +2,7 @@ import { createLessonApi } from "./api.js";
 import { createRequestId, isConflict, pollingDelay, terminalResult, wordCount } from "./core.js";
 import { getDraft, getLatestDraft, putDraft } from "./idb.js";
 import { fieldDefinitions, normalizeLessonProgress, sectionDefinitions, sectionIsFilled } from "./lesson-core.js";
-import { appendMarkdown } from "./markdown.js";
+import { appendMarkdown } from "./markdown.js?v=20260818-numbering-v2";
 import { renderStudentFieldComments } from "./teacher-comments-ui.js";
 
 const $ = (id) => document.getElementById(id);

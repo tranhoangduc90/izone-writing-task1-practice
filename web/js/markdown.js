@@ -5,6 +5,7 @@ export function parseMarkdownBlocks(value) {
   const blocks = [];
   let paragraph = [];
   let list = null;
+  let orderedSequenceEnd = 0;
 
   const flushParagraph = () => {
     if (!paragraph.length) return;
@@ -28,23 +29,35 @@ export function parseMarkdownBlocks(value) {
     const heading = line.match(/^\s{0,3}(#{1,4})\s+(.+)$/u);
     if (heading) {
       flushParagraph(); flushList();
+      orderedSequenceEnd = 0;
       blocks.push({ type: "heading", level: heading[1].length, text: heading[2] });
       continue;
     }
     if (/^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/u.test(line)) {
-      flushParagraph(); flushList(); blocks.push({ type: "rule" }); continue;
+      flushParagraph(); flushList(); orderedSequenceEnd = 0; blocks.push({ type: "rule" }); continue;
     }
     const listItem = line.match(/^(\s*)([-+*]|\d+[.)])\s+(.+)$/u);
     if (listItem) {
       flushParagraph();
       const ordered = /^\d/u.test(listItem[2]);
-      if (!list || list.ordered !== ordered) { flushList(); list = { type: "list", ordered, items: [] }; }
+      if (!list || list.ordered !== ordered) {
+        flushList();
+        if (ordered) {
+          const requestedStart = Number.parseInt(listItem[2], 10);
+          const start = Math.max(requestedStart, orderedSequenceEnd + 1);
+          list = { type: "list", ordered, start, items: [] };
+        } else {
+          orderedSequenceEnd = 0;
+          list = { type: "list", ordered, items: [] };
+        }
+      }
       list.items.push({ text: listItem[3], depth: Math.min(3, Math.floor(listItem[1].length / 2)) });
+      if (ordered) orderedSequenceEnd = list.start + list.items.length - 1;
       continue;
     }
     const quote = line.match(/^\s{0,3}>\s?(.*)$/u);
     if (quote) {
-      flushParagraph(); flushList(); blocks.push({ type: "quote", text: quote[1] }); continue;
+      flushParagraph(); flushList(); orderedSequenceEnd = 0; blocks.push({ type: "quote", text: quote[1] }); continue;
     }
     flushList(); paragraph.push(line.trim());
   }
@@ -87,6 +100,7 @@ export function appendMarkdown(root, value) {
     if (block.type === "rule") { root.append(document.createElement("hr")); continue; }
     if (block.type === "list") {
       const list = document.createElement(block.ordered ? "ol" : "ul");
+      if (block.ordered && block.start > 1) list.start = block.start;
       for (const item of block.items) {
         const li = document.createElement("li"); li.dataset.depth = String(item.depth); appendInlineMarkdown(li, item.text); list.append(li);
       }

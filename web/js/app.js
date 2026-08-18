@@ -4,7 +4,7 @@ import { getDraft, getLatestDraft, putDraft } from "./idb.js";
 import { appendInlineMarkdown, appendMarkdown } from "./markdown.js?v=20260818-numbering-v3";
 import { renderStudentFieldComments } from "./teacher-comments-ui.js";
 import { renderLmsDraftResult } from "./lms-draft-result.js?v=20260818-numbering-v3";
-import { createVocabularySection, manifestVocabularyRows } from "./vocabulary-ui.js";
+import { createVocabularySection, manifestVocabularyRows } from "./vocabulary-ui.js?v=20260818-vocabulary-scroll";
 
 const $ = (id) => document.getElementById(id);
 const SECTION_INFO = {
@@ -188,6 +188,7 @@ function addDraftGuidance(card) {
 function addDraftVocabulary(card) {
   const section = createVocabularySection(document, manifestVocabularyRows(app.manifest?.vocabulary), {
     className: "draft-vocabulary",
+    scrollHint: "Cuộn trong bảng để xem thêm. Phần Draft ở ngay bên dưới ↓",
   });
   if (section) card.querySelector(".text-fields").append(section);
 }

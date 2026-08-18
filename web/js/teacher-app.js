@@ -8,7 +8,7 @@ import { teacherAuthFailure } from "./teacher-auth-ui.js";
 import { selectionOffsets, threadsForField } from "./teacher-comments-core.js";
 import { createTeacherCommentThreadCard, renderAnnotatedText } from "./teacher-comments-ui.js";
 import { renderLmsDraftResult } from "./lms-draft-result.js?v=20260818-numbering-v3";
-import { createVocabularySection, manifestVocabularyRows } from "./vocabulary-ui.js";
+import { createVocabularySection, manifestVocabularyRows } from "./vocabulary-ui.js?v=20260818-vocabulary-scroll";
 
 const $ = (id) => document.getElementById(id);
 const state = { token: "", api: null, manifest: null, activitySlug: "", students: [], pollTimer: null,
@@ -310,6 +310,7 @@ function renderStudentDetail(student, { loading = false, error = "" } = {}) {
         const vocabulary = createVocabularySection(document, manifestVocabularyRows(state.manifest?.vocabulary), {
           className: "teacher-detail-vocabulary teacher-draft-vocabulary",
           headingTag: "h4",
+          scrollHint: "Cuộn trong bảng để xem thêm. Phần Draft ở ngay bên dưới ↓",
         });
         if (vocabulary) bodySection.append(vocabulary);
       }

@@ -3,17 +3,18 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { parseMarkdownBlocks } from "../js/markdown.js";
 
-const VERSION = "20260818-numbering-v2";
+const VERSION = "20260818-numbering-v3";
 
-test("comment đánh số trong dữ liệu LMS thật được render thành một danh sách liên tục", async () => {
+test("comment đánh số trong dữ liệu LMS thật tiếp tục qua các đoạn giải thích", async () => {
   const fixture = JSON.parse(await readFile(new URL("../demo-lms-draft-result.json", import.meta.url), "utf8"));
   const comment = fixture.lmsResponse.essays.flatMap((essay) => essay.comments || [])
     .find((value) => /^1\./u.test(value));
   const blocks = parseMarkdownBlocks(comment);
-  assert.equal(blocks.length, 1);
-  assert.equal(blocks[0].type, "list");
-  assert.equal(blocks[0].ordered, true);
-  assert.deepEqual(blocks[0].items.map((item) => item.text.split(":", 1)[0]), ["Chẩn đoán", "Cách sửa", "Ghi nhớ"]);
+  const lists = blocks.filter((block) => block.type === "list");
+  assert.deepEqual(lists.map((block) => block.start), [1, 2, 3]);
+  assert.deepEqual(lists.map((block) => block.items[0].text.split(":", 1)[0]), [
+    "**Chẩn đoán", "**Chẩn đoán", "**Chẩn đoán",
+  ]);
 });
 
 test("bản học viên và giảng viên cùng tải bộ Markdown đã sửa, không dùng cache cũ", async () => {

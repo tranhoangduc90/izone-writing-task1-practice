@@ -1,4 +1,4 @@
-import { appendMarkdown } from "./markdown.js?v=20260818-numbering-v2";
+import { appendMarkdown } from "./markdown.js?v=20260818-numbering-v3";
 
 const MAX_ESSAYS = 80;
 const MAX_COMMENT_LENGTH = 20_000;

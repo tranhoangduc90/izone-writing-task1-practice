@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeLessonProgress, sectionIsFilled } from "../js/lesson-core.js";
+import { normalizeLessonProgress, sectionIsFilled, sectionPrerequisitesPassed, vocabularyPrerequisitesPassed } from "../js/lesson-core.js";
 
 const manifest = {
   sections: [{
@@ -23,4 +23,18 @@ test("Lesson Check requires all configured fields and ignores invisible characte
   const section = manifest.sections[0];
   assert.equal(sectionIsFilled(section, { idea1: "A", idea2: "B", topic: "T" }), true);
   assert.equal(sectionIsFilled(section, { idea1: "A", idea2: "B", topic: " \u200B " }), false);
+});
+
+test("Task 2 chỉ mở phần tiếp theo và bảng từ vựng sau khi đủ điều kiện", () => {
+  const states = {
+    topic_sentence: { status: "passed" },
+    supporting_idea_1: { status: "revision" },
+    supporting_idea_2: { status: "draft" },
+  };
+  assert.equal(sectionPrerequisitesPassed({ prerequisites: ["topic_sentence"] }, states), true);
+  assert.equal(sectionPrerequisitesPassed({ prerequisites: ["topic_sentence", "supporting_idea_1"] }, states), false);
+  assert.equal(vocabularyPrerequisitesPassed({ unlockAfter: ["topic_sentence", "supporting_idea_1", "supporting_idea_2"] }, states), false);
+  states.supporting_idea_1.status = "passed";
+  states.supporting_idea_2.status = "passed";
+  assert.equal(vocabularyPrerequisitesPassed({ unlockAfter: ["topic_sentence", "supporting_idea_1", "supporting_idea_2"] }, states), true);
 });

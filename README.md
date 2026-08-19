@@ -1,8 +1,10 @@
-# IZONE Writing Task 1 Practice
+# IZONE Writing Practice
 
 Web app luyện **Overview**, **Outline hai thân bài** và **Draft 1 → Draft 2** không phụ thuộc Google Docs.
 
 Repo cũng có bản nháp **Writing trên lớp 67 – Lesson 13**, gộp hai handout Body 1 và Body 2 thành một trang với sáu phần được chấm độc lập.
+
+Repo hiện có thêm web app **Writing Task 2 dùng chung cho mọi đề**: học viên lập ý cho hai thân bài, chọn một thân bài, sửa Topic Sentence và hai chuỗi A–X–B đến khi đạt, nhận từ vựng gợi ý rồi viết Draft 1 → Draft 2. Đề mới chỉ thêm manifest/activity; không sao chép HTML hoặc JavaScript. Activity public-health đang mở cho phạm vi kiểm thử production bằng dữ liệu giả và không chứa nội dung từ bài mẫu của học viên.
 
 ## Cấu trúc
 
@@ -26,6 +28,8 @@ Comment trực tiếp của giảng viên là một lớp riêng: giảng viên 
 
 - Trang học viên: `web/lesson.html?task=writing-lesson13-young-leaders`.
 - Bản demo bài đã hoàn thành: `web/lesson-completed-demo.html`; chỉ dùng dữ liệu giả, không gọi API, database hoặc AI.
+- Bộ demo Task 2: `web/task2-demo.html`; dùng đúng đề crime prevention trong handout và chín tình huống giả thường gặp, không gọi API, database, AI hoặc LMS.
+- Activity production Task 2 public-health: `web/lesson.html?task=writing-task2-public-health-ban`; hiện chỉ có lớp và học viên kiểm thử giả.
 - Trang giảng viên: `web/teacher.html?task=writing-lesson13-young-leaders`; bắt buộc đăng nhập Google và được cấp quyền trong `mapping.reviewer_account`.
 - Trang mô phỏng tải lớp: `web/teacher-live-demo.html`; dùng 40 học viên giả, không gọi API hoặc AI thật.
 - Khi có thay đổi, trình duyệt vẫn lưu dự phòng cục bộ sau 500 ms và đồng bộ bản nháp lên database sau khoảng 15 giây. Chuyển ô, Check, Lưu và đóng đều yêu cầu lưu ngay.

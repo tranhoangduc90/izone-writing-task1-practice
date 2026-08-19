@@ -168,7 +168,7 @@ textarea { resize:vertical; min-height:10rem; line-height:1.55; }
 @media (min-width:840px) { .demo-inline-result-workspace { grid-template-columns:minmax(360px,.78fr) minmax(520px,1.22fr); } }
 @media (min-width:1280px) { .demo-layout { grid-template-columns:minmax(520px,.9fr) minmax(820px,1.5fr); } }
 
-/* Handout Writing Lesson 13 */
+/* Handout Writing dùng chung cho các bài luyện theo từng bước. */
 .lesson-shell { max-width:1680px; }
 .lesson-prompt { margin-bottom:1.25rem; padding:1.1rem 1.25rem; border-left:5px solid var(--navy); }
 .lesson-prompt h2 { margin:.25rem 0 .45rem; }
@@ -186,6 +186,20 @@ textarea { resize:vertical; min-height:10rem; line-height:1.55; }
 .lesson-section-card .section-actions { display:grid; grid-template-columns:1fr; gap:.6rem; margin-top:1rem; }
 .lesson-section-card .submit-section { width:100%; min-height:56px; border-color:#1d4ed8; border-radius:11px; background:var(--blue); color:#fff; font-size:1.02rem; box-shadow:0 7px 18px rgb(37 99 235/.2); }
 .lesson-section-card .submit-section:hover:not(:disabled) { background:#1d4ed8; }
+.field-group-heading { margin:.9rem 0 -.15rem; padding:.65rem .75rem; border-left:4px solid var(--blue); border-radius:7px; background:#eaf3ff; }
+.field-group-heading:first-child { margin-top:0; }
+.field-group-heading h4 { margin:0; color:var(--navy); }
+.choice-field { display:grid; gap:.65rem; margin:.8rem 0; padding:.85rem; border:1px solid #a9bfd9; border-radius:10px; background:#fff; }
+.choice-field legend { padding:0 .25rem; color:var(--navy); font-weight:800; }
+.choice-field label { display:flex; flex-direction:row; align-items:center; gap:.65rem; min-height:44px; padding:.55rem .65rem; border:1px solid var(--line); border-radius:8px; background:#f8fbff; cursor:pointer; }
+.choice-field input { width:1.1rem; height:1.1rem; margin:0; }
+.draft-guidance { margin-bottom:.75rem; padding:.8rem; border-left:4px solid #7c3aed; border-radius:7px; background:#f5f0ff; }
+.draft-copy-banner { padding:.7rem .8rem; border-left:4px solid var(--success); background:#effaf3; font-weight:700; }
+.unlock-draft2 { width:100%; min-height:52px; margin-top:.75rem; }
+.task2-draft-vocabulary { margin-bottom:0; }
+.task2-draft-vocabulary .table-scroll { max-height:clamp(11rem,30vh,15rem); overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }
+.task2-draft-vocabulary .table-scroll:focus-visible { outline:3px solid #93c5fd; outline-offset:2px; }
+.vocabulary-scroll-hint { margin:.55rem 0 0; color:var(--muted); font-size:.88rem; font-weight:700; }
 .lesson-section-workspace[data-state="passed"] .lesson-section-card .submit-section { border-color:var(--success); background:var(--success); color:#fff; opacity:1; box-shadow:0 7px 18px rgb(22 112 68/.16); }
 .lesson-section-workspace[data-state="queued"] .lesson-section-card .submit-section { border-color:var(--warning); background:var(--warning); color:#fff; opacity:1; box-shadow:none; }
 .lesson-vocabulary { padding:1rem; overflow:hidden; }
@@ -197,6 +211,12 @@ textarea { resize:vertical; min-height:10rem; line-height:1.55; }
 .lesson-completed-demo .lesson-prompt { margin-top:1rem; }
 .lesson-demo-note { border-left-color:var(--blue); background:#eef6ff; color:#24436b; }
 .lesson-demo-vocabulary { margin-top:1.5rem; }
+.task2-demo .lesson-prompt { margin:1rem 0; }
+.task2-demo .lesson-body-block { margin-top:1rem; }
+.task2-demo .lesson-section-workspace[data-state="revision"] .submit-section { border-color:var(--danger); background:var(--danger); color:#fff; opacity:1; }
+.task2-demo .lesson-section-workspace[data-state="queued"] .comments-panel { border-color:#e6c66a; }
+.task2-demo .lesson-section-workspace textarea:disabled { color:#526078; opacity:1; }
+.task2-demo .task2-draft-vocabulary { margin:1rem 0; }
 
 /* Dashboard chỉ đọc dành cho giảng viên */
 .teacher-shell { max-width:1680px; }

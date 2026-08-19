@@ -193,7 +193,16 @@ export function createWritingPracticeService({ pool, provisionalService = null }
           AND comment.section_key=$2 AND comment.status='completed'
         WHERE session.id=$1
         GROUP BY activity.task_prompt,activity.prompt_registry_key,activity.prompt_record_ref,
-          activity.prompt_version,definition.prompt_record_ref,definition.prompt_version`,[row.session_id,row.section_key]); jobs.push({jobRef:row.public_id,attemptRef:row.public_id,section:row.section_key,commentNumber:row.comment_number,studentInput:row.snapshot,snapshot:row.snapshot,leaseToken:row.lease_token,leaseExpiresAt:row.lease_expires_at,taskPrompt:context.rows[0].task_prompt,feedbackHistory:context.rows[0].history,promptRegistryKey:context.rows[0].prompt_registry_key,promptRecordId:context.rows[0].prompt_record_ref,promptVersion:context.rows[0].prompt_version,workerPool}); }
+          activity.prompt_version,definition.prompt_record_ref,definition.prompt_version`,[row.session_id,row.section_key]);
+        const priorArtifacts = await client.query(`SELECT COALESCE(jsonb_object_agg(latest.section_key,latest.result_artifacts),'{}'::jsonb) AS artifacts
+          FROM (SELECT DISTINCT ON (attempt.section_key) attempt.section_key,attempt.result_artifacts
+            FROM writing_practice.check_attempt attempt
+            WHERE attempt.session_id=$1 AND attempt.section_key<>$2
+              AND attempt.status='completed' AND attempt.result_status='passed'
+              AND attempt.result_artifacts<>'{}'::jsonb
+            ORDER BY attempt.section_key,attempt.completed_at DESC NULLS LAST,attempt.id DESC) latest`,
+        [row.session_id,row.section_key]);
+        jobs.push({jobRef:row.public_id,attemptRef:row.public_id,section:row.section_key,commentNumber:row.comment_number,studentInput:row.snapshot,snapshot:row.snapshot,contextArtifacts:priorArtifacts.rows[0]?.artifacts||{},leaseToken:row.lease_token,leaseExpiresAt:row.lease_expires_at,taskPrompt:context.rows[0].task_prompt,feedbackHistory:context.rows[0].history,promptRegistryKey:context.rows[0].prompt_registry_key,promptRecordId:context.rows[0].prompt_record_ref,promptVersion:context.rows[0].prompt_version,workerPool}); }
       return jobs;
     });
   }

@@ -64,6 +64,7 @@ export function createLessonApi(base = "") {
       ...(accessCode ? { accessCode } : {}),
     })),
     session: (sessionRef) => fetchJson(endpoint(root, `lesson-sessions/${encodeURIComponent(sessionRef)}`)),
+    draftResult: (sessionRef) => fetchJson(endpoint(root, `lesson-sessions/${encodeURIComponent(sessionRef)}/draft-result`)),
     saveResponses: (sessionRef, progress, keepalive = false) => fetchJson(endpoint(root, `lesson-sessions/${encodeURIComponent(sessionRef)}/responses`), jsonOptions("PUT", {
       baseVersion: progress.revision,
       responses: progress.responses,

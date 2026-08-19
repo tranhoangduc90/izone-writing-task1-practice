@@ -17,7 +17,7 @@ export function createLessonPracticeService({ pool, provisionalService = null, n
   async function definitions(activityId, client = pool) {
     const result = await client.query(`SELECT section_key AS section, title, sort_order AS "sortOrder",
       input_fields AS "inputFields", context_fields AS "contextFields", required_fields AS "requiredFields",
-      validation_mode AS "validationMode"
+      validation_mode AS "validationMode", prerequisite_sections AS prerequisites
       FROM writing_practice.activity_section_definition
       WHERE activity_id=$1 ORDER BY sort_order`, [activityId]);
     return result.rows;
@@ -132,7 +132,7 @@ export function createLessonPracticeService({ pool, provisionalService = null, n
       const session = await client.query(`SELECT id,activity_id,response_data
         FROM writing_practice.activity_session WHERE public_id=$1 FOR UPDATE`, [sessionRef]);
       if (!session.rowCount) throw new ApiError(404, 'SESSION_NOT_FOUND', 'Không tìm thấy phiên làm bài.');
-      const definition = await client.query(`SELECT input_fields,context_fields,required_fields,validation_mode
+      const definition = await client.query(`SELECT input_fields,context_fields,required_fields,validation_mode,prerequisite_sections
         FROM writing_practice.activity_section_definition WHERE activity_id=$1 AND section_key=$2`,
       [session.rows[0].activity_id, section]);
       if (!definition.rowCount) throw new ApiError(409, 'SECTION_NOT_READY', 'Phần này chưa được cấu hình để chấm.');
@@ -148,6 +148,15 @@ export function createLessonPracticeService({ pool, provisionalService = null, n
         WHERE session_id=$1 AND section_key=$2 FOR UPDATE`, [session.rows[0].id, section]);
       if (!state.rowCount) throw new ApiError(409, 'SECTION_NOT_READY', 'Phần này chưa sẵn sàng để chấm.');
       if (state.rows[0].locked) throw new ApiError(423, 'SECTION_LOCKED', 'Phần này đã đạt yêu cầu và đã được khóa.');
+      const prerequisites = stringArray(config.prerequisite_sections);
+      if (prerequisites.length) {
+        const passed = await client.query(`SELECT section_key FROM writing_practice.session_section
+          WHERE session_id=$1 AND section_key=ANY($2::text[]) AND locked=true FOR UPDATE`,
+        [session.rows[0].id, prerequisites]);
+        if (passed.rowCount !== new Set(prerequisites).size) {
+          throw new ApiError(409, 'SECTION_PREREQUISITES_NOT_PASSED', 'Hãy hoàn thành các phần trước theo đúng thứ tự.');
+        }
+      }
       const bodyHash = hash({ section, snapshot });
       const prior = await client.query(`SELECT attempt.public_id,attempt.session_id,attempt.section_key,
         attempt.status,attempt.version,attempt.body_hash,attempt.comment_number,

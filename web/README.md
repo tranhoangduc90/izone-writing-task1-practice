@@ -42,6 +42,8 @@ Link kết quả Draft chỉ được render nếu dùng HTTPS, đúng host `pra
 
 Bản demo `draft-inline-result-demo.html` dùng dữ liệu band 6.0 giả theo đúng response `essays` của Quick Aid để hiển thị từng thẻ chấm câu ngay trong handout. Mỗi lần chỉ có một thẻ được hiện; học viên dùng nút Trang trước/Tiếp theo như LMS Writing. Comment dạng Markdown dùng cùng bộ render production nên các mục `1.` cách nhau bởi dòng trống vẫn hiển thị liên tục thành `1, 2, 3`. Demo cố ý bỏ qua hai trường `content` và `feedback`, tức màn tổng hợp TR/CC, đồng thời không gọi API, LMS, n8n hay database.
 
+Bộ demo `task2-demo.html` dùng đúng đề crime prevention trong handout và chín tình huống giả: mới bắt đầu, Topic Sentence cần sửa, Idea 1 hổng điểm X, Idea 2 còn chung chung, đã mở từ vựng, đang viết Draft, Draft đang chấm, lỗi kỹ thuật và hoàn tất với thẻ LMS. Trang chỉ tải tệp cục bộ, không tạo phiên học viên hoặc gọi API/n8n/LMS thật.
+
 ## Lưu ý triển khai
 
 `fetch(..., { keepalive: true })` chỉ là phương án dự phòng khi đóng tab; API vẫn áp dụng cùng kiểm tra phiên bản/idempotency như `PUT draft`. GitHub Pages không bảo vệ API: backend vẫn phải kiểm tra UUID, CORS origin allow-list và rate limit.

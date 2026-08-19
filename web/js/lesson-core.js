@@ -48,6 +48,17 @@ export function sectionIsFilled(section, responses = {}) {
   return section.validationMode === "any" ? filled.some(Boolean) : filled.length > 0 && filled.every(Boolean);
 }
 
+export function sectionPrerequisitesPassed(section, sections = {}) {
+  const prerequisites = Array.isArray(section.prerequisites) ? section.prerequisites : [];
+  return prerequisites.every((key) => sections?.[key]?.status === "passed");
+}
+
+export function vocabularyPrerequisitesPassed(vocabulary = {}, sections = {}) {
+  const configured = vocabulary.unlockAfter;
+  const prerequisites = Array.isArray(configured) ? configured : configured ? [configured] : [];
+  return prerequisites.every((key) => sections?.[key]?.status === "passed");
+}
+
 export function responsesForSection(section, responses = {}) {
   return Object.fromEntries((section.fields || []).map((field) => [field.key, responses[field.key] || ""]));
 }

@@ -25,8 +25,9 @@ export function createLessonPracticeService({ pool, provisionalService = null, n
 
   async function sessionDetails(sessionRef, client = pool) {
     const session = await client.query(`SELECT session.id, session.public_id AS "sessionRef",
-      session.activity_id AS "activityId", jsonb_strip_nulls(COALESCE(session.response_data,'{}'::jsonb)||jsonb_build_object(
-        'overview',session.overview,'body1',session.body1,'body2',session.body2,'draft1',session.draft1,'draft2',session.draft2)) AS responses,
+      session.activity_id AS "activityId", jsonb_strip_nulls(jsonb_build_object(
+        'overview',session.overview,'body1',session.body1,'body2',session.body2,'draft1',session.draft1,'draft2',session.draft2)
+        ||COALESCE(session.response_data,'{}'::jsonb)) AS responses,
       session.draft_version AS "draftVersion", session.updated_at AS "updatedAt",
       activity.slug AS "activitySlug", activity.title
       FROM writing_practice.activity_session session
@@ -221,8 +222,9 @@ export function createLessonPracticeService({ pool, provisionalService = null, n
       pool.query(`SELECT session.public_id AS "sessionRef",
       scope.public_id AS "classRef", scope.class_name_snapshot AS "className",
       roster.student_public_id AS "studentRef", roster.display_alias AS "displayName",
-      jsonb_strip_nulls(COALESCE(session.response_data,'{}'::jsonb)||jsonb_build_object(
-        'overview',session.overview,'body1',session.body1,'body2',session.body2,'draft1',session.draft1,'draft2',session.draft2)) AS responses,
+      jsonb_strip_nulls(jsonb_build_object(
+        'overview',session.overview,'body1',session.body1,'body2',session.body2,'draft1',session.draft1,'draft2',session.draft2)
+        ||COALESCE(session.response_data,'{}'::jsonb)) AS responses,
       session.updated_at AS "savedAt",
       session.last_seen_at AS "lastSeenAt", session.active_field AS "activeField",
       (provisional.status='pending') AS provisional,

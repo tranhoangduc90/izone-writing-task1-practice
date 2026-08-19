@@ -1,6 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { createLessonPracticeService } from '../src/lesson-service.js';
+
+test('dữ liệu response động ghi đè cột tương thích cũ khi tải lại Task 2', () => {
+  const source = fs.readFileSync(new URL('../src/lesson-service.js', import.meta.url), 'utf8');
+  const legacyFirst = /jsonb_strip_nulls\(jsonb_build_object\([\s\S]*?\)\s*\|\|COALESCE\(session\.response_data,'\{\}'::jsonb\)\) AS responses/g;
+  const dynamicFirst = /jsonb_strip_nulls\(COALESCE\(session\.response_data,'\{\}'::jsonb\)\|\|jsonb_build_object/g;
+
+  assert.equal([...source.matchAll(legacyFirst)].length, 2);
+  assert.doesNotMatch(source, dynamicFirst);
+});
 
 test('backend từ chối Check khi phần bắt buộc trước đó chưa đạt', async () => {
   const calls = [];

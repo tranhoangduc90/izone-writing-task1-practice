@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#14213d" />
+    <link rel="icon" href="data:," />
+    <title>Demo Writing Task 2 · Các tình huống thường gặp</title>
+    <link rel="stylesheet" href="./styles.css?v=20260819-task2-demo-v1" />
+  </head>
+  <body>
+    <a class="skip-link" href="#task2-demo-workspace">Đi tới tình huống demo</a>
+    <header class="topbar">
+      <a class="brand" href="./task2-demo.html">iZONE · Demo Writing Task 2</a>
+      <p class="save-state">Dữ liệu giả · không gọi AI</p>
+    </header>
+    <main id="task2-demo-workspace" class="page-shell lesson-shell task2-demo">
+      <section class="demo-hero" aria-labelledby="task2-demo-case-title">
+        <p class="eyebrow">Các tình huống thường gặp</p>
+        <h1 id="task2-demo-case-title">Đang tải bản demo…</h1>
+        <p id="task2-demo-case-description"></p>
+        <nav id="task2-demo-cases" class="demo-case-nav" aria-label="Chọn tình huống demo"></nav>
+      </section>
+      <p id="task2-demo-note" class="notice lesson-demo-note"><strong>Bản demo an toàn:</strong> dùng đúng đề trong handout nhưng toàn bộ câu trả lời và Comment bên dưới là dữ liệu giả. Trang không gọi API, n8n, LMS hoặc database.</p>
+      <article class="lesson-prompt card">
+        <p class="eyebrow">Đề bài trong handout</p>
+        <h2>Crime prevention</h2>
+        <div id="task2-demo-prompt" class="markdown-body"></div>
+      </article>
+      <div id="task2-demo-bodies" class="lesson-bodies"></div>
+    </main>
+
+    <template id="task2-demo-section-template">
+      <section class="section-workspace lesson-section-workspace">
+        <article class="section-card lesson-section-card">
+          <div class="section-heading">
+            <div><p class="section-kicker"></p><h3></h3></div>
+            <span class="section-status"></span>
+          </div>
+          <p class="section-instruction muted"></p>
+          <div class="text-fields"></div>
+          <div class="section-actions">
+            <span class="word-count muted"></span>
+            <button class="secondary submit-section" type="button" disabled>Check</button>
+          </div>
+        </article>
+        <aside class="comments-panel">
+          <div class="comments-heading">
+            <div><p class="eyebrow">Nhận xét</p><h3 class="comments-title">Dòng thời gian</h3></div>
+            <span class="polling-state">Demo</span>
+          </div>
+          <ol class="comment-list" aria-live="polite"></ol>
+          <p class="empty-comments muted">Chưa có nhận xét.</p>
+        </aside>
+      </section>
+    </template>
+    <script type="module" src="./js/task2-demo.js?v=20260819-task2-demo-v1"></script>
+  </body>
+</html>

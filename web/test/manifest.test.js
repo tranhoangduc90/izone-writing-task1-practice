@@ -60,6 +60,31 @@ test("Lesson 13 manifest merges Body 1 and Body 2 without private grading prompt
   assert.doesNotMatch(JSON.stringify(manifest), /grader.?prompt|credential|api.?key|student.?data|Bearer /i);
 });
 
+test("Task 2 template follows the requested four-step flow without student content", () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifests", "writing-task2-practice-template.json"), "utf8"));
+  assert.equal(manifest.schemaVersion, "lesson-handout.v1");
+  assert.deepEqual(manifest.sections.map((section) => section.key), ["topic_sentence", "supporting_idea_1", "supporting_idea_2", "draft"]);
+  assert.equal(manifest.sections[0].fields.filter((field) => field.group === "Thân bài 1").length, 3);
+  assert.equal(manifest.sections[0].fields.filter((field) => field.group === "Thân bài 2").length, 3);
+  assert.equal(manifest.sections[0].fields.find((field) => field.key === "body_choice").control, "choice");
+  assert.deepEqual(manifest.sections[3].prerequisites, ["topic_sentence", "supporting_idea_1", "supporting_idea_2"]);
+  assert.equal(manifest.sections[3].flow.type, "draft-revision");
+  assert.equal(Object.hasOwn(manifest.vocabulary, "staticRows"), false);
+  assert.match(manifest.task.statement, /giảng viên cấu hình riêng/i);
+  assert.doesNotMatch(JSON.stringify(manifest), /grader.?prompt|credential|api.?key|student.?data|student.?name|Bearer /i);
+});
+
+test("a new Task 2 topic is configuration-only and keeps the shared app structure", () => {
+  const template = JSON.parse(fs.readFileSync(path.join(root, "manifests", "writing-task2-practice-template.json"), "utf8"));
+  const activity = JSON.parse(fs.readFileSync(path.join(root, "manifests", "writing-task2-public-health-ban.json"), "utf8"));
+  const sharedShape = manifest => ({ bodies: manifest.bodies, sections: manifest.sections, vocabulary: manifest.vocabulary });
+
+  assert.deepEqual(sharedShape(activity), sharedShape(template));
+  assert.equal(activity.activity.slug, "writing-task2-public-health-ban");
+  assert.equal(activity.task.statement, "Shops should be banned from selling any food or drink that has been scientifically proven to be damaging to public health. Do you agree or disagree?");
+  assert.doesNotMatch(JSON.stringify(activity), /grader.?prompt|credential|api.?key|student.?data|student.?name|Bearer /i);
+});
+
 test("student identity uses native selects for both class and name on mobile", () => {
   for (const filename of ["index.html", "lesson.html"]) {
     const html = fs.readFileSync(path.join(root, filename), "utf8");

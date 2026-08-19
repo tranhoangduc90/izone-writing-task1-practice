@@ -1,9 +1,11 @@
 import { createLessonApi } from "./api.js";
-import { createRequestId, isConflict, pollingDelay, terminalResult, wordCount } from "./core.js";
+import { createRequestId, hasMeaningfulText, isConflict, pollingDelay, safeLmsUrl, terminalResult, wordCount } from "./core.js";
 import { getDraft, getLatestDraft, putDraft } from "./idb.js";
-import { fieldDefinitions, normalizeLessonProgress, sectionDefinitions, sectionIsFilled } from "./lesson-core.js";
+import { fieldDefinitions, normalizeLessonProgress, sectionDefinitions, sectionIsFilled, sectionPrerequisitesPassed, vocabularyPrerequisitesPassed } from "./lesson-core.js";
+import { renderLmsDraftResult } from "./lms-draft-result.js?v=20260818-numbering-v3";
 import { appendMarkdown } from "./markdown.js?v=20260818-numbering-v3";
 import { renderStudentFieldComments } from "./teacher-comments-ui.js";
+import { createVocabularySection, manifestVocabularyRows } from "./vocabulary-ui.js?v=20260818-vocabulary-scroll";
 
 const $ = (id) => document.getElementById(id);
 const app = {
@@ -27,6 +29,7 @@ const app = {
   teacherComments: [],
   teacherCommentsEtag: null,
   teacherCommentTimer: null,
+  draftResult: { key: null, status: "idle", data: null, pageIndex: 0 },
 };
 
 function setSaveState(value) { $("lesson-save-state").textContent = value; }
@@ -48,6 +51,10 @@ async function loadManifest() {
   const publicConfig = configResponse?.ok ? await configResponse.json() : {};
   app.api = createLessonApi(publicConfig.apiBase || "");
   const title = app.manifest.activity?.title || "Handout Writing";
+  const eyebrow = app.manifest.activity?.eyebrow || "Writing Task 2";
+  document.title = `${title} · iZONE`;
+  $("lesson-setup-eyebrow").textContent = eyebrow;
+  $("lesson-workspace-eyebrow").textContent = eyebrow;
   $("lesson-summary").textContent = title;
   $("lesson-title").textContent = title;
   $("lesson-prompt-title").textContent = app.manifest.task?.title || "Essay question";
@@ -237,6 +244,87 @@ function addTextarea(card, section, field, locked) {
   renderTeacherCommentsForField(teacherComments, field.key);
 }
 
+function addChoice(card, section, field, locked) {
+  const group = document.createElement("fieldset");
+  group.className = "choice-field";
+  const legend = document.createElement("legend");
+  legend.textContent = field.label;
+  group.append(legend);
+  for (const option of field.options || []) {
+    const label = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = "radio";
+    input.name = field.key;
+    input.value = String(option.value ?? "");
+    input.checked = app.state.responses[field.key] === input.value;
+    input.disabled = locked;
+    input.addEventListener("change", () => {
+      app.state.responses[field.key] = input.value;
+      markDirty();
+      updateWordCount(card, section);
+    });
+    const text = document.createElement("span");
+    text.textContent = option.label || input.value;
+    label.append(input, text);
+    group.append(label);
+  }
+  card.querySelector(".text-fields").append(group);
+}
+
+function appendFieldGroup(card, title) {
+  const heading = document.createElement("div");
+  heading.className = "field-group-heading";
+  const text = document.createElement("h4");
+  text.textContent = title;
+  heading.append(text);
+  card.querySelector(".text-fields").append(heading);
+}
+
+function addField(card, section, field, locked) {
+  if (field.control === "choice") addChoice(card, section, field, locked);
+  else addTextarea(card, section, field, locked);
+}
+
+function renderDraftRevisionFields(card, section, locked) {
+  if (section.guidance) {
+    const guidance = document.createElement("div");
+    guidance.className = "draft-guidance markdown-body";
+    appendMarkdown(guidance, section.guidance);
+    card.querySelector(".text-fields").append(guidance);
+  }
+  const [draft1Field, draft2Field] = section.fields || [];
+  if (!draft1Field || !draft2Field) return;
+  addTextarea(card, section, draft1Field, locked);
+  const draft2Visible = hasMeaningfulText(app.state.responses[draft2Field.key]);
+  if (!draft2Visible) {
+    const unlock = document.createElement("button");
+    unlock.type = "button";
+    unlock.className = "primary unlock-draft2";
+    unlock.textContent = "Chuyển Draft 1 xuống Draft 2 và sửa";
+    unlock.disabled = locked || !hasMeaningfulText(app.state.responses[draft1Field.key]);
+    unlock.addEventListener("click", () => {
+      if (!hasMeaningfulText(app.state.responses[draft1Field.key])) return;
+      app.state.responses[draft2Field.key] = app.state.responses[draft1Field.key];
+      markDirty();
+      renderBodies();
+      document.querySelector(`textarea[name="${draft2Field.key}"]`)?.focus();
+    });
+    const hint = document.createElement("p");
+    hint.className = "muted draft-unlock-hint";
+    hint.textContent = "Nút chỉ mở khi Draft 1 có nội dung. Hệ thống sẽ sao chép nguyên văn để em tự sửa.";
+    card.querySelector(".text-fields").append(unlock, hint);
+    card.querySelector(`textarea[name="${draft1Field.key}"]`)?.addEventListener("input", () => {
+      unlock.disabled = locked || !hasMeaningfulText(app.state.responses[draft1Field.key]);
+    });
+    return;
+  }
+  const banner = document.createElement("p");
+  banner.className = "draft-copy-banner";
+  banner.textContent = "Draft 1 đã được copy xuống. Hãy sửa Draft 2 thành tiếng Anh hoàn chỉnh rồi gửi chấm.";
+  card.querySelector(".text-fields").append(banner);
+  addTextarea(card, section, draft2Field, locked);
+}
+
 function renderTeacherCommentsForField(root, fieldKey) {
   renderStudentFieldComments(root, {
     fieldKey,
@@ -274,7 +362,7 @@ async function refreshTeacherComments(force = false) {
 }
 
 function updateWordCount(card, section) {
-  const text = (section.fields || []).map((field) => app.state.responses[field.key] || "").join(" ");
+  const text = (section.fields || []).filter((field) => field.control !== "choice").map((field) => app.state.responses[field.key] || "").join(" ");
   card.querySelector(".word-count").textContent = `${wordCount(text)} từ`;
 }
 
@@ -282,21 +370,36 @@ function renderSection(section) {
   const workspace = $("lesson-section-template").content.firstElementChild.cloneNode(true);
   const card = workspace.querySelector(".section-card");
   const state = app.state.sections[section.key] || { status: "draft", attemptsWithoutPass: 0 };
-  const locked = ["queued", "passed"].includes(state.status);
+  const prerequisitesPassed = sectionPrerequisitesPassed(section, app.state.sections);
+  const locked = ["queued", "passed"].includes(state.status) || !prerequisitesPassed;
   workspace.dataset.section = section.key;
   workspace.dataset.state = state.status;
   card.querySelector(".section-kicker").textContent = section.kicker || "";
   card.querySelector("h3").textContent = section.title;
   card.querySelector(".section-instruction").textContent = section.instruction || "";
   const badge = card.querySelector(".section-status");
-  badge.textContent = statusLabel(state.status);
+  badge.textContent = prerequisitesPassed ? statusLabel(state.status) : "Chờ phần trước";
   badge.dataset.state = state.status;
-  for (const field of section.fields || []) addTextarea(card, section, field, locked);
+  if (section.flow?.type === "draft-revision") renderDraftRevisionFields(card, section, locked);
+  else {
+    let currentGroup = "";
+    for (const field of section.fields || []) {
+      if (field.group && field.group !== currentGroup) {
+        currentGroup = field.group;
+        appendFieldGroup(card, currentGroup);
+      }
+      addField(card, section, field, locked);
+    }
+  }
   const button = card.querySelector(".submit-section");
   button.disabled = locked;
-  button.textContent = state.status === "queued" ? "Đang chấm" : state.status === "passed" ? "Phần này đã đạt" : "Check";
+  if (section.flow?.type === "draft-revision") {
+    const draft2Field = section.fields?.[1];
+    button.hidden = !draft2Field || !hasMeaningfulText(app.state.responses[draft2Field.key]);
+    button.textContent = state.status === "queued" ? "Đang tạo kết quả chấm" : state.status === "passed" ? "Đã có kết quả chấm" : "Gửi chấm Draft";
+  } else button.textContent = state.status === "queued" ? "Đang chấm" : state.status === "passed" ? "Phần này đã đạt" : "Check";
   button.addEventListener("click", () => submitSection(section, card));
-  workspace.querySelector(".comments-title").textContent = `Dòng thời gian · ${section.title}`;
+  workspace.querySelector(".comments-title").textContent = section.flow?.type === "draft-revision" ? "Kết quả chấm Draft" : `Dòng thời gian · ${section.title}`;
   updateWordCount(card, section);
   renderSectionComments(workspace, section);
   return workspace;
@@ -322,34 +425,30 @@ function latestVocabulary(bodyKey) {
 }
 
 function renderVocabulary(bodyRoot, bodyKey) {
-  const section = document.createElement("section");
-  section.className = "lesson-vocabulary card";
-  const title = document.createElement("h3");
-  title.textContent = app.manifest.vocabulary?.title || "Từ vựng hỗ trợ";
-  const rows = latestVocabulary(bodyKey);
+  const unlocked = vocabularyPrerequisitesPassed(app.manifest.vocabulary, app.state.sections);
+  const selectorField = app.manifest.vocabulary?.bodySelectorField;
+  const selectedBody = selectorField ? app.state.responses?.[selectorField] : bodyKey;
+  const rows = unlocked ? latestVocabulary(selectedBody) : [];
   if (!rows.length) {
+    const section = document.createElement("section");
+    section.className = "lesson-vocabulary card";
+    const title = document.createElement("h3");
+    title.textContent = app.manifest.vocabulary?.title || "Từ vựng hỗ trợ";
     const empty = document.createElement("p");
     empty.className = "muted";
-    empty.textContent = "Bảng từ vựng sẽ xuất hiện sau khi phần phát triển ý được hệ thống xử lý.";
+    empty.textContent = unlocked
+      ? "Hệ thống chưa trả được bảng từ vựng. Hãy thử lại lượt Check lỗi kỹ thuật hoặc liên hệ giảng viên."
+      : "Hoàn thành Topic Sentence và cả hai Supporting Ideas để mở bảng từ vựng.";
     section.append(title, empty);
     bodyRoot.append(section);
     return;
   }
-  const table = document.createElement("table");
-  const head = document.createElement("thead");
-  const headRow = document.createElement("tr");
-  for (const label of app.manifest.vocabulary?.columns || ["Ý cần diễn đạt", "Từ/cụm từ tiếng Anh"]) {
-    const th = document.createElement("th"); th.textContent = label; headRow.append(th);
-  }
-  head.append(headRow);
-  const tbody = document.createElement("tbody");
-  for (const row of rows) {
-    const tr = document.createElement("tr");
-    const idea = document.createElement("td"); idea.textContent = row.idea;
-    const terms = document.createElement("td"); terms.textContent = Array.isArray(row.terms) ? row.terms.join(", ") : row.terms;
-    tr.append(idea, terms); tbody.append(tr);
-  }
-  table.append(head, tbody); section.append(title, table); bodyRoot.append(section);
+  const section = createVocabularySection(document, manifestVocabularyRows(rows), {
+    title: app.manifest.vocabulary?.title || "Từ vựng hỗ trợ",
+    className: "card task2-draft-vocabulary",
+    scrollHint: "Cuộn trong bảng để xem thêm. Phần Draft ở ngay bên dưới ↓",
+  });
+  if (section) bodyRoot.append(section);
 }
 
 function renderBodies() {
@@ -368,14 +467,19 @@ function renderBodies() {
       const section = sectionByKey(sectionKey);
       if (section) bodyRoot.append(renderSection(section));
     }
-    renderVocabulary(bodyRoot, body.key);
+    if (body.vocabulary !== false) renderVocabulary(bodyRoot, body.key);
     root.append(bodyRoot);
   }
   updatePollingStates();
 }
 
 function renderSectionComments(workspace, section) {
-  const comments = (app.state.comments || []).filter((item) => item.section === section.key).slice().reverse();
+  const sectionComments = (app.state.comments || []).filter((item) => item.section === section.key);
+  if (section.flow?.type === "draft-revision") {
+    renderDraftResult(workspace, sectionComments);
+    return;
+  }
+  const comments = sectionComments.slice().reverse();
   const list = workspace.querySelector(".comment-list");
   list.replaceChildren();
   for (const item of comments) {
@@ -399,6 +503,88 @@ function renderSectionComments(workspace, section) {
     list.append(li);
   }
   workspace.querySelector(".empty-comments").hidden = comments.length > 0;
+}
+
+function renderDraftResult(workspace, comments) {
+  const panel = workspace.querySelector(".comments-panel");
+  const list = workspace.querySelector(".comment-list");
+  const empty = workspace.querySelector(".empty-comments");
+  panel.classList.add("draft-result-panel");
+  list.classList.add("draft-result-list");
+  list.replaceChildren();
+  const latest = comments.at(-1);
+  if (!latest) {
+    empty.hidden = false;
+    empty.textContent = "Sau khi gửi Draft 2, kết quả chấm từng câu sẽ xuất hiện tại đây.";
+    return;
+  }
+  empty.hidden = true;
+  const item = document.createElement("li");
+  item.className = "draft-result-box";
+  item.dataset.status = latest.status || "completed";
+  const meta = document.createElement("div");
+  meta.className = "comment-meta";
+  meta.textContent = latest.createdAt
+    ? `Cập nhật ${new Date(latest.createdAt).toLocaleString("vi-VN")}`
+    : "Kết quả Draft 2";
+  const lmsUrl = safeLmsUrl(latest.artifacts?.lmsUrl || latest.feedback);
+  if (lmsUrl) {
+    const key = `${app.sessionRef}:${lmsUrl}`;
+    const inline = document.createElement("div");
+    inline.className = "lms-inline-result";
+    item.append(meta, inline);
+    if (app.draftResult.key !== key) {
+      app.draftResult = { key, status: "loading", data: null, pageIndex: 0 };
+      void app.api.draftResult(app.sessionRef).then(({ data }) => {
+        if (app.draftResult.key !== key) return;
+        app.draftResult = { key, status: "loaded", data: data.result, pageIndex: app.draftResult.pageIndex || 0 };
+        renderBodies();
+      }).catch(() => {
+        if (app.draftResult.key !== key) return;
+        app.draftResult = { key, status: "error", data: null, pageIndex: 0 };
+        renderBodies();
+      });
+    }
+    if (app.draftResult.status === "loaded") {
+      renderLmsDraftResult(inline, app.draftResult.data, {
+        updatedAt: app.draftResult.data?.updatedAt || latest.createdAt,
+        initialIndex: app.draftResult.pageIndex,
+        onPageChange: (pageIndex) => { app.draftResult.pageIndex = pageIndex; },
+      });
+    } else {
+      const message = document.createElement("p");
+      message.className = "draft-result-message";
+      message.textContent = app.draftResult.status === "error"
+        ? "Chưa tải được các thẻ nhận xét từ LMS."
+        : "Đang tải các thẻ nhận xét…";
+      inline.append(message);
+    }
+    const link = document.createElement("a");
+    link.className = "lms-result-link lms-result-fallback";
+    link.href = lmsUrl;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = app.draftResult.status === "error" ? "Mở kết quả trên LMS" : "Mở bản gốc trên LMS";
+    item.append(link);
+  } else {
+    const message = document.createElement("p");
+    message.className = "draft-result-message";
+    message.textContent = latest.status === "queued"
+      ? "Hệ thống đang chấm từng câu và tạo kết quả…"
+      : latest.status === "technical_error"
+        ? (latest.feedback || "Tạm thời chưa tạo được kết quả chấm.")
+        : "Kết quả đã cập nhật nhưng chưa có dữ liệu LMS hợp lệ. Vui lòng báo giảng viên.";
+    item.append(meta, message);
+    if (latest.status === "technical_error" && latest.attemptRef && latest.canRetry !== false) {
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "secondary compact";
+      retry.textContent = "Thử lại";
+      retry.addEventListener("click", () => retryAttempt(latest, retry));
+      item.append(retry);
+    }
+  }
+  list.append(item);
 }
 
 function upsertComment(comment) {
@@ -522,6 +708,7 @@ async function openSession(event) {
     if (student.requiresAccessCode && !/^\d{4}$/.test(accessCode)) throw new Error("Hãy nhập đúng mã 4 số của hồ sơ tạm.");
     const opened = await app.api.createSession(app.activitySlug, classRef, student.studentRef, accessCode);
     app.sessionRef = (opened.data.session || opened.data).sessionRef;
+    app.draftResult = { key: null, status: "idle", data: null, pageIndex: 0 };
     const result = await app.api.session(app.sessionRef);
     app.state = normalizeLessonProgress(result.data.session || result.data, app.manifest);
     await restoreLocal();

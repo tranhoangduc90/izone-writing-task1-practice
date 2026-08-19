@@ -93,6 +93,19 @@ test('Draft jobs receive a longer lease while claim keeps row locking without a 
   assert.equal(queries.some(sql => sql.includes('LIMIT $1::int')), true);
 });
 
+test('Task 2 Draft job receives vocabulary artifacts from the passed Idea 2 check', async () => {
+  const queries = [];
+  const vocabulary = [{ idea: 'ý thử nghiệm', terms: ['test term'] }];
+  const pool = transactionalPool([
+    { rowCount: 1, rows: [{ id: 3, public_id: 'job-ref', section_key: 'draft', comment_number: 1, snapshot: { draft1: 'D1', draft2: 'D2' }, lease_token: 'lease-ref', lease_expires_at: '2026-08-19T00:00:00Z', session_id: 7 }] },
+    { rowCount: 1, rows: [{ task_prompt: 'Đề thử nghiệm', prompt_registry_key: 'registry', prompt_record_ref: 'record', prompt_version: 'v1', history: [] }] },
+    { rowCount: 1, rows: [{ artifacts: { supporting_idea_2: { vocabulary } } }] },
+  ], queries);
+  const [job] = await createWritingPracticeService({ pool }).claimJobs({ workerId: 'task2-test', workerPool: 'task2', maxJobs: 1, leaseSeconds: 420 });
+  assert.deepEqual(job.contextArtifacts.supporting_idea_2.vocabulary, vocabulary);
+  assert.equal(queries.some(sql => sql.includes("result_artifacts<>'{}'::jsonb")), true);
+});
+
 test('Draft completion requires an official LMS link and then locks the section', async () => {
   const queries = [];
   const pool = transactionalPool([

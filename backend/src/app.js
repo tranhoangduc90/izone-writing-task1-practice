@@ -68,6 +68,10 @@ export function createApp({config,pool,service,lessonService=service,provisional
  app.put('/api/v1/sessions/:sessionRef/live',writes,asyncRoute(async(q,r)=>r.json({ok:true,...await service.publishLive({sessionRef:parse(uuid,q.params.sessionRef)})})));
  app.post('/api/v1/lesson-sessions',writes,asyncRoute(async(q,r)=>r.status(201).json({ok:true,session:await lessonService.openSession(parse(open,q.body))})));
  app.get('/api/v1/lesson-sessions/:sessionRef',asyncRoute(async(q,r)=>r.json({ok:true,session:await lessonService.sessionDetails(parse(uuid,q.params.sessionRef))})));
+ app.get('/api/v1/lesson-sessions/:sessionRef/draft-result',lmsReads,asyncRoute(async(q,r)=>{
+   if(!lmsResultService)throw new ApiError(503,'LMS_RESULT_NOT_CONFIGURED','Kết quả LMS chưa được cấu hình.');
+   r.json({ok:true,result:await lmsResultService.getDraftResult({sessionRef:parse(uuid,q.params.sessionRef)})});
+ }));
  app.put('/api/v1/lesson-sessions/:sessionRef/responses',writes,asyncRoute(async(q,r)=>r.json({ok:true,session:await lessonService.saveResponses({sessionRef:parse(uuid,q.params.sessionRef),...parse(lessonSave,q.body)})})));
  app.post('/api/v1/lesson-sessions/:sessionRef/checks',writes,asyncRoute(async(q,r)=>r.status(202).json({ok:true,attempt:await lessonService.submitCheck({sessionRef:parse(uuid,q.params.sessionRef),...parse(lessonCheck,q.body)})})));
  app.put('/api/v1/lesson-sessions/:sessionRef/live',writes,asyncRoute(async(q,r)=>r.json({ok:true,...await lessonService.publishLive({sessionRef:parse(uuid,q.params.sessionRef),...parse(liveUpdate,q.body)})})));

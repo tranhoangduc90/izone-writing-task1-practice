@@ -1,0 +1,105 @@
+{
+  "schemaVersion": "lesson-handout.v1",
+  "contentVersion": "2026-08-19.1",
+  "activity": {
+    "slug": "writing-task2-practice-template",
+    "title": "Luyện viết một đoạn thân bài Writing Task 2",
+    "eyebrow": "Writing Task 2 · Bản cấu hình mẫu"
+  },
+  "task": {
+    "title": "Đề bài",
+    "statement": "Đề Writing Task 2 sẽ được giảng viên cấu hình riêng trước khi mở hoạt động cho lớp."
+  },
+  "bodies": [
+    {
+      "key": "preparation",
+      "title": "Chuẩn bị nội dung",
+      "description": "Lập ý cho cả hai thân bài, chọn một thân bài rồi hoàn thiện Topic Sentence và hai Supporting Ideas.",
+      "sectionKeys": ["topic_sentence", "supporting_idea_1", "supporting_idea_2"]
+    },
+    {
+      "key": "drafting",
+      "title": "Viết đoạn thân bài",
+      "description": "Dùng bảng từ vựng gợi ý để viết Draft 1, tự chỉnh thành Draft 2 rồi nhận kết quả chấm từng câu.",
+      "sectionKeys": ["draft"],
+      "vocabulary": false
+    }
+  ],
+  "sections": [
+    {
+      "key": "topic_sentence",
+      "title": "Chọn thân bài và viết Topic Sentence",
+      "kicker": "Bước 1 · Topic Sentence",
+      "instruction": "Nhập thông điệp chung và hai Idea cho cả hai thân bài. Sau đó chọn một thân bài để luyện và viết Topic Sentence cho thân bài đã chọn.",
+      "requiredFields": ["body1_message", "body1_idea1", "body1_idea2", "body2_message", "body2_idea1", "body2_idea2", "body_choice", "topic_sentence"],
+      "validationMode": "all",
+      "fields": [
+        { "key": "body1_message", "group": "Thân bài 1", "label": "Thông điệp chung của thân bài 1", "rows": 3, "placeholder": "Thân bài này muốn chứng minh điều gì?" },
+        { "key": "body1_idea1", "group": "Thân bài 1", "label": "Idea 1", "rows": 3, "placeholder": "Ý hỗ trợ thứ nhất…" },
+        { "key": "body1_idea2", "group": "Thân bài 1", "label": "Idea 2", "rows": 3, "placeholder": "Ý hỗ trợ thứ hai…" },
+        { "key": "body2_message", "group": "Thân bài 2", "label": "Thông điệp chung của thân bài 2", "rows": 3, "placeholder": "Thân bài này muốn chứng minh điều gì?" },
+        { "key": "body2_idea1", "group": "Thân bài 2", "label": "Idea 1", "rows": 3, "placeholder": "Ý hỗ trợ thứ nhất…" },
+        { "key": "body2_idea2", "group": "Thân bài 2", "label": "Idea 2", "rows": 3, "placeholder": "Ý hỗ trợ thứ hai…" },
+        {
+          "key": "body_choice",
+          "group": "Thân bài em sẽ luyện",
+          "label": "Chọn một thân bài",
+          "control": "choice",
+          "options": [
+            { "value": "body1", "label": "Thân bài 1" },
+            { "value": "body2", "label": "Thân bài 2" }
+          ]
+        },
+        { "key": "topic_sentence", "group": "Topic Sentence", "label": "Topic Sentence của thân bài đã chọn", "rows": 4, "placeholder": "Viết câu chủ đề bao quát hai Idea…" }
+      ]
+    },
+    {
+      "key": "supporting_idea_1",
+      "title": "Phát triển Supporting Idea 1",
+      "kicker": "Bước 2 · Idea 1",
+      "instruction": "A nêu điểm đầu, X giải thích mối nối, B chốt điều cần chứng minh hoặc hệ quả cuối cùng.",
+      "prerequisites": ["topic_sentence"],
+      "requiredFields": ["idea1_a", "idea1_x", "idea1_b"],
+      "validationMode": "all",
+      "fields": [
+        { "key": "idea1_a", "label": "A · Điểm đầu", "rows": 3, "placeholder": "Luận điểm mở đầu…" },
+        { "key": "idea1_x", "label": "X · Điểm giữa", "rows": 3, "placeholder": "Giải thích cơ chế dẫn đến điểm cuối hoặc làm rõ điểm đầu…" },
+        { "key": "idea1_b", "label": "B · Điểm cuối", "rows": 3, "placeholder": "Điều muốn chứng minh hoặc hệ quả cuối cùng…" }
+      ]
+    },
+    {
+      "key": "supporting_idea_2",
+      "title": "Phát triển Supporting Idea 2",
+      "kicker": "Bước 3 · Idea 2",
+      "instruction": "Hoàn thiện A–X–B cho Idea 2. Khi phần này đạt, hệ thống sẽ gợi ý từ vựng dựa trên nội dung của hai Idea.",
+      "prerequisites": ["topic_sentence", "supporting_idea_1"],
+      "requiredFields": ["idea2_a", "idea2_x", "idea2_b"],
+      "validationMode": "all",
+      "fields": [
+        { "key": "idea2_a", "label": "A · Điểm đầu", "rows": 3, "placeholder": "Luận điểm mở đầu…" },
+        { "key": "idea2_x", "label": "X · Điểm giữa", "rows": 3, "placeholder": "Giải thích cơ chế dẫn đến điểm cuối hoặc làm rõ điểm đầu…" },
+        { "key": "idea2_b", "label": "B · Điểm cuối", "rows": 3, "placeholder": "Điều muốn chứng minh hoặc hệ quả cuối cùng…" }
+      ]
+    },
+    {
+      "key": "draft",
+      "title": "Draft",
+      "kicker": "Bước 4 · Viết và chỉnh sửa",
+      "instruction": "Viết Draft 1 bằng từ vựng gợi ý, sao chép xuống Draft 2 để tự chỉnh rồi gửi chấm.",
+      "guidance": "Draft cần bám đúng **Topic Sentence** và hai chuỗi **A–X–B** đã đạt. Từ vựng chỉ là gợi ý; em tự quyết định cách diễn đạt.",
+      "flow": { "type": "draft-revision" },
+      "prerequisites": ["topic_sentence", "supporting_idea_1", "supporting_idea_2"],
+      "requiredFields": ["draft1", "draft2"],
+      "validationMode": "all",
+      "fields": [
+        { "key": "draft1", "label": "Draft 1", "rows": 10, "placeholder": "Viết đoạn thân bài đầu tiên…" },
+        { "key": "draft2", "label": "Draft 2", "rows": 10, "placeholder": "Tự sửa Draft 1 thành bản hoàn chỉnh…" }
+      ]
+    }
+  ],
+  "vocabulary": {
+    "title": "Từ vựng gợi ý theo hai Idea",
+    "unlockAfter": ["topic_sentence", "supporting_idea_1", "supporting_idea_2"],
+    "bodySelectorField": "body_choice"
+  }
+}

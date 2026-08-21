@@ -76,13 +76,28 @@ test("Task 2 template follows the requested four-step flow without student conte
 
 test("a new Task 2 topic is configuration-only and keeps the shared app structure", () => {
   const template = JSON.parse(fs.readFileSync(path.join(root, "manifests", "writing-task2-practice-template.json"), "utf8"));
-  const activity = JSON.parse(fs.readFileSync(path.join(root, "manifests", "writing-task2-public-health-ban.json"), "utf8"));
   const sharedShape = manifest => ({ bodies: manifest.bodies, sections: manifest.sections, vocabulary: manifest.vocabulary });
 
-  assert.deepEqual(sharedShape(activity), sharedShape(template));
-  assert.equal(activity.activity.slug, "writing-task2-public-health-ban");
-  assert.equal(activity.task.statement, "Shops should be banned from selling any food or drink that has been scientifically proven to be damaging to public health. Do you agree or disagree?");
-  assert.doesNotMatch(JSON.stringify(activity), /grader.?prompt|credential|api.?key|student.?data|student.?name|Bearer /i);
+  const topics = [
+    {
+      file: "writing-task2-public-health-ban.json",
+      slug: "writing-task2-public-health-ban",
+      statement: "Shops should be banned from selling any food or drink that has been scientifically proven to be damaging to public health. Do you agree or disagree?"
+    },
+    {
+      file: "writing-task2-living-alone-development.json",
+      slug: "writing-task2-living-alone-development",
+      statement: "Nowadays, more and more people are choosing to live alone. Is this a positive or negative development?"
+    }
+  ];
+
+  for (const topic of topics) {
+    const activity = JSON.parse(fs.readFileSync(path.join(root, "manifests", topic.file), "utf8"));
+    assert.deepEqual(sharedShape(activity), sharedShape(template));
+    assert.equal(activity.activity.slug, topic.slug);
+    assert.equal(activity.task.statement, topic.statement);
+    assert.doesNotMatch(JSON.stringify(activity), /grader.?prompt|credential|api.?key|student.?data|student.?name|Bearer /i);
+  }
 });
 
 test("student identity uses native selects for both class and name on mobile", () => {

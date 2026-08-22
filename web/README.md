@@ -2,6 +2,8 @@
 
 Giao diện GitHub Pages, không dùng framework và không chứa dữ liệu học viên, prompt chấm, credential hay đáp án. Mở `?task=<slug>` để tải `manifests/<slug>.json`; thêm `&version=<phiên-bản>` để tải `manifests/<slug>/<phiên-bản>.json`. Không có query thì dùng `sample-task`.
 
+Với handout dùng chung tại `lesson.html`, không có query `class` thì học viên tự chọn trong toàn bộ lớp đang được gắn với activity. Nếu URL có `class=CS.070626`, app chọn sẵn lớp đó và chỉ nạp danh sách họ tên của lớp đã chọn.
+
 ## Chạy cục bộ
 
 ```powershell

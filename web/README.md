@@ -4,6 +4,8 @@ Giao diện GitHub Pages, không dùng framework và không chứa dữ liệu h
 
 Với handout dùng chung tại `lesson.html`, không có query `class` thì học viên tự chọn trong toàn bộ lớp đang được gắn với activity. Nếu URL có `class=CS.070626`, app chọn sẵn lớp đó và chỉ nạp danh sách họ tên của lớp đã chọn.
 
+Dashboard giảng viên tại `teacher.html` dùng cùng query `class`. Sau khi đăng nhập, dashboard chọn sẵn lớp và chỉ tải tiến độ của lớp đó; giảng viên vẫn có thể đổi bộ lọc lớp.
+
 ## Chạy cục bộ
 
 ```powershell

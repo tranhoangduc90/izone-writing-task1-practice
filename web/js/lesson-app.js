@@ -1,4 +1,5 @@
 import { createLessonApi } from "./api.js";
+import { classQuery, resolveClassRef } from "./class-selection.js";
 import { createRequestId, hasMeaningfulText, isConflict, pollingDelay, safeLmsUrl, terminalResult, wordCount } from "./core.js";
 import { getDraft, getLatestDraft, putDraft } from "./idb.js";
 import { fieldDefinitions, normalizeLessonProgress, sectionDefinitions, sectionIsFilled, sectionPrerequisitesPassed, vocabularyPrerequisitesPassed } from "./lesson-core.js";
@@ -68,6 +69,24 @@ function renderClassOptions() {
     option.textContent = item.className;
     $("lesson-class").append(option);
   }
+}
+
+function applyClassQuery() {
+  const requested = classQuery(location.search);
+  if (!requested) {
+    updateStudentOptions();
+    return;
+  }
+  const classRef = resolveClassRef(app.roster?.classes, requested);
+  if (!classRef) {
+    updateStudentOptions();
+    const error = $("lesson-identity-error");
+    error.hidden = false;
+    error.textContent = `Không tìm thấy lớp “${requested}”. Hãy chọn lớp trong danh sách.`;
+    return;
+  }
+  $("lesson-class").value = classRef;
+  updateStudentOptions();
 }
 
 function studentsForClass(classRef) {
@@ -753,6 +772,7 @@ async function init() {
     const roster = await app.api.roster(app.activitySlug);
     app.roster = roster.data;
     renderClassOptions();
+    applyClassQuery();
     $("lesson-resume-recent").hidden = !(await getLatestDraft(`lesson:${app.activitySlug}:`));
     $("lesson-class").addEventListener("change", updateStudentOptions);
     $("lesson-student").addEventListener("change", updateAccessCode);

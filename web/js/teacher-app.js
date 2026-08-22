@@ -1,4 +1,5 @@
 import { createTeacherApi } from "./api.js?v=20260818-teacher-lms-vocab";
+import { classQuery, resolveClassRef } from "./class-selection.js";
 import { createRequestId, hasMeaningfulText, safeLmsUrl } from "./core.js";
 import { sectionDefinitions } from "./lesson-core.js";
 import { appendMarkdown } from "./markdown.js?v=20260818-numbering-v3";
@@ -12,7 +13,8 @@ import { createVocabularySection, manifestVocabularyRows } from "./vocabulary-ui
 
 const $ = (id) => document.getElementById(id);
 const state = { token: "", api: null, manifest: null, activitySlug: "", students: [], pollTimer: null,
-  selectedStudent: null, detailRequestId: 0, focusSection: "", pending: [], canManage: false, draftResults: new Map() };
+  selectedStudent: null, detailRequestId: 0, focusSection: "", pending: [], canManage: false, draftResults: new Map(),
+  requestedClass: "", classQueryResolved: false, classQueryError: "" };
 
 function teacherDefinitions() {
   const dynamic = sectionDefinitions(state.manifest);
@@ -59,6 +61,7 @@ function populateClasses(students) {
     const option = document.createElement("option"); option.value = classRef; option.textContent = className; select.append(option);
   }
   if ([...select.options].some((option) => option.value === current)) select.value = current;
+  return [...classes].map(([classRef, className]) => ({ classRef, className }));
 }
 
 function renderSummary(students) {
@@ -427,12 +430,23 @@ async function refresh() {
   clearTimeout(state.pollTimer);
   if (!state.token) return;
   try {
-    const result = await state.api.liveActivity(state.activitySlug, $("teacher-class").value);
+    const selectedClassRef = $("teacher-class").value;
+    const result = await state.api.liveActivity(state.activitySlug, selectedClassRef);
     state.students = result.data.students || [];
     state.canManage = result.data.permissions?.canManage === true;
     const pendingResult = await state.api.provisionalStudents(state.activitySlug, $("teacher-class").value);
     state.pending = pendingResult.data.students || [];
-    populateClasses(state.students);
+    const classes = populateClasses(state.students);
+    if (!state.classQueryResolved) {
+      state.classQueryResolved = true;
+      const classRef = resolveClassRef(classes, state.requestedClass);
+      if (state.requestedClass && !classRef) {
+        state.classQueryError = `Không tìm thấy lớp “${state.requestedClass}”. Dashboard đang hiển thị tất cả lớp.`;
+      } else if (classRef && classRef !== selectedClassRef) {
+        $("teacher-class").value = classRef;
+        return refresh();
+      }
+    }
     renderSummary(state.students);
     renderStudents(state.students);
     renderReconciliation();
@@ -440,7 +454,7 @@ async function refresh() {
     $("teacher-dashboard").hidden = false;
     $("teacher-updated").textContent = `Cập nhật lúc ${formatTime(result.data.generatedAt)}`;
     showLoginError();
-    showDashboardError();
+    showDashboardError(state.classQueryError);
     if ($("teacher-detail").open && state.selectedStudent && !$("teacher-detail").querySelector(".teacher-comment-composer textarea:focus, .teacher-comment-reply textarea:focus")) {
       const updated = state.students.find((student) => student.studentRef === state.selectedStudent.studentRef);
       if (updated) await loadStudentDetail({ ...state.selectedStudent, ...updated });
@@ -491,6 +505,7 @@ async function waitForGoogle(clientId) {
 async function init() {
   try {
     const slug = new URLSearchParams(location.search).get("task") || "writing-lesson13-young-leaders";
+    state.requestedClass = classQuery(location.search);
     const [manifestResponse, configResponse] = await Promise.all([
       fetch(`./manifests/${encodeURIComponent(slug)}.json`),
       fetch("./config.json", { cache: "no-store" }),
@@ -502,7 +517,10 @@ async function init() {
     state.activitySlug = state.manifest.activity?.slug || slug;
     state.api = createTeacherApi(config.apiBase || "", () => state.token);
     $("teacher-title").textContent = state.manifest.activity?.title || "Theo dõi bài làm";
-    $("teacher-class").addEventListener("change", refresh);
+    $("teacher-class").addEventListener("change", () => {
+      state.classQueryError = "";
+      void refresh();
+    });
     $("teacher-export").addEventListener("click", async () => { const blob = await state.api.exportProgress(state.activitySlug, $("teacher-class").value); const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = `${state.activitySlug}-progress.csv`; link.click(); URL.revokeObjectURL(url); });
     const detail = $("teacher-detail");
     detail.addEventListener("click", (event) => {

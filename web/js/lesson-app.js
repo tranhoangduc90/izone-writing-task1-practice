@@ -2,7 +2,7 @@ import { createLessonApi } from "./api.js";
 import { classQuery, resolveClassRef } from "./class-selection.js";
 import { createRequestId, hasMeaningfulText, isConflict, pollingDelay, safeLmsUrl, terminalResult, wordCount } from "./core.js";
 import { getDraft, getLatestDraft, putDraft } from "./idb.js";
-import { fieldDefinitions, normalizeLessonProgress, sectionDefinitions, sectionIsFilled, sectionPrerequisitesPassed, vocabularyPrerequisitesPassed } from "./lesson-core.js";
+import { claimSectionSubmission, fieldDefinitions, normalizeLessonProgress, sectionDefinitions, sectionIsFilled, sectionPrerequisitesPassed, sectionSubmitLabel, vocabularyPrerequisitesPassed } from "./lesson-core.js";
 import { renderLmsDraftResult } from "./lms-draft-result.js?v=20260818-numbering-v3";
 import { appendMarkdown } from "./markdown.js?v=20260818-numbering-v3";
 import { renderStudentFieldComments } from "./teacher-comments-ui.js";
@@ -27,6 +27,7 @@ const app = {
   changeSequence: 0,
   savingPromise: null,
   pendingAttempts: new Map(),
+  submittingSections: new Set(),
   teacherComments: [],
   teacherCommentsEtag: null,
   teacherCommentTimer: null,
@@ -390,7 +391,8 @@ function renderSection(section) {
   const card = workspace.querySelector(".section-card");
   const state = app.state.sections[section.key] || { status: "draft", attemptsWithoutPass: 0 };
   const prerequisitesPassed = sectionPrerequisitesPassed(section, app.state.sections);
-  const locked = ["queued", "passed"].includes(state.status) || !prerequisitesPassed;
+  const submitting = app.submittingSections.has(section.key);
+  const locked = submitting || ["queued", "passed"].includes(state.status) || !prerequisitesPassed;
   workspace.dataset.section = section.key;
   workspace.dataset.state = state.status;
   card.querySelector(".section-kicker").textContent = section.kicker || "";
@@ -415,8 +417,8 @@ function renderSection(section) {
   if (section.flow?.type === "draft-revision") {
     const draft2Field = section.fields?.[1];
     button.hidden = !draft2Field || !hasMeaningfulText(app.state.responses[draft2Field.key]);
-    button.textContent = state.status === "queued" ? "Đang tạo kết quả chấm" : state.status === "passed" ? "Đã có kết quả chấm" : "Gửi chấm Draft";
-  } else button.textContent = state.status === "queued" ? "Đang chấm" : state.status === "passed" ? "Phần này đã đạt" : "Check";
+  }
+  button.textContent = sectionSubmitLabel(section, state.status, submitting);
   button.addEventListener("click", () => submitSection(section, card));
   workspace.querySelector(".comments-title").textContent = section.flow?.type === "draft-revision" ? "Kết quả chấm Draft" : `Dòng thời gian · ${section.title}`;
   updateWordCount(card, section);
@@ -619,24 +621,31 @@ async function submitSection(section, card) {
     errorNode.textContent = "Hãy hoàn thành các ô của phần này trước khi Check.";
     return;
   }
+  if (!claimSectionSubmission(app.submittingSections, section.key)) return;
   errorNode.hidden = true;
-  if (!(await saveRemote("check"))) return;
-  const previousStatus = app.state.sections[section.key].status;
-  app.state.sections[section.key].status = "queued";
   renderBodies();
+  let previousStatus = app.state.sections[section.key].status;
   try {
+    if (!(await saveRemote("check"))) return;
+    previousStatus = app.state.sections[section.key].status;
+    app.state.sections[section.key].status = "queued";
+    renderBodies();
     const result = await app.api.checkSection(app.sessionRef, section.key);
     const attempt = result.data.attempt || result.data;
     registerAttempt(attempt);
     upsertComment({ commentRef: attempt.commentRef, attemptRef: attempt.attemptRef, section: section.key,
       commentNumber: attempt.commentNumber, status: "queued", feedback: "Đang chấm", createdAt: new Date().toISOString() });
-    setSaveState("Đã bắt đầu check...");
+    app.submittingSections.delete(section.key);
+    setSaveState("Đã nhận Check — đang chấm, không cần bấm lại");
     renderBodies();
   } catch (error) {
     app.state.sections[section.key].status = previousStatus;
     renderBodies();
     const currentError = document.querySelector(`[data-section="${section.key}"] .field-error`);
     if (currentError) { currentError.hidden = false; currentError.textContent = error.message; }
+  } finally {
+    app.submittingSections.delete(section.key);
+    if (!["queued", "passed"].includes(app.state.sections[section.key].status)) renderBodies();
   }
 }
 
@@ -686,7 +695,7 @@ function updatePollingStates() {
     const node = document.querySelector(`[data-section="${section.key}"] .polling-state`);
     if (!node) continue;
     const active = [...app.pendingAttempts.values()].some((attempt) => attempt.section === section.key);
-    node.textContent = active ? (document.hidden ? "Đã tạm dừng" : "Đang chấm") : "—";
+    node.textContent = active ? (document.hidden ? "Đã tạm dừng cập nhật" : "Đang chấm · thường 10–60 giây · không cần bấm lại") : "—";
   }
 }
 

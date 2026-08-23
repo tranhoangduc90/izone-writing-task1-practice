@@ -53,6 +53,20 @@ export function sectionPrerequisitesPassed(section, sections = {}) {
   return prerequisites.every((key) => sections?.[key]?.status === "passed");
 }
 
+export function claimSectionSubmission(pendingSections, sectionKey) {
+  if (pendingSections.has(sectionKey)) return false;
+  pendingSections.add(sectionKey);
+  return true;
+}
+
+export function sectionSubmitLabel(section = {}, status = "draft", submitting = false) {
+  if (submitting) return "Đang gửi bài…";
+  const draftResult = section.flow?.type === "draft-revision";
+  if (status === "queued") return draftResult ? "Đang tạo kết quả — không cần bấm lại" : "Đang chấm — không cần bấm lại";
+  if (status === "passed") return draftResult ? "Đã có kết quả chấm" : "Phần này đã đạt";
+  return draftResult ? "Gửi chấm Draft" : "Check";
+}
+
 export function vocabularyPrerequisitesPassed(vocabulary = {}, sections = {}) {
   const configured = vocabulary.unlockAfter;
   const prerequisites = Array.isArray(configured) ? configured : configured ? [configured] : [];

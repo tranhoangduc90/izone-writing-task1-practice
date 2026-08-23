@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { canUnlockDraft2, draftPrerequisitesPassed, hasMeaningfulText, isConflict, normalizeProgress, pollingDelay, rebaseLocalProgress, safeHttpUrl, safeLmsUrl, terminalResult, wordCount } from "../js/core.js";
+import { canUnlockDraft2, claimSectionSubmission, draftPrerequisitesPassed, hasMeaningfulText, isConflict, normalizeProgress, pollingDelay, rebaseLocalProgress, safeHttpUrl, safeLmsUrl, sectionSubmitLabel, terminalResult, wordCount } from "../js/core.js";
 
 test("normalizes public session data into three section states", () => {
   const result = normalizeProgress({ draftVersion: 4, draft: { overview: "A", body1: "B", body2: "C", draft1: "D1", draft2: "D2", draft2Unlocked: true }, sectionStates: { overview: { status: "passed" }, outline: { status: "revision", attemptsWithoutPass: 3 } } });
@@ -32,6 +32,20 @@ test("polling backs off at the specified elapsed-time boundaries", () => {
   assert.equal(pollingDelay(20001), 5000);
   assert.equal(pollingDelay(120000), 5000);
   assert.equal(pollingDelay(120001), 10000);
+});
+
+test("mỗi phần chỉ nhận một lượt gửi cho tới khi yêu cầu trước kết thúc", () => {
+  const pendingSections = new Set();
+  assert.equal(claimSectionSubmission(pendingSections, "overview"), true);
+  assert.equal(claimSectionSubmission(pendingSections, "overview"), false);
+  pendingSections.delete("overview");
+  assert.equal(claimSectionSubmission(pendingSections, "overview"), true);
+});
+
+test("nút Check nói rõ trạng thái gửi và không yêu cầu học viên bấm lại", () => {
+  assert.equal(sectionSubmitLabel("overview", "draft", true), "Đang gửi bài…");
+  assert.equal(sectionSubmitLabel("overview", "queued"), "Đang chấm — không cần bấm lại");
+  assert.equal(sectionSubmitLabel("draft", "queued"), "Đang tạo kết quả — không cần bấm lại");
 });
 
 test("word count ignores surrounding whitespace", () => {

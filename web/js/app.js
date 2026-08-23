@@ -1,5 +1,5 @@
 import { createApi } from "./api.js";
-import { SECTION_KEYS, canUnlockDraft2, createRequestId, draftPrerequisitesPassed, hasMeaningfulText, isConflict, normalizeProgress, pollingDelay, rebaseLocalProgress, safeHttpUrl, safeLmsUrl, terminalResult, wordCount } from "./core.js";
+import { SECTION_KEYS, canUnlockDraft2, claimSectionSubmission, createRequestId, draftPrerequisitesPassed, hasMeaningfulText, isConflict, normalizeProgress, pollingDelay, rebaseLocalProgress, safeHttpUrl, safeLmsUrl, sectionSubmitLabel, terminalResult, wordCount } from "./core.js";
 import { getDraft, getLatestDraft, putDraft } from "./idb.js";
 import { appendInlineMarkdown, appendMarkdown } from "./markdown.js?v=20260818-numbering-v3";
 import { renderStudentFieldComments } from "./teacher-comments-ui.js";
@@ -12,7 +12,7 @@ const SECTION_INFO = {
   outline: { title: "Outline", kicker: "Phần 2", fields: [{ key: "body1", label: "Body 1", placeholder: "Nhóm số liệu thứ nhất…" }, { key: "body2", label: "Body 2", placeholder: "Nhóm số liệu thứ hai…" }] },
   draft: { title: "Draft 1 → Draft 2", kicker: "Phần 3", fields: [{ key: "draft1", label: "Draft 1", placeholder: "Viết liên tục phần Overview và Body 1…" }, { key: "draft2", label: "Draft 2", placeholder: "Sửa bản sao Draft 1 thành tiếng Anh hoàn chỉnh…" }] },
 };
-const app = { manifest: null, activitySlug: null, api: null, roster: null, identity: null, sessionRef: null, state: null, dirty: false, idbTimer: null, saveTimer: null, pollTimer: null, heartbeatTimer: null, pendingAttempts: new Map(), conflict: false, conflictServer: null, teacherComments: [], teacherCommentsEtag: null, teacherCommentTimer: null, draftResult: { key: null, status: "idle", data: null, pageIndex: 0 } };
+const app = { manifest: null, activitySlug: null, api: null, roster: null, identity: null, sessionRef: null, state: null, dirty: false, idbTimer: null, saveTimer: null, pollTimer: null, heartbeatTimer: null, pendingAttempts: new Map(), submittingSections: new Set(), conflict: false, conflictServer: null, teacherComments: [], teacherCommentsEtag: null, teacherCommentTimer: null, draftResult: { key: null, status: "idle", data: null, pageIndex: 0 } };
 
 function setSaveState(text) { $("save-state").textContent = text; }
 function showNotice(text = "") { const node = $("network-notice"); node.hidden = !text; node.textContent = text; }
@@ -269,11 +269,11 @@ function renderSections() {
     const info = SECTION_INFO[section]; const workspace = template.content.firstElementChild.cloneNode(true); const card = workspace.querySelector(".section-card"); const status = card.querySelector(".section-status");
     workspace.dataset.section = section; workspace.dataset.state = app.state.sections[section].status; card.dataset.section = section; card.querySelector(".section-kicker").textContent = info.kicker; card.querySelector("h2").textContent = info.title;
     const commentsTitle = workspace.querySelector(".comments-title"); commentsTitle.id = `comments-title-${section}`; commentsTitle.textContent = section === "draft" ? "Kết quả chấm từng câu" : `Dòng thời gian ${info.title}`; workspace.querySelector(".comments-panel").setAttribute("aria-labelledby", commentsTitle.id);
-    const prerequisitesPassed = section !== "draft" || draftPrerequisitesPassed(app.state.sections); const locked = ["passed", "queued"].includes(app.state.sections[section].status) || !prerequisitesPassed;
+    const prerequisitesPassed = section !== "draft" || draftPrerequisitesPassed(app.state.sections); const submitting = app.submittingSections.has(section); const locked = submitting || ["passed", "queued"].includes(app.state.sections[section].status) || !prerequisitesPassed;
     status.textContent = section === "draft" && !prerequisitesPassed ? "Chờ phần trước" : statusLabel(app.state.sections[section].status); status.dataset.state = app.state.sections[section].status;
     if (section === "draft") renderDraftFields(card, locked, prerequisitesPassed);
     else for (const field of info.fields) addTextarea(card, section, field, locked);
-    const button = card.querySelector(".submit-section"); button.hidden = section === "draft" && !app.state.draft2Unlocked; button.disabled = locked || app.conflict; button.textContent = app.conflict ? "Xử lý xung đột bản lưu trước" : app.state.sections[section].status === "queued" ? (section === "draft" ? "Đang tạo link LMS" : "Đang chấm") : locked && app.state.sections[section].status === "passed" ? (section === "draft" ? "Đã có kết quả LMS" : "Phần này đã đạt") : section === "draft" ? "Gửi chấm từng câu" : "Gửi để nhận xét"; button.addEventListener("click", () => submitSection(section, card));
+    const button = card.querySelector(".submit-section"); button.hidden = section === "draft" && !app.state.draft2Unlocked; button.disabled = locked || app.conflict; button.textContent = app.conflict ? "Xử lý xung đột bản lưu trước" : sectionSubmitLabel(section, app.state.sections[section].status, submitting); button.addEventListener("click", () => submitSection(section, card));
     refreshSection(card, section); root.append(workspace);
   }
 }
@@ -390,11 +390,13 @@ async function submitSection(section, card) {
   const content = sectionContent(section); const filled = section === "overview" ? hasMeaningfulText(content.overview) : section === "outline" ? Object.values(content).some(hasMeaningfulText) : app.state.draft2Unlocked && Object.values(content).every(hasMeaningfulText);
   const errorNode = card.querySelector(".field-error"); errorNode.hidden = filled;
   if (!filled) { errorNode.textContent = section === "overview" ? "Bạn cần viết Overview trước khi gửi." : section === "outline" ? "Bạn cần viết ít nhất một trong hai ô Body trước khi gửi." : "Bạn cần hoàn thành Draft 1, mở Draft 2 và sửa Draft 2 trước khi Check."; return; }
-  const submitButton = card.querySelector(".submit-section"); submitButton.disabled = true; submitButton.textContent = "Đang lưu trước khi gửi…";
-  if (!(await saveRemote("check"))) { renderAll(); return; }
+  if (!claimSectionSubmission(app.submittingSections, section)) return;
+  renderAll();
+  if (!(await saveRemote("check"))) { app.submittingSections.delete(section); renderAll(); return; }
   const previousStatus = app.state.sections[section].status;
   app.state.sections[section].status = "queued";
   renderAll();
+  let requestError = null;
   try {
     const snapshot = { overview: app.state.texts.overview, body1: app.state.texts.body1, body2: app.state.texts.body2, draft1: app.state.texts.draft1, draft2: app.state.texts.draft2 };
     const result = await app.api.checkSection(app.sessionRef, section, snapshot, app.state.revision);
@@ -403,11 +405,14 @@ async function submitSection(section, card) {
     app.state.sections[section].status = "queued"; registerAttempt(attempt); resetAutosave(); renderAll();
     const number = attempt.attemptNumber || attempt.commentNumber || attempt.sequence || app.state.sections[section].attemptsWithoutPass + 1;
     upsertComment({ commentRef: attempt.commentRef, attemptRef: attempt.attemptRef, section, commentNumber: number, status: "queued", feedback: section === "draft" ? "Hệ thống đang chấm từng câu và tạo link LMS…" : "Đang chấm", createdAt: new Date().toISOString() });
-    renderComments(); setSaveState("Đã bắt đầu check...");
+    renderComments(); setSaveState("Đã nhận Check — đang chấm, không cần bấm lại");
   } catch (error) {
     app.state.sections[section].status = previousStatus;
+    requestError = error;
+  } finally {
+    app.submittingSections.delete(section);
     renderAll();
-    const currentError = document.querySelector(`[data-section="${section}"] .field-error`); if (currentError) { currentError.hidden = false; currentError.textContent = error.message; }
+    const currentError = document.querySelector(`[data-section="${section}"] .field-error`); if (requestError && currentError) { currentError.hidden = false; currentError.textContent = requestError.message; }
   }
 }
 
@@ -457,7 +462,7 @@ function updatePollingStates() {
   for (const section of SECTION_KEYS) {
     const node = document.querySelector(`.section-workspace[data-section="${section}"] .polling-state`); if (!node) continue;
     const active = activeAttempts().some((item) => item.section === section);
-    node.textContent = active ? (document.hidden ? "Đã tạm dừng" : section === "draft" ? "Đang tạo link" : "Đang chấm") : "—"; node.dataset.state = active && !document.hidden ? "polling" : "idle";
+    node.textContent = active ? (document.hidden ? "Đã tạm dừng cập nhật" : section === "draft" ? "Đang tạo kết quả · không cần bấm lại" : "Đang chấm · thường 10–60 giây · không cần bấm lại") : "—"; node.dataset.state = active && !document.hidden ? "polling" : "idle";
   }
 }
 

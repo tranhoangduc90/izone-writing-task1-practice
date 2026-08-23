@@ -62,6 +62,9 @@ textarea { resize:vertical; min-height:10rem; line-height:1.55; }
 .section-workspace[data-state="revision"] textarea { border-color:#efaaa2; background:#fffafa; }
 .section-heading,.comments-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:.8rem; margin-bottom:.8rem; }
 .section-status,.polling-state { white-space:nowrap; padding:.2rem .48rem; border-radius:999px; font-size:.78rem; font-weight:700; background:#edf2f7; color:#475467; }
+.section-workspace .comments-heading { flex-wrap:wrap; }
+.section-workspace .comments-heading > div { flex:1 1 10rem; min-width:0; }
+.section-workspace .polling-state { max-width:100%; white-space:normal; text-align:center; }
 .section-status[data-state="passed"] { background:#e7f7ec; color:var(--success); }
 .section-status[data-state="queued"],.polling-state[data-state="polling"] { background:#fff5df; color:var(--warning); }
 .section-status[data-state="technical_error"] { background:#fff0df; color:#a5480d; }

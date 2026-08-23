@@ -66,6 +66,19 @@ export function pollingDelay(elapsedSinceSubmitMs) {
   if (elapsedSinceSubmitMs <= 120000) return 5000;
   return 10000;
 }
+export function claimSectionSubmission(pendingSections, sectionKey) {
+  if (pendingSections.has(sectionKey)) return false;
+  pendingSections.add(sectionKey);
+  return true;
+}
+export function sectionSubmitLabel(section, status, submitting = false) {
+  if (submitting) return "Đang gửi bài…";
+  if (status === "queued") return section === "draft"
+    ? "Đang tạo kết quả — không cần bấm lại"
+    : "Đang chấm — không cần bấm lại";
+  if (status === "passed") return section === "draft" ? "Đã có kết quả LMS" : "Phần này đã đạt";
+  return section === "draft" ? "Gửi chấm từng câu" : "Gửi để nhận xét";
+}
 export function isConflict(error) { return error?.status === 409 && error?.data?.error === "DRAFT_VERSION_CONFLICT"; }
 export function terminalResult(attempt) {
   const outcome = attempt?.resultStatus || attempt?.status;

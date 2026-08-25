@@ -25,6 +25,7 @@ textarea { resize:vertical; min-height:10rem; line-height:1.55; }
 .primary,.secondary { min-height:44px; border-radius:8px; padding:.62rem 1rem; font-weight:720; }
 .primary { border:1px solid var(--blue); background:var(--blue); color:#fff; }
 .secondary { border:1px solid #b6c4d7; background:#fff; color:#23304a; }
+.danger-button { min-height:44px; border:1px solid #d92d20; border-radius:8px; padding:.62rem 1rem; background:#fff; color:#b42318; font-weight:720; }
 .form-error,.field-error { margin:0; color:var(--danger); font-size:.88rem; }
 .task-header { display:flex; justify-content:space-between; gap:1rem; align-items:flex-start; margin:.5rem 0 1rem; }
 .actions,.section-actions { display:flex; flex-wrap:wrap; gap:.6rem; align-items:center; }
@@ -263,7 +264,8 @@ textarea { resize:vertical; min-height:10rem; line-height:1.55; }
 .teacher-progress-fill { height:100%; background:#2b6cb0; }
 .teacher-summary-card[data-state="support"] { border:2px solid #d92d20; background:#fff4f3; cursor:pointer; }
 .reconciliation-panel { display:grid; gap:.75rem; margin-top:1rem; padding:1rem; border:1px solid #e0a63d; border-radius:12px; background:#fff9e8; }
-@media(max-width:560px){.pin-grid{grid-template-columns:1fr}.teacher-student-meta{line-height:1.5}}
+.reconciliation-search { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:.6rem; }
+@media(max-width:560px){.pin-grid,.reconciliation-search{grid-template-columns:1fr}.teacher-student-meta{line-height:1.5}}
 [hidden] { display:none!important; }
 .teacher-detail { width:min(1420px,calc(100% - 2rem)); max-height:90vh; padding:1.25rem; border:0; border-radius:16px; color:var(--ink); box-shadow:0 25px 60px rgb(15 23 42/.28); }
 .teacher-detail::backdrop { background:rgb(15 23 42/.52); }

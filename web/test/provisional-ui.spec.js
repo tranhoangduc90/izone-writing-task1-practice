@@ -1,6 +1,7 @@
 import { test, expect } from 'playwright/test';
 
 test.use({ channel: 'chrome' });
+const officialOutsideClassRef = '99999999-9999-4999-8999-999999999999';
 
 test('học viên tạm đăng ký và mở Task 1 trên desktop', async ({ page }) => {
   const errors = []; page.on('pageerror', error => errors.push(error.message));
@@ -53,4 +54,25 @@ test('dashboard một cột ưu tiên hỗ trợ, tiến trình thấp rồi ch�
   await page.locator('[data-group="support"] .teacher-student-card').nth(1).click();
   await expect(page.locator('#teacher-detail')).toHaveAttribute('open', '');
   await expect(page.locator('.teacher-detail-section[data-section-key="outline"]')).toBeVisible();
+});
+
+test('dashboard tìm hồ sơ ngoài lớp và xóa mềm hồ sơ thử nghiệm', async ({ page }) => {
+  await page.addInitScript(() => {
+    const accounts = { initialize(options) { globalThis.__googleCallback = options.callback; }, renderButton(root) { const button = document.createElement('button'); button.id = 'mock-google-login'; button.textContent = 'Đăng nhập thử'; button.addEventListener('click', () => globalThis.__googleCallback({ credential: 'mock-token' })); root.append(button); } };
+    Object.defineProperty(globalThis, 'google', { value: { accounts: { id: accounts } }, configurable: false });
+  });
+  await page.route('https://accounts.google.com/**', route => route.abort());
+  await page.goto('http://127.0.0.1:8080/teacher.html?task=pie-app-users-by-age');
+  await page.click('#mock-google-login');
+  const firstPending = page.locator('#teacher-reconciliation-list .teacher-student-card').first();
+  await firstPending.locator('input[type="search"]').fill('Học viên ngoài lớp');
+  await firstPending.getByRole('button', { name: 'Tìm trong database' }).click();
+  await expect(firstPending.locator('select')).toContainText('Học viên ngoài lớp · Lớp ngoài phạm vi');
+  await firstPending.locator('select').selectOption(officialOutsideClassRef);
+  await expect(firstPending.getByRole('button', { name: 'Ghép hồ sơ' })).toBeEnabled();
+
+  const demo = page.locator('#teacher-reconciliation-list .teacher-student-card').filter({ hasText: 'demo học viên vào sau' });
+  page.once('dialog', dialog => dialog.accept());
+  await demo.getByRole('button', { name: 'Xóa hồ sơ tạm' }).click();
+  await expect(demo).toHaveCount(0);
 });

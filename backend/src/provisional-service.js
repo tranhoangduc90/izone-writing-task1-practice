@@ -124,6 +124,20 @@ export function createProvisionalStudentService({ pool, pepper }) {
     return result.rows;
   }
 
+  async function searchOfficialStudents({ query, excludeStudentRef = null, limit = 20 }) {
+    const normalized = normalizeStudentName(query);
+    if (normalized.length < 2 || normalized.length > 100) {
+      throw new ApiError(400, 'INVALID_STUDENT_SEARCH', 'Nhập ít nhất hai ký tự để tìm học viên.');
+    }
+    const result = await pool.query(`SELECT
+      student_public_id AS "studentRef",
+      display_name AS "displayName",
+      class_names AS "classNames"
+      FROM writing_practice.search_official_students($1::text,$2::uuid,$3::integer)`,
+    [normalized, excludeStudentRef, limit]);
+    return result.rows.map(row => ({ ...row, classNames: Array.isArray(row.classNames) ? row.classNames : [] }));
+  }
+
   async function resetCode({ studentRef, actorRef }) {
     const code = String(crypto.randomInt(0, 10_000)).padStart(4, '0');
     const encoded = await hashPin(code, pepper);
@@ -147,17 +161,32 @@ export function createProvisionalStudentService({ pool, pepper }) {
       if (!item.rowCount) throw new ApiError(404, 'PROVISIONAL_STUDENT_NOT_FOUND', 'Không tìm thấy hồ sơ tạm.');
       const row = item.rows[0];
       if (row.status !== 'pending' || studentRef === officialStudentRef) throw new ApiError(409, 'PROVISIONAL_STUDENT_NOT_PENDING', 'Hồ sơ này không còn ở trạng thái chờ đối soát.');
-      const official = await client.query(`SELECT 1 FROM writing_practice.activity_roster
-        WHERE activity_class_id=$1 AND student_public_id=$2 AND active
-          AND NOT EXISTS(SELECT 1 FROM writing_practice.provisional_student provisional
-            WHERE provisional.activity_class_id=$1 AND provisional.student_public_id=$2)`, [row.activity_class_id, officialStudentRef]);
-      if (!official.rowCount) throw new ApiError(404, 'OFFICIAL_STUDENT_NOT_FOUND', 'Không tìm thấy học viên chính thức cùng lớp.');
+      const official = await client.query(`SELECT
+        erp_student_contact_id,
+        student_public_id,
+        display_name
+        FROM writing_practice.resolve_official_student($1)`, [officialStudentRef]);
+      if (!official.rowCount) throw new ApiError(404, 'OFFICIAL_STUDENT_NOT_FOUND', 'Không tìm thấy hồ sơ chính thức trong database.');
       const existingAlias = await client.query(`SELECT 1 FROM writing_practice.activity_student_alias
         WHERE activity_class_id=$1 AND alias_student_public_id=$2`, [row.activity_class_id, officialStudentRef]);
       if (existingAlias.rowCount) throw new ApiError(409, 'OFFICIAL_STUDENT_ALREADY_MATCHED', 'Hồ sơ chính thức này đã được ghép với một bài làm khác.');
       const conflict = await client.query(`SELECT 1 FROM writing_practice.activity_session
         WHERE activity_id=$1 AND student_public_id=$2`, [row.activity_id, officialStudentRef]);
       if (conflict.rowCount) throw new ApiError(409, 'RECONCILIATION_CONFLICT', 'Cả hai hồ sơ đều đã có bài làm; hệ thống không tự ghép để tránh mất dữ liệu.');
+      const officialRow = official.rows[0];
+      await client.query(`INSERT INTO writing_practice.activity_roster_override
+        (activity_class_id,erp_student_contact_id,student_public_id,display_name,active,approved_by,reason)
+        VALUES($1,$2,$3,$4,true,$5,'Giảng viên ghép hồ sơ tạm với học viên chính thức từ database.')
+        ON CONFLICT(activity_class_id,erp_student_contact_id) DO UPDATE
+        SET student_public_id=EXCLUDED.student_public_id,display_name=EXCLUDED.display_name,
+          active=true,approved_by=EXCLUDED.approved_by,reason=EXCLUDED.reason,updated_at=now()`,
+      [row.activity_class_id, officialRow.erp_student_contact_id, officialStudentRef, officialRow.display_name, actorRef]);
+      await client.query(`INSERT INTO writing_practice.activity_roster
+        (activity_class_id,student_public_id,display_name,display_alias,active)
+        VALUES($1,$2,$3,$3,true)
+        ON CONFLICT(activity_class_id,student_public_id) DO UPDATE
+        SET display_name=EXCLUDED.display_name,display_alias=EXCLUDED.display_alias,active=true,updated_at=now()`,
+      [row.activity_class_id, officialStudentRef, officialRow.display_name]);
       await client.query(`INSERT INTO writing_practice.activity_student_alias
         (activity_class_id,alias_student_public_id,canonical_student_public_id,created_by)
         VALUES($1,$2,$3,$4) ON CONFLICT(activity_class_id,alias_student_public_id) DO NOTHING`, [row.activity_class_id, officialStudentRef, studentRef, actorRef]);
@@ -172,5 +201,30 @@ export function createProvisionalStudentService({ pool, pepper }) {
     });
   }
 
-  return { createStudent, resolveStudent, listPending, resetCode, reconcile };
+  async function deleteStudent({ studentRef, actorRef }) {
+    return withTransaction(pool, async client => {
+      const item = await client.query(`SELECT activity_class_id,status
+        FROM writing_practice.provisional_student
+        WHERE student_public_id=$1 FOR UPDATE`, [studentRef]);
+      if (!item.rowCount) throw new ApiError(404, 'PROVISIONAL_STUDENT_NOT_FOUND', 'Không tìm thấy hồ sơ tạm.');
+      const row = item.rows[0];
+      if (row.status === 'deleted') return { studentRef, reconciliationStatus: 'deleted', idempotent: true };
+      if (!['pending', 'conflict'].includes(row.status)) {
+        throw new ApiError(409, 'PROVISIONAL_STUDENT_NOT_DELETABLE', 'Hồ sơ đã được ghép nên không thể xóa khỏi màn hình này.');
+      }
+      await client.query(`UPDATE writing_practice.provisional_student
+        SET status='deleted',deleted_at=now(),deleted_by=$3,updated_at=now()
+        WHERE activity_class_id=$1 AND student_public_id=$2`, [row.activity_class_id, studentRef, actorRef]);
+      await client.query(`UPDATE writing_practice.activity_roster
+        SET active=false,updated_at=now()
+        WHERE activity_class_id=$1 AND student_public_id=$2`, [row.activity_class_id, studentRef]);
+      await client.query(`INSERT INTO writing_practice.provisional_student_audit
+        (activity_class_id,student_public_id,action,actor_ref,details)
+        VALUES($1,$2,'deleted',$3,jsonb_build_object('historyPreserved',true))`,
+      [row.activity_class_id, studentRef, actorRef]);
+      return { studentRef, reconciliationStatus: 'deleted', idempotent: false };
+    });
+  }
+
+  return { createStudent, resolveStudent, listPending, searchOfficialStudents, resetCode, reconcile, deleteStudent };
 }

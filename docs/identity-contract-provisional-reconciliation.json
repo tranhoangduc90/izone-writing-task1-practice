@@ -1,0 +1,67 @@
+{
+  "name": "Tìm, ghép và xóa an toàn hồ sơ học viên tạm",
+  "source_mode": "single",
+  "identity": {
+    "scope": "per_request",
+    "entity_key": "provisional_student_ref",
+    "unit_key": "official_student_ref",
+    "operation_key": "http_request",
+    "idempotency_key": "provisional_student_ref:action:current_status"
+  },
+  "stages": [
+    {
+      "name": "Tìm hồ sơ chính thức toàn database",
+      "kind": "lookup",
+      "preserves": [
+        "provisional_student_ref",
+        "official_student_ref"
+      ],
+      "join_on": [
+        "official_student_ref"
+      ]
+    },
+    {
+      "name": "Khóa hồ sơ tạm trước khi ghi",
+      "kind": "lock",
+      "preserves": [
+        "provisional_student_ref",
+        "official_student_ref"
+      ]
+    },
+    {
+      "name": "Ghép hoặc xóa mềm",
+      "kind": "write",
+      "preserves": [
+        "provisional_student_ref",
+        "official_student_ref"
+      ]
+    }
+  ],
+  "side_effects": [
+    {
+      "name": "Ghép hồ sơ chính thức vào bài làm tạm",
+      "target_key": "provisional_student_ref",
+      "guard": "fail_closed",
+      "readback": true
+    },
+    {
+      "name": "Ẩn hồ sơ tạm khỏi roster và hàng chờ",
+      "target_key": "provisional_student_ref",
+      "guard": "fail_closed",
+      "readback": true
+    }
+  ],
+  "tests": [
+    "single",
+    "variable_cardinality",
+    "batch_interleaved",
+    "out_of_order",
+    "partial_failure",
+    "global_lookup_outside_current_class",
+    "same_name_different_ids",
+    "duplicate_retry",
+    "already_matched",
+    "soft_delete_preserves_session",
+    "wrong_target_readback"
+  ]
+}

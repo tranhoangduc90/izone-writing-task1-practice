@@ -89,7 +89,10 @@ export function createApp({config,pool,service,lessonService=service,provisional
  app.post('/api/v1/admin/sessions/:sessionRef/sections/:section/reopen',adminAuth,teacherManage,asyncRoute(async(q,r)=>r.json({ok:true,session:await service.reopenSection({sessionRef:parse(uuid,q.params.sessionRef),section:parse(section,q.params.section),actorRef:q.reviewer.email,...parse(reopen,q.body)})})));
  app.get('/api/v1/admin/live/activities/:slug',adminAuth,asyncRoute(async(q,r)=>{const data=await lessonService.listLive({activitySlug:parse(activitySlug,q.params.slug),classRef:q.query.classRef?parse(uuid,q.query.classRef):null});r.json({ok:true,...data,permissions:{canManage:Boolean(q.reviewer?.canManage)}});}));
  app.get('/api/v1/admin/activities/:slug/provisional-students',adminAuth,asyncRoute(async(q,r)=>r.json({ok:true,students:await provisionalService.listPending({activitySlug:parse(activitySlug,q.params.slug),classRef:q.query.classRef?parse(uuid,q.query.classRef):null})})));
- app.get('/api/v1/admin/official-students/search',adminAuth,teacherManage,asyncRoute(async(q,r)=>r.json({ok:true,students:await provisionalService.searchOfficialStudents(parse(studentSearch,q.query))})));
+ app.get('/api/v1/admin/official-students/search',adminAuth,teacherManage,asyncRoute(async(q,r)=>{
+  const search=parse(studentSearch,q.query);
+  r.json({ok:true,students:await provisionalService.searchOfficialStudents({query:search.q,excludeStudentRef:search.excludeStudentRef,limit:search.limit})});
+ }));
  app.post('/api/v1/admin/provisional-students/:studentRef/reset-code',adminAuth,teacherManage,asyncRoute(async(q,r)=>r.json({ok:true,...await provisionalService.resetCode({studentRef:parse(uuid,q.params.studentRef),actorRef:q.reviewer.email})})));
  app.post('/api/v1/admin/provisional-students/:studentRef/reconcile',adminAuth,teacherManage,asyncRoute(async(q,r)=>r.json({ok:true,...await provisionalService.reconcile({studentRef:parse(uuid,q.params.studentRef),actorRef:q.reviewer.email,...parse(reconcile,q.body)})})));
  app.post('/api/v1/admin/provisional-students/:studentRef/delete',adminAuth,teacherManage,asyncRoute(async(q,r)=>r.json({ok:true,...await provisionalService.deleteStudent({studentRef:parse(uuid,q.params.studentRef),actorRef:q.reviewer.email})})));

@@ -1,4 +1,4 @@
-import { createTeacherApi } from "./api.js?v=20260818-teacher-lms-vocab";
+import { createTeacherApi } from "./api.js?v=20260825-reconciliation-search-delete";
 import { classQuery, resolveClassRef } from "./class-selection.js";
 import { createRequestId, hasMeaningfulText, safeLmsUrl } from "./core.js";
 import { sectionDefinitions } from "./lesson-core.js";
@@ -14,7 +14,7 @@ import { createVocabularySection, manifestVocabularyRows } from "./vocabulary-ui
 const $ = (id) => document.getElementById(id);
 const state = { token: "", api: null, manifest: null, activitySlug: "", students: [], pollTimer: null,
   selectedStudent: null, detailRequestId: 0, focusSection: "", pending: [], canManage: false, draftResults: new Map(),
-  requestedClass: "", classQueryResolved: false, classQueryError: "" };
+  requestedClass: "", classQueryResolved: false, classQueryError: "", reconciliationSearches: new Map() };
 
 function teacherDefinitions() {
   const dynamic = sectionDefinitions(state.manifest);
@@ -407,6 +407,10 @@ function showStudentDetail(student, focusSection = "") {
 function renderReconciliation() {
   const panel = $("teacher-reconciliation"); const root = $("teacher-reconciliation-list"); root.replaceChildren();
   panel.hidden = !state.pending.length;
+  const pendingRefs = new Set(state.pending.map(item => item.studentRef));
+  for (const studentRef of state.reconciliationSearches.keys()) {
+    if (!pendingRefs.has(studentRef)) state.reconciliationSearches.delete(studentRef);
+  }
   for (const item of state.pending) {
     const row = document.createElement("article"); row.className = "teacher-student-card";
     const title = document.createElement("strong"); title.textContent = `${item.displayName} · ${item.className}`;
@@ -414,15 +418,56 @@ function renderReconciliation() {
       const note = document.createElement("span"); note.className = "muted"; note.textContent = "Chỉ xem · Tài khoản quản trị sẽ đối soát hồ sơ này.";
       row.append(title, note); root.append(row); continue;
     }
-    const candidates = state.students.filter(student => student.classRef === item.classRef && !student.provisional);
-    const select = document.createElement("select"); const placeholder = document.createElement("option"); placeholder.value = ""; placeholder.textContent = "Chọn hồ sơ chính thức"; select.append(placeholder);
-    for (const candidate of candidates) { const option = document.createElement("option"); option.value = candidate.studentRef; option.textContent = candidate.displayName; select.append(option); }
+    const searchState = state.reconciliationSearches.get(item.studentRef) || { query: item.displayName, results: [], selectedRef: "", message: "" };
+    state.reconciliationSearches.set(item.studentRef, searchState);
+    const searchGroup = document.createElement("div"); searchGroup.className = "reconciliation-search";
+    const input = document.createElement("input"); input.type = "search"; input.value = searchState.query; input.maxLength = 100;
+    input.placeholder = "Nhập họ tên để tìm trong toàn bộ database"; input.setAttribute("aria-label", `Tìm hồ sơ chính thức cho ${item.displayName}`);
+    input.addEventListener("input", () => { searchState.query = input.value; });
+    const search = document.createElement("button"); search.type = "button"; search.className = "secondary"; search.textContent = "Tìm trong database";
+    const runSearch = async () => {
+      const query = input.value.trim(); searchState.query = query;
+      if (query.length < 2) { searchState.message = "Nhập ít nhất hai ký tự."; renderReconciliation(); return; }
+      search.disabled = true; search.textContent = "Đang tìm…";
+      try {
+        const result = await state.api.searchOfficialStudents(query, item.studentRef);
+        searchState.results = result.data.students || [];
+        searchState.selectedRef = "";
+        searchState.message = searchState.results.length ? `Tìm thấy ${searchState.results.length} hồ sơ.` : "Không tìm thấy hồ sơ phù hợp.";
+        renderReconciliation();
+      } catch (error) {
+        searchState.message = error.message || "Chưa thể tìm hồ sơ.";
+        renderReconciliation();
+      }
+    };
+    search.addEventListener("click", runSearch);
+    input.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); void runSearch(); } });
+    searchGroup.append(input, search);
+    const searchMessage = document.createElement("span"); searchMessage.className = "muted"; searchMessage.setAttribute("role", "status"); searchMessage.textContent = searchState.message;
+    const select = document.createElement("select"); const placeholder = document.createElement("option"); placeholder.value = ""; placeholder.textContent = "Chọn hồ sơ từ kết quả tìm kiếm"; select.append(placeholder);
+    for (const candidate of searchState.results) {
+      const option = document.createElement("option"); option.value = candidate.studentRef;
+      const classes = (candidate.classNames || []).join(", ") || "Không có lớp đang hoạt động";
+      option.textContent = `${candidate.displayName} · ${classes}`; select.append(option);
+    }
+    select.value = searchState.results.some(candidate => candidate.studentRef === searchState.selectedRef) ? searchState.selectedRef : "";
     const actions = document.createElement("span"); actions.className = "actions";
     const reset = document.createElement("button"); reset.type = "button"; reset.className = "secondary"; reset.textContent = "Đặt lại mã";
     reset.addEventListener("click", async () => { const result = await state.api.resetProvisionalCode(item.studentRef); alert(`Mã mới của ${item.displayName}: ${result.data.accessCode}\nMã chỉ hiển thị lần này.`); });
-    const match = document.createElement("button"); match.type = "button"; match.className = "primary"; match.textContent = "Ghép hồ sơ";
-    match.addEventListener("click", async () => { if (!select.value) return; try { await state.api.reconcileProvisional(item.studentRef, select.value); await refresh(); } catch (error) { showDashboardError(error.message); } });
-    actions.append(reset, match); row.append(title, select, actions); root.append(row);
+    const match = document.createElement("button"); match.type = "button"; match.className = "primary"; match.textContent = "Ghép hồ sơ"; match.disabled = !select.value;
+    select.addEventListener("change", () => { searchState.selectedRef = select.value; match.disabled = !select.value; });
+    match.addEventListener("click", async () => {
+      if (!select.value) return;
+      const candidate = searchState.results.find(result => result.studentRef === select.value);
+      if (!candidate || !confirm(`Ghép hồ sơ “${candidate.displayName}” với bài làm tạm “${item.displayName}”?`)) return;
+      try { await state.api.reconcileProvisional(item.studentRef, candidate.studentRef); await refresh(); } catch (error) { showDashboardError(error.message); }
+    });
+    const remove = document.createElement("button"); remove.type = "button"; remove.className = "danger-button"; remove.textContent = "Xóa hồ sơ tạm";
+    remove.addEventListener("click", async () => {
+      if (!confirm(`Xóa hồ sơ tạm “${item.displayName}” khỏi web app? Lịch sử kỹ thuật cũ vẫn được giữ để tránh mất dữ liệu.`)) return;
+      try { await state.api.deleteProvisional(item.studentRef); state.reconciliationSearches.delete(item.studentRef); await refresh(); } catch (error) { showDashboardError(error.message); }
+    });
+    actions.append(reset, match, remove); row.append(title, searchGroup, searchMessage, select, actions); root.append(row);
   }
 }
 

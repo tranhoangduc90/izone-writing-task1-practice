@@ -9,3 +9,61 @@ test('chuẩn hóa tên loại ký tự vô hình/control và thu gọn khoảng
 test('API không khởi động chức năng mã tạm nếu pepper yếu', () => {
   assert.throws(() => createProvisionalStudentService({ pool: {}, pepper: 'ngắn' }), /32 ký tự/);
 });
+
+function transactionPool(queryHandler) {
+  return {
+    connect: async () => ({
+      query: async (sql, params = []) => ['BEGIN', 'COMMIT', 'ROLLBACK'].includes(sql) ? { rowCount: 0, rows: [] } : queryHandler(sql, params),
+      release() {}
+    })
+  };
+}
+
+test('tìm hồ sơ chính thức dùng hàm database toàn cục và chỉ trả UUID công khai', async () => {
+  const officialRef = '22222222-2222-4222-8222-222222222222';
+  const pool = { query: async (sql, params) => {
+    assert.match(sql, /search_official_students/);
+    assert.match(sql, /\$1::text,\$2::uuid,\$3::integer/);
+    assert.deepEqual(params, ['Học viên giả', null, 20]);
+    return { rows: [{ studentRef: officialRef, displayName: 'Học viên giả', classNames: ['Lớp B'] }] };
+  } };
+  const service = createProvisionalStudentService({ pool, pepper: 'p'.repeat(32) });
+  const result = await service.searchOfficialStudents({ query: '  Học viên giả  ' });
+  assert.deepEqual(result, [{ studentRef: officialRef, displayName: 'Học viên giả', classNames: ['Lớp B'] }]);
+});
+
+test('ghép hồ sơ khác lớp bằng UUID và tạo ngoại lệ roster bền vững', async () => {
+  const provisionalRef = '11111111-1111-4111-8111-111111111111';
+  const officialRef = '22222222-2222-4222-8222-222222222222';
+  const writes = [];
+  const pool = transactionPool(async (sql, params) => {
+    if (/FROM writing_practice\.provisional_student provisional/u.test(sql) && /FOR UPDATE/u.test(sql)) return { rowCount: 1, rows: [{ activity_class_id: 5, status: 'pending', activity_id: 7 }] };
+    if (/resolve_official_student/u.test(sql)) return { rowCount: 1, rows: [{ erp_student_contact_id: 99, student_public_id: officialRef, display_name: 'Học viên giả' }] };
+    if (/SELECT 1 FROM writing_practice\.activity_student_alias/u.test(sql)) return { rowCount: 0, rows: [] };
+    if (/SELECT 1 FROM writing_practice\.activity_session/u.test(sql)) return { rowCount: 0, rows: [] };
+    writes.push({ sql, params }); return { rowCount: 1, rows: [] };
+  });
+  const service = createProvisionalStudentService({ pool, pepper: 'p'.repeat(32) });
+  const result = await service.reconcile({ studentRef: provisionalRef, officialStudentRef: officialRef, actorRef: 'teacher@example.invalid' });
+  assert.equal(result.reconciliationStatus, 'matched');
+  const override = writes.find(item => /INSERT INTO writing_practice\.activity_roster_override/u.test(item.sql));
+  assert.deepEqual(override.params.slice(0, 4), [5, 99, officialRef, 'Học viên giả']);
+  const alias = writes.find(item => /INSERT INTO writing_practice\.activity_student_alias/u.test(item.sql));
+  assert.deepEqual(alias.params.slice(0, 3), [5, officialRef, provisionalRef]);
+});
+
+test('xóa mềm chỉ đổi đúng hồ sơ tạm và giữ lịch sử bài làm', async () => {
+  const provisionalRef = '11111111-1111-4111-8111-111111111111';
+  const writes = [];
+  const pool = transactionPool(async (sql, params) => {
+    if (/FROM writing_practice\.provisional_student/u.test(sql) && /FOR UPDATE/u.test(sql)) return { rowCount: 1, rows: [{ activity_class_id: 5, status: 'pending' }] };
+    writes.push({ sql, params }); return { rowCount: 1, rows: [] };
+  });
+  const service = createProvisionalStudentService({ pool, pepper: 'p'.repeat(32) });
+  const result = await service.deleteStudent({ studentRef: provisionalRef, actorRef: 'teacher@example.invalid' });
+  assert.equal(result.reconciliationStatus, 'deleted');
+  assert.equal(writes.some(item => /DELETE FROM/u.test(item.sql)), false);
+  const rosterWrite = writes.find(item => /UPDATE writing_practice\.activity_roster/u.test(item.sql));
+  assert.deepEqual(rosterWrite.params, [5, provisionalRef]);
+  assert.match(writes.find(item => /provisional_student_audit/u.test(item.sql)).sql, /historyPreserved/u);
+});

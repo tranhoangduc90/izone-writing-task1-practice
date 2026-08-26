@@ -147,3 +147,122 @@ test('Draft completion rejects an unrelated path on the official LMS host', asyn
   );
   assert.equal(connected, false);
 });
+
+test('mọi webapp dùng hàng đợi chung đều dừng lượt chấm sau ba phút', async () => {
+  const queries = [];
+  const pool = transactionalPool([
+    { rowCount: 1, rows: [{ attempt_id: 'attempt-id' }] },
+    { rowCount: 1, rows: [{
+      attemptRef: 'attempt-ref', section: 'body1_topic', commentNumber: 1,
+      status: 'failed', resultStatus: null, feedback: null,
+      errorCode: 'GRADING_TIMEOUT_3_MINUTES', retryCount: 1, version: 3,
+      attemptsWithoutPass: 0, commentRef: 'comment-ref',
+      commentStatus: 'technical_error',
+      commentContent: 'Lượt chấm vừa rồi mất quá 3 phút nên đã dừng. Em hãy bấm Check lại.',
+      commentCreatedAt: '2026-08-26T00:00:00.000Z', artifacts: {}
+    }] }
+  ], queries);
+
+  const result = await createWritingPracticeService({ pool }).getAttempt('attempt-ref');
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.errorCode, 'GRADING_TIMEOUT_3_MINUTES');
+  assert.equal(result.canRetry, true);
+  assert.equal(result.comment.status, 'technical_error');
+  assert.match(result.comment.feedback, /bấm Check lại/u);
+  assert.equal(queries.some(sql => sql.includes("interval '3 minutes'")), true);
+  assert.equal(queries.some(sql => sql.includes('late_callback_token=CASE')), true);
+});
+
+test('kết quả cũ đến muộn được dùng cho lượt Check mới có cùng nội dung', async () => {
+  const queries = [];
+  const pool = transactionalPool([
+    { rowCount: 0, rows: [] },
+    { rowCount: 1, rows: [{
+      id: 'old-attempt-id', session_id: 'session-id', section_key: 'body1_topic',
+      round_number: 1, body_hash: 'same-body-hash', created_at: '2026-08-26T00:00:00.000Z'
+    }] },
+    { rowCount: 1, rows: [{
+      id: 'new-attempt-id', public_id: 'new-attempt-ref', session_id: 'session-id',
+      section_key: 'body1_topic', version: 4
+    }] },
+    { rowCount: 1, rows: [] },
+    { rowCount: 1, rows: [] },
+    { rowCount: 1, rows: [] },
+    { rowCount: 1, rows: [] },
+    { rowCount: 1, rows: [{ fail_streak: 0 }] }
+  ], queries);
+
+  const result = await createWritingPracticeService({ pool }).completeJob({
+    jobRef: 'old-attempt-ref', leaseToken: 'old-lease-ref', resultStatus: 'passed',
+    feedback: 'Kết quả từ lượt cũ.', artifacts: {}
+  });
+
+  assert.equal(result.attemptRef, 'new-attempt-ref');
+  assert.equal(result.sourceAttemptRef, 'old-attempt-ref');
+  assert.equal(result.adoptedLateResult, true);
+  assert.equal(queries.some(sql => sql.includes('active.body_hash=$4')), true);
+});
+
+test('kết quả cũ không được dùng nếu lượt Check mới không cùng nội dung', async () => {
+  const queries = [];
+  const pool = transactionalPool([
+    { rowCount: 0, rows: [] },
+    { rowCount: 1, rows: [{
+      id: 'old-attempt-id', session_id: 'session-id', section_key: 'body1_topic',
+      round_number: 1, body_hash: 'old-body-hash', created_at: '2026-08-26T00:00:00.000Z'
+    }] },
+    { rowCount: 0, rows: [] }
+  ], queries);
+
+  await assert.rejects(
+    createWritingPracticeService({ pool }).completeJob({
+      jobRef: 'old-attempt-ref', leaseToken: 'old-lease-ref', resultStatus: 'passed',
+      feedback: 'Kết quả từ nội dung cũ.', artifacts: {}
+    }),
+    error => error.code === 'LATE_RESULT_NOT_APPLICABLE'
+  );
+});
+
+test('workflow errors unlock immediately for every grading pool', async () => {
+  for (const gradingPool of ['lesson13', 'task1']) {
+    const queries = [];
+    const pool = transactionalPool([
+      { rowCount: 1, rows: [{
+        id: 'attempt-id', public_id: 'attempt-ref', status: 'failed',
+        retry_count: 1, version: 3, grading_pool: gradingPool
+      }] },
+      { rowCount: 1, rows: [] }
+    ], queries);
+    const result = await createWritingPracticeService({ pool }).failJob({
+      jobRef: 'attempt-ref', leaseToken: 'lease-ref', errorCode: 'MODEL_ERROR', retryable: true
+    });
+    assert.equal(result.status, 'failed');
+    assert.equal(result.canRetry, true);
+    assert.equal(queries.filter(sql => sql.includes('UPDATE writing_practice.comment')).length, 1);
+  }
+});
+
+test('student retry creates a new attempt so the timed-out callback remains traceable', async () => {
+  const queries = [];
+  const pool = transactionalPool([
+    { rowCount: 1, rows: [{
+      id: 'old-id', public_id: 'old-ref', session_id: 'session-id', section_key: 'overview',
+      round_number: 1, comment_number: 1, status: 'failed', retry_count: 1,
+      body_hash: 'a'.repeat(64), snapshot: { overview: 'Nội dung thử' }, locked: false
+    }] },
+    { rowCount: 0, rows: [] },
+    { rowCount: 1, rows: [{ next: 2 }] },
+    { rowCount: 1, rows: [{
+      id: 'new-id', public_id: 'new-ref', section_key: 'overview',
+      comment_number: 2, status: 'queued', version: 1
+    }] },
+    { rowCount: 1, rows: [{ public_id: 'new-comment-ref' }] }
+  ], queries);
+
+  const result = await createWritingPracticeService({ pool }).retryAttempt('old-ref');
+
+  assert.equal(result.attemptRef, 'new-ref');
+  assert.equal(result.commentRef, 'new-comment-ref');
+  assert.equal(queries.some(sql => sql.includes('INSERT INTO writing_practice.check_attempt')), true);
+});

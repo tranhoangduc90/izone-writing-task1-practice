@@ -313,7 +313,8 @@ export function createLessonPracticeService({ pool, provisionalService = null, n
   async function retryFailedAttempt({ attemptRef, actorRef }) {
     return withTransaction(pool, async client => {
       const attempt = await client.query(`SELECT attempt.id,attempt.public_id,attempt.session_id,
-        attempt.section_key,attempt.comment_number,attempt.status,state.locked
+        attempt.section_key,attempt.round_number,attempt.comment_number,attempt.status,
+        attempt.body_hash,attempt.snapshot,state.locked
         FROM writing_practice.check_attempt attempt
         JOIN writing_practice.session_section state ON state.session_id=attempt.session_id
           AND state.section_key=attempt.section_key
@@ -329,17 +330,26 @@ export function createLessonPracticeService({ pool, provisionalService = null, n
       const active = await client.query(`SELECT 1 FROM writing_practice.check_attempt
         WHERE session_id=$1 AND section_key=$2 AND status IN ('queued','leased')`, [row.session_id, row.section_key]);
       if (active.rowCount) throw new ApiError(409, 'SECTION_ALREADY_QUEUED', 'Phần này đã có một lượt đang chấm.');
-      await client.query(`UPDATE writing_practice.check_attempt
-        SET status='queued',retry_count=0,error_code=NULL,worker_id=NULL,lease_token=NULL,
-          lease_expires_at=NULL,completed_at=NULL,version=version+1,updated_at=now()
-        WHERE id=$1`, [row.id]);
-      await client.query(`UPDATE writing_practice.comment
-        SET status='queued',content='Đang chấm' WHERE attempt_id=$1`, [row.id]);
+      const sequence = await client.query(`SELECT COALESCE(max(comment_number),0)+1 AS next
+        FROM writing_practice.check_attempt WHERE session_id=$1 AND section_key=$2`,
+      [row.session_id,row.section_key]);
+      const inserted = await client.query(`INSERT INTO writing_practice.check_attempt(
+          session_id,section_key,round_number,comment_number,request_id,body_hash,snapshot)
+        VALUES($1,$2,$3,$4,gen_random_uuid(),$5,$6::jsonb)
+        RETURNING id,public_id,section_key,comment_number,status,version`,
+      [row.session_id,row.section_key,row.round_number,sequence.rows[0].next,row.body_hash,JSON.stringify(row.snapshot)]);
+      const replacement = inserted.rows[0];
+      const comment = await client.query(`INSERT INTO writing_practice.comment(
+          attempt_id,session_id,section_key,comment_number,status,content)
+        VALUES($1,$2,$3,$4,'queued','Đang chấm') RETURNING public_id`,
+      [replacement.id,row.session_id,row.section_key,replacement.comment_number]);
       await client.query(`INSERT INTO writing_practice.admin_audit_event
         (session_id,section_key,action,actor_ref,reason)
         VALUES($1,$2,'retry_failed_attempt',$3,$4)`,
       [row.session_id, row.section_key, actorRef, 'Giảng viên xếp chấm lại sau lỗi kỹ thuật.']);
-      return { attemptRef: row.public_id, section: row.section_key, commentNumber: row.comment_number, status: 'queued', idempotent: false };
+      return { attemptRef: replacement.public_id, commentRef: comment.rows[0].public_id,
+        section: replacement.section_key, commentNumber: replacement.comment_number,
+        status: replacement.status, version: replacement.version, idempotent: false };
     });
   }
 

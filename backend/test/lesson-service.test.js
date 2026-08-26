@@ -46,3 +46,40 @@ test('backend từ chối Check khi phần bắt buộc trước đó chưa đ�
   );
   assert.equal(calls.at(-1), 'ROLLBACK');
 });
+
+test('giảng viên xếp chấm lại tạo attempt mới thay vì tái sử dụng lượt lỗi', async () => {
+  const responses = [
+    { rowCount: 1, rows: [{
+      id: 'old-id', public_id: 'old-ref', session_id: 'session-id', section_key: 'body1_topic',
+      round_number: 1, comment_number: 1, status: 'failed', body_hash: 'a'.repeat(64),
+      snapshot: { body1_topic: 'Nội dung thử' }, locked: false
+    }] },
+    { rowCount: 0, rows: [] },
+    { rowCount: 1, rows: [{ next: 2 }] },
+    { rowCount: 1, rows: [{
+      id: 'new-id', public_id: 'new-ref', section_key: 'body1_topic',
+      comment_number: 2, status: 'queued', version: 1
+    }] },
+    { rowCount: 1, rows: [{ public_id: 'new-comment-ref' }] },
+    { rowCount: 1, rows: [] }
+  ];
+  const calls = [];
+  const client = {
+    async query(sql) {
+      calls.push(String(sql));
+      if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(sql)) return { rowCount: 0, rows: [] };
+      const next = responses.shift();
+      if (!next) throw new Error(`Truy vấn ngoài dự kiến: ${String(sql).slice(0, 80)}`);
+      return next;
+    },
+    release() {}
+  };
+
+  const result = await createLessonPracticeService({ pool: { connect: async () => client } }).retryFailedAttempt({
+    attemptRef: 'old-ref', actorRef: 'teacher@example.invalid'
+  });
+
+  assert.equal(result.attemptRef, 'new-ref');
+  assert.equal(result.commentRef, 'new-comment-ref');
+  assert.equal(calls.some(sql => sql.includes('INSERT INTO writing_practice.check_attempt')), true);
+});

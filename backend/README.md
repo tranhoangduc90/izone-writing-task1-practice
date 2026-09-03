@@ -43,3 +43,13 @@ Seed [Lesson 13 draft](../docs/migrations/2026-08-14-seed-lesson13-young-leaders
 ## Production
 
 Compose bind cổng localhost, giới hạn 0.5 CPU/256 MB, filesystem read-only, bỏ capabilities và xoay log tối đa 30 MB. Database admin chạy `writing_practice.purge_expired_student_data()` theo lịch; hàm xóa bài/Comment sau ngày kết thúc lớp cộng 180 ngày. Không commit `.env`, token n8n hoặc dữ liệu học viên.
+
+### Sửa quyền lưu kết quả ghép hồ sơ
+
+Nếu tìm được hồ sơ khác lớp nhưng bấm Ghép hồ sơ trả lỗi nội bộ, kiểm log API có mã PostgreSQL `42501`. Thao tác ghép cần lưu ngoại lệ danh sách lớp; migration cũ chưa cấp quyền này cho tài khoản API.
+
+Sau khi sao lưu database và quyền hiện tại của bảng, áp dụng [migration quyền ghép](../docs/migrations/2026-09-03-reconciliation-override-permissions.sql) bằng tài khoản quản trị. Migration chỉ cấp quyền đọc/thêm/cập nhật các cột cần thiết của `activity_roster_override`; không cấp quyền xóa hay đọc bảng mapping. Không cần khởi động lại API hoặc n8n. Không đổi trạng thái hồ sơ bằng SQL để bỏ qua thao tác ghép.
+
+Kiểm thử thật: chạy `node integration/reconciliation-permissions-staging.mjs` trong backend dùng database `writing_practice_staging`, đúng tài khoản `writing_practice_api`, và fixture từ `integration/staging-seed.sql`. Script tạo hồ sơ giả trong transaction, gọi HTTP ghép thật ở cả nhánh thêm/cập nhật, kiểm bài giữ nguyên, chỉ còn một thẻ trên dashboard và cả hai mã cùng mở đúng bài; cuối cùng luôn hoàn tác dữ liệu thử. Nếu sai database/quyền, thiếu fixture hoặc kiểm tra thất bại, script dừng với exit code khác 0. Không chạy script trên production.
+
+Để hoàn tác quyền, chỉ thu hồi đúng các quyền cột vừa cấp nếu bản sao lưu xác nhận trước đó chưa có; không thu hồi quyền đã tồn tại của tài khoản và không xóa các hồ sơ đã ghép thành công. Sau triển khai, ghép qua dashboard bằng tài khoản quản trị thật rồi đọc lại trạng thái, liên kết và bài làm.

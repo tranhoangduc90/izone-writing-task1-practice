@@ -50,6 +50,13 @@ test('ghép hồ sơ khác lớp bằng UUID và tạo ngoại lệ roster bền
   assert.deepEqual(override.params.slice(0, 4), [5, 99, officialRef, 'Học viên giả']);
   const alias = writes.find(item => /INSERT INTO writing_practice\.activity_student_alias/u.test(item.sql));
   assert.deepEqual(alias.params.slice(0, 3), [5, officialRef, provisionalRef]);
+  // Cùng tên vẫn ghép được: tắt đúng hồ sơ tạm trước khi bật hồ sơ chính thức.
+  const deactivateIndex = writes.findIndex(item => /UPDATE writing_practice\.activity_roster SET active=false/u.test(item.sql));
+  const activateIndex = writes.findIndex(item => /INSERT INTO writing_practice\.activity_roster\s*\(/u.test(item.sql));
+  assert.ok(deactivateIndex >= 0 && deactivateIndex < activateIndex);
+  assert.deepEqual(writes[deactivateIndex].params, [5, provisionalRef]);
+  assert.match(writes[deactivateIndex].sql, /WHERE activity_class_id=\$1 AND student_public_id=\$2/u);
+  assert.equal(writes.some(item => /(?:UPDATE|DELETE FROM) writing_practice\.activity_session/u.test(item.sql)), false);
 });
 
 test('xóa mềm chỉ đổi đúng hồ sơ tạm và giữ lịch sử bài làm', async () => {

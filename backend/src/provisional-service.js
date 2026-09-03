@@ -181,6 +181,10 @@ export function createProvisionalStudentService({ pool, pepper }) {
         SET student_public_id=EXCLUDED.student_public_id,display_name=EXCLUDED.display_name,
           active=true,approved_by=EXCLUDED.approved_by,reason=EXCLUDED.reason,updated_at=now()`,
       [row.activity_class_id, officialRow.erp_student_contact_id, officialStudentRef, officialRow.display_name, actorRef]);
+      // Hai hồ sơ có thể cùng tên: nhường tên hiển thị trước khi bật hồ sơ chính thức.
+      // Chỉ đổi đúng UUID trong đúng lớp; lỗi ở bước sau sẽ rollback, bài làm không bị sửa.
+      await client.query(`UPDATE writing_practice.activity_roster SET active=false,updated_at=now()
+        WHERE activity_class_id=$1 AND student_public_id=$2`, [row.activity_class_id, studentRef]);
       await client.query(`INSERT INTO writing_practice.activity_roster
         (activity_class_id,student_public_id,display_name,display_alias,active)
         VALUES($1,$2,$3,$3,true)
@@ -192,8 +196,6 @@ export function createProvisionalStudentService({ pool, pepper }) {
         VALUES($1,$2,$3,$4) ON CONFLICT(activity_class_id,alias_student_public_id) DO NOTHING`, [row.activity_class_id, officialStudentRef, studentRef, actorRef]);
       await client.query(`UPDATE writing_practice.provisional_student SET status='matched',matched_student_public_id=$2,
         reconciled_at=now(),reconciled_by=$3,updated_at=now() WHERE student_public_id=$1`, [studentRef, officialStudentRef, actorRef]);
-      await client.query(`UPDATE writing_practice.activity_roster SET active=false,updated_at=now()
-        WHERE activity_class_id=$1 AND student_public_id=$2`, [row.activity_class_id, studentRef]);
       await client.query(`INSERT INTO writing_practice.provisional_student_audit
         (activity_class_id,student_public_id,action,actor_ref,details)
         VALUES($1,$2,'matched',$3,jsonb_build_object('officialStudentRef',$4::text))`, [row.activity_class_id, studentRef, actorRef, officialStudentRef]);

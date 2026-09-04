@@ -39,6 +39,18 @@ Ngày phát hành: 04/09/2026.
 - Cấu hình readback: `saveDataErrorExecution=all`, `saveDataSuccessExecution=all`, `saveManualExecutions=true`.
 - Không sửa, refresh hoặc restart n8n trong lần phát hành này.
 
+## Kiểm thử E2E production bằng học viên demo
+
+- Dùng lớp QA riêng `Kiểm thử nội bộ · Đô thị đông đúc` và học viên hoàn toàn giả `Học viên demo E2E`; không dùng dữ liệu học viên thật.
+- Phiên demo: `1f5f3699-063c-4abc-835a-9921cbd36e89`.
+- Topic Sentence đạt ở lượt 1; Supporting Idea 1 nhận `needs_revision` ở lượt 1 rồi đạt ở lượt 2; Supporting Idea 2 đạt ở lượt 1; Draft đạt ở lượt 1.
+- Database ghi đúng 5 lượt chấm `completed`, 5 nhận xét `completed`, 0 lỗi kỹ thuật; cả bốn section đều `locked=true`.
+- Bảng từ vựng mở đúng 12 mục. Draft 1 và Draft 2 được lưu trong `response_data` với độ dài lần lượt 966 và 939 ký tự; tải lại trang vẫn khôi phục đủ bốn trạng thái đạt và liên kết LMS.
+- Liên kết kết quả LMS đã được kiểm tra đúng miền `practice.izone.edu.vn` và đúng tuyến `/shared/writing-essays/`.
+- Execution n8n `1838871` của workflow `CQnOdCf8XY3DeOWT` kết thúc `success` lúc `2026-09-04T12:11:44.066Z`, khớp thời điểm Draft attempt hoàn tất lúc `2026-09-04T12:11:44.003Z`.
+- Backup trước E2E: `/opt/backups/writing-practice/2026-09-04-task2-urban-crowding-e2e-demo/writing-practice-production-before-e2e-demo.dump`, 5.487.540 byte, SHA-256 `adce34a897034f49a1d23c1d5079a28b5c7e980cecc0504b2972513a11eef758`; `pg_restore -l` đọc thành công.
+- Sau kiểm thử, class scope QA được đổi sang `closed`. Roster, session, 5 attempts và 5 comments demo được giữ làm bằng chứng; danh sách công khai chỉ còn `CS.070626` (32 học viên) và `CS.160826` (14 học viên).
+
 ## URL
 
 - Học viên: `https://tranhoangduc90.github.io/izone-ai-team-pages/writing-handouts/lesson.html?task=writing-task2-urban-crowding-traffic-congestion`.
@@ -48,6 +60,6 @@ Ngày phát hành: 04/09/2026.
 
 ## Giới hạn kiểm thử và rollback
 
-- Không chạy Check AI bằng danh tính học viên thật trên production. Luồng lưu, xung đột phiên bản và khóa prerequisite đã được kiểm bằng fixture giả trên staging.
+- Không chạy Check AI bằng danh tính học viên thật trên production. Lượt E2E production dùng duy nhất fixture giả, tách biệt và đã đóng khỏi roster công khai sau khi hoàn tất.
 - Nếu cần tạm dừng, đổi class scope hoặc activity sang `closed`; không xóa roster, session, comment hoặc bài làm.
 - Nếu cần lùi giao diện, revert đúng commit Pages và chờ GitHub Pages build xong rồi đọc lại URL.

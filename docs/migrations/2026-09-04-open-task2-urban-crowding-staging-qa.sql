@@ -1,6 +1,7 @@
 -- Dữ liệu nhận vào: activity đô thị đã được seed trong database staging.
 -- Việc chính: chỉ trên writing_practice_staging, mở một lớp và một học viên giả
--- để chạy API/E2E mà không dùng dữ liệu học viên thật.
+-- không đặt ngày hết hạn và chạy API/E2E mà không dùng dữ liệu học viên thật.
+-- PostgreSQL DATE 'infinity' biểu diễn đúng trạng thái không bao giờ hết hạn.
 -- Kết quả: có thể kiểm tra toàn bộ web app trước cổng production.
 -- Khi lỗi hoặc chạy nhầm database: transaction rollback và psql trả lỗi rõ ràng.
 BEGIN;
@@ -20,6 +21,7 @@ $database_guard$;
 
 UPDATE writing_practice.activity
 SET status = 'active',
+    end_date = DATE 'infinity',
     updated_at = now()
 WHERE slug = 'writing-task2-urban-crowding-traffic-congestion'
   AND content_version = '2026-09-04.1'
@@ -43,7 +45,7 @@ SELECT
   id,
   -4092026,
   'Kiểm thử nội bộ: đô thị đông đúc',
-  DATE '2026-12-31',
+  DATE 'infinity',
   'active'
 FROM writing_practice.activity
 WHERE slug = 'writing-task2-urban-crowding-traffic-congestion'
@@ -90,6 +92,7 @@ BEGIN
   FROM writing_practice.activity
   WHERE slug = 'writing-task2-urban-crowding-traffic-congestion'
     AND content_version = '2026-09-04.1'
+    AND end_date = DATE 'infinity'
     AND status = 'active';
 
   SELECT count(*)
@@ -106,6 +109,7 @@ BEGIN
     AND scope.public_id = '9705cdf0-8367-4242-b9dd-0c700196210e'
     AND scope.erp_course_class_id = -4092026
     AND scope.class_name_snapshot = 'Kiểm thử nội bộ: đô thị đông đúc'
+    AND scope.end_date = DATE 'infinity'
     AND scope.status = 'active';
 
   SELECT count(*)

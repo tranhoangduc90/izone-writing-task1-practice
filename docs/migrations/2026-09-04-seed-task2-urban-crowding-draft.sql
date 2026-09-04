@@ -1,8 +1,9 @@
 -- Dữ liệu nhận vào: manifest đề đô thị đông đúc đã qua validator và activity mẫu
 -- Task 2 đang ghim đúng bộ prompt dùng chung.
 -- Việc chính: tạo activity ở trạng thái bản nháp và sao chép đúng bốn định nghĩa
--- section từ template đã khóa phiên bản; chưa gắn lớp hoặc roster thật.
+-- section từ template đã khóa phiên bản; không đặt ngày hết hạn, chưa gắn lớp hoặc roster thật.
 -- Kết quả: staging có đủ cấu hình để kiểm thử, còn học viên production chưa thấy đề.
+-- PostgreSQL DATE 'infinity' biểu diễn đúng trạng thái không bao giờ hết hạn.
 -- Khi lỗi: transaction rollback toàn bộ; xem lỗi validation trong kết quả psql.
 BEGIN;
 
@@ -78,7 +79,7 @@ VALUES(
   '2026-08-19.1',
   'task2',
   'draft',
-  DATE '2026-12-31'
+  DATE 'infinity'
 )
 ON CONFLICT(slug, content_version) DO UPDATE
 SET public_id = EXCLUDED.public_id,
@@ -164,7 +165,7 @@ BEGIN
     AND prompt_record_ref = 'task2-web-template-v1'
     AND prompt_version = '2026-08-19.1'
     AND grading_pool = 'task2'
-    AND end_date = DATE '2026-12-31'
+    AND end_date = DATE 'infinity'
     AND status IN ('draft', 'active');
 
   SELECT count(*)

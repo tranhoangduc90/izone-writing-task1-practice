@@ -1,8 +1,10 @@
 -- Dữ liệu nhận vào: activity đô thị ở trạng thái bản nháp, manifest đúng checksum,
 -- hai lớp Task 2 hiện hành và các ngoại lệ roster đã được duyệt ở đề Living Alone.
 -- Việc chính: mở đúng CS.070626 và CS.160826, sao chép ngoại lệ đã duyệt rồi
--- dựng roster mới từ mapping/Classroom hiện hành; không sao chép hồ sơ tạm.
+-- dựng roster mới từ mapping/Classroom hiện hành, không đặt ngày hết hạn;
+-- không sao chép hồ sơ tạm.
 -- Kết quả: hai lớp nhìn thấy đề mới, mỗi lớp chỉ nhận roster chính thức của mình.
+-- PostgreSQL DATE 'infinity' biểu diễn đúng trạng thái không bao giờ hết hạn.
 -- Khi lỗi: transaction rollback toàn bộ; đóng activity/scope để rollback, không xóa bài.
 -- Cổng an toàn: file này chỉ được chạy production sau khi Đức duyệt trong task hiện tại.
 BEGIN;
@@ -49,8 +51,7 @@ BEGIN
   WHERE activity.slug = 'writing-task2-living-alone-development'
     AND activity.status = 'active'
     AND scope.erp_course_class_id IN (1184, 1283)
-    AND scope.status = 'active'
-    AND scope.end_date = DATE '2026-12-31';
+    AND scope.status = 'active';
 
   SELECT count(*)
   INTO v_invalid_override_count
@@ -83,6 +84,7 @@ $source_validation$;
 
 UPDATE writing_practice.activity
 SET status = 'active',
+    end_date = DATE 'infinity',
     updated_at = now()
 WHERE slug = 'writing-task2-urban-crowding-traffic-congestion'
   AND content_version = '2026-09-04.1'
@@ -103,7 +105,7 @@ WITH target_activity AS (
   SELECT
     scope.erp_course_class_id,
     scope.class_name_snapshot,
-    scope.end_date
+    DATE 'infinity' AS end_date
   FROM writing_practice.activity_class_scope scope
   JOIN writing_practice.activity activity ON activity.id = scope.activity_id
   WHERE activity.slug = 'writing-task2-living-alone-development'
@@ -215,6 +217,7 @@ BEGIN
     AND prompt_record_ref = 'task2-web-template-v1'
     AND prompt_version = '2026-08-19.1'
     AND grading_pool = 'task2'
+    AND end_date = DATE 'infinity'
     AND status = 'active';
 
   SELECT count(*)
@@ -275,7 +278,7 @@ BEGIN
     WHERE activity.slug = 'writing-task2-urban-crowding-traffic-congestion'
       AND scope.status = 'active'
   ), source_scope AS (
-    SELECT scope.erp_course_class_id, scope.class_name_snapshot, scope.end_date
+    SELECT scope.erp_course_class_id, scope.class_name_snapshot, DATE 'infinity' AS end_date
     FROM writing_practice.activity_class_scope scope
     JOIN writing_practice.activity activity ON activity.id = scope.activity_id
     WHERE activity.slug = 'writing-task2-living-alone-development'

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
-import { createApp } from '../src/app.js';
+import { createApp, writingRateIdentity, writingWriteRateKey, writingWriteRateLimit } from '../src/app.js';
 import { ApiError } from '../src/service.js';
 
 const uuid='11111111-1111-4111-8111-111111111111';
@@ -9,7 +9,15 @@ const config={trustProxyHops:0,allowedOrigins:new Set(['https://app.example']),i
 function fakeService(){return {getRoster:async()=>({activity:{slug:'task-1',title:'T'},classes:[]}),openSession:async()=>({sessionRef:uuid}),sessionDetails:async()=>({sessionRef:uuid,draftVersion:1,sections:[],comments:[],attempts:[]}),saveDraft:async data=>({sessionRef:data.sessionRef,draftVersion:2}),saveResponses:async data=>({sessionRef:data.sessionRef,draftVersion:2,responses:data.responses}),submitCheck:async()=>({attemptRef:uuid,status:'queued'}),publishLive:async()=>({accepted:true}),listLive:async()=>({students:[]}),getAttempt:async()=>({attemptRef:uuid,status:'queued',version:2}),claimJobs:async()=>[],completeJob:async data=>data,failJob:async()=>({}),recoverJobs:async()=>[],retryAttempt:async()=>({attemptRef:uuid,status:'queued'}),retryFailedAttempt:async()=>({attemptRef:uuid,status:'queued'}),reopenSection:async()=>({sessionRef:uuid})};}
 function app(service=fakeService(),adminAuth,teacherCommentService=null,lmsResultService=null){return createApp({config,pool:{query:async()=>({rows:[]})},service,adminAuth,teacherCommentService,lmsResultService});}
 function appWithProvisional(service=fakeService(),adminAuth,provisionalOverrides={}){const provisionalService={createStudent:async data=>({studentRef:uuid,displayName:data.displayName,provisional:true,requiresAccessCode:true}),listPending:async()=>[],searchOfficialStudents:async()=>[{studentRef:uuid,displayName:'Học viên chính thức',classNames:['Lớp khác']}],resetCode:async()=>({studentRef:uuid,accessCode:'2468'}),reconcile:async()=>({reconciliationStatus:'matched'}),deleteStudent:async()=>({reconciliationStatus:'deleted'}),...provisionalOverrides};return createApp({config,pool:{query:async()=>({rows:[]})},service,provisionalService,adminAuth});}
-test('CORS allows PUT and required conditional headers',async()=>{const r=await request(app()).options('/api/v1/sessions/x').set('Origin','https://app.example');assert.equal(r.status,204);assert.match(r.headers['access-control-allow-methods'],/PUT/);assert.match(r.headers['access-control-allow-headers'],/If-None-Match/);});
+test('CORS allows PUT and exposes ETag plus Retry-After to the browser',async()=>{const r=await request(app()).options('/api/v1/sessions/x').set('Origin','https://app.example');assert.equal(r.status,204);assert.match(r.headers['access-control-allow-methods'],/PUT/);assert.match(r.headers['access-control-allow-headers'],/If-None-Match/);assert.match(r.headers['access-control-expose-headers'],/ETag/);assert.match(r.headers['access-control-expose-headers'],/Retry-After/);});
+test('write rate limit isolates students sharing one IP and keeps a guarded fallback',()=>{
+  const first={ip:'203.0.113.10',params:{sessionRef:uuid},body:{}};
+  const second={ip:'203.0.113.10',params:{sessionRef:'22222222-2222-4222-8222-222222222222'},body:{}};
+  assert.equal(writingRateIdentity(first),`session:${uuid}`);
+  assert.notEqual(writingWriteRateKey(first),writingWriteRateKey(second));
+  assert.equal(writingWriteRateLimit(first),240);
+  assert.equal(writingWriteRateLimit({ip:'203.0.113.10',params:{},body:{}}),2000);
+});
 test('save requires requestId and three draft fields',async()=>{const r=await request(app()).put(`/api/v1/sessions/${uuid}/draft`).send({baseVersion:0});assert.equal(r.status,400);});
 test('attempt returns 304 when ETag unchanged',async()=>{const first=await request(app()).get(`/api/v1/attempts/${uuid}`);assert.equal(first.status,200);const second=await request(app()).get(`/api/v1/attempts/${uuid}`).set('If-None-Match',first.headers.etag);assert.equal(second.status,304);});
 test('internal job endpoint is Bearer fail-closed',async()=>{assert.equal((await request(app()).post('/api/v1/internal/grading-jobs/claim').send({workerId:'n8n',maxJobs:1,leaseSeconds:420})).status,401);assert.equal((await request(app()).post('/api/v1/internal/grading-jobs/claim').set('Authorization',`Bearer ${config.internalApiToken}`).send({workerId:'n8n',maxJobs:1,leaseSeconds:420})).status,200);});

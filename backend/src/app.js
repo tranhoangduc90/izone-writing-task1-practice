@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import express from 'express';
-import { rateLimit } from 'express-rate-limit';
+import { ipKeyGenerator, rateLimit } from 'express-rate-limit';
 import helmet from 'helmet';
 import { z } from 'zod';
 import { ApiError } from './service.js';
@@ -42,7 +42,34 @@ const teacherCommentStatus=z.object({status:z.enum(['open','addressed']),request
 const parse=(schema,value,code='INVALID_REQUEST')=>{const r=schema.safeParse(value);if(!r.success)throw new ApiError(400,code,'Dữ liệu gửi lên không hợp lệ.');return r.data;};
 const asyncRoute=fn=>(req,res,next)=>Promise.resolve(fn(req,res,next)).catch(next);
 function sameSecret(actual,expected){const a=Buffer.from(String(actual||'')),b=Buffer.from(String(expected||''));return a.length>0&&a.length===b.length&&crypto.timingSafeEqual(a,b);}
-function cors(config){return(req,res,next)=>{const origin=req.get('origin');if(origin&&!config.allowedOrigins.has(origin))return res.status(403).json({ok:false,error:'ORIGIN_NOT_ALLOWED'});if(origin){res.set('Access-Control-Allow-Origin',origin);res.set('Vary','Origin');}res.set('Access-Control-Allow-Methods','GET, POST, PUT, OPTIONS');res.set('Access-Control-Allow-Headers','Authorization, Content-Type, If-None-Match, If-Match');res.set('Cache-Control','no-store');return req.method==='OPTIONS'?res.status(204).end():next();};}
+
+// Dữ liệu vào: mã phiên/lượt chấm/học viên do route nhận; handler phía sau vẫn chịu trách nhiệm kiểm định dạng và quyền.
+// Việc chính: chọn một khóa ổn định theo đúng đối tượng nghiệp vụ; không dùng requestId vì mỗi lần lưu có mã mới.
+// Kết quả: nhiều học viên dùng chung Wi-Fi không tranh cùng một quota ghi.
+// Khi thiếu identity: quay về khóa IP với trần dự phòng cao hơn, không bỏ hoàn toàn lớp chống quá tải.
+export function writingRateIdentity(req = {}) {
+  const candidates = [
+    ['session', req.params?.sessionRef],
+    ['attempt', req.params?.attemptRef],
+    ['student', req.params?.studentRef],
+    ['student', req.body?.studentRef],
+  ];
+  const match = candidates.find(([, value]) => typeof value === 'string' && value.trim());
+  return match ? `${match[0]}:${match[1].trim()}` : '';
+}
+
+export function writingWriteRateKey(req) {
+  const identity = writingRateIdentity(req);
+  if (identity) {
+    return `identity:${crypto.createHash('sha256').update(identity).digest('hex').slice(0, 24)}`;
+  }
+  return `ip:${ipKeyGenerator(req.ip)}`;
+}
+
+export function writingWriteRateLimit(req) {
+  return writingRateIdentity(req) ? 240 : 2_000;
+}
+function cors(config){return(req,res,next)=>{const origin=req.get('origin');if(origin&&!config.allowedOrigins.has(origin))return res.status(403).json({ok:false,error:'ORIGIN_NOT_ALLOWED'});if(origin){res.set('Access-Control-Allow-Origin',origin);res.set('Vary','Origin');}res.set('Access-Control-Allow-Methods','GET, POST, PUT, OPTIONS');res.set('Access-Control-Allow-Headers','Authorization, Content-Type, If-None-Match, If-Match');res.set('Access-Control-Expose-Headers','ETag, Retry-After');res.set('Cache-Control','no-store');return req.method==='OPTIONS'?res.status(204).end():next();};}
 function csvCell(value){const text=String(value??'');return /[",\r\n]/.test(text)?`"${text.replaceAll('"','""')}"`:text;}
 
 export function createApp({config,pool,service,lessonService=service,provisionalService=null,lmsResultService=null,teacherCommentService=null,adminAuth=(_q,r)=>r.status(503).json({ok:false,error:'ADMIN_AUTH_NOT_CONFIGURED'})}){
@@ -50,7 +77,12 @@ export function createApp({config,pool,service,lessonService=service,provisional
  const teacherManage=(q,r,next)=>q.reviewer?.canManage===true?next():r.status(403).json({ok:false,error:'MANAGE_PERMISSION_REQUIRED'});
  // Một lớp có thể dùng chung một địa chỉ mạng. Ngưỡng đọc này vẫn chịu được 40 học viên polling 2 giây/lần.
  app.use(rateLimit({windowMs:60_000,limit:2400,standardHeaders:'draft-8',legacyHeaders:false,message:{ok:false,error:'RATE_LIMITED'}}));app.use(express.json({limit:'96kb',strict:true}));
- app.get('/health',(_q,r)=>r.json({ok:true}));app.get('/ready',asyncRoute(async(_q,r)=>{await pool.query('SELECT 1');r.json({ok:true});}));const writes=rateLimit({windowMs:60_000,limit:240,standardHeaders:'draft-8',legacyHeaders:false,message:{ok:false,error:'RATE_LIMITED'}});
+ app.get('/health',(_q,r)=>r.json({ok:true}));app.get('/ready',asyncRoute(async(_q,r)=>{await pool.query('SELECT 1');r.json({ok:true});}));
+ // Hai lớp: mỗi phiên có quota riêng, đồng thời toàn bộ request ghi từ một IP vẫn có trần chống lạm dụng.
+ const writes=[
+  rateLimit({windowMs:60_000,limit:2_000,keyGenerator:q=>ipKeyGenerator(q.ip),standardHeaders:'draft-8',legacyHeaders:false,message:{ok:false,error:'RATE_LIMITED'}}),
+  rateLimit({windowMs:60_000,limit:writingWriteRateLimit,keyGenerator:writingWriteRateKey,standardHeaders:'draft-8',legacyHeaders:false,message:{ok:false,error:'RATE_LIMITED'}}),
+ ];
  const lmsReads=rateLimit({windowMs:60_000,limit:240,standardHeaders:'draft-8',legacyHeaders:false,message:{ok:false,error:'LMS_RESULT_RATE_LIMITED'}});
  const provisionalWrites=rateLimit({windowMs:10*60_000,limit:60,standardHeaders:'draft-8',legacyHeaders:false,message:{ok:false,error:'PROVISIONAL_REGISTRATION_RATE_LIMITED'}});
  app.get('/api/v1/activities/:slug/roster',asyncRoute(async(q,r)=>r.json({ok:true,...await service.getRoster(q.params.slug)})));

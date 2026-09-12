@@ -215,7 +215,7 @@ export function createLessonPracticeService({ pool, provisionalService = null, n
     return { accepted: true };
   }
 
-  async function listLive({ activitySlug, classRef }) {
+  async function listLive({ activitySlug, classRef, reviewerEmail = '', canAccessAllClasses = false }) {
     const [activityResult, roster] = await Promise.all([
       pool.query(`SELECT activity.id,activity.grading_pool AS "gradingPool" FROM writing_practice.activity activity
         WHERE activity.slug=$1 AND activity.status='active'`, [activitySlug]),
@@ -282,7 +282,13 @@ export function createLessonPracticeService({ pool, provisionalService = null, n
       ) support_summary ON true
       WHERE activity.slug=$1 AND activity.status='active'
         AND ($2::uuid IS NULL OR scope.public_id=$2::uuid)
-      ORDER BY scope.class_name_snapshot,roster.display_alias`, [activitySlug, classRef || null])
+        AND ($3::boolean OR EXISTS (
+          SELECT 1 FROM mapping.reviewer_class_access access
+          WHERE access.reviewer_email=$4
+            AND access.erp_course_class_id=scope.erp_course_class_id
+        ))
+      ORDER BY scope.class_name_snapshot,roster.display_alias`,
+      [activitySlug, classRef || null, canAccessAllClasses, reviewerEmail])
     ]);
     if (!activityResult.rowCount) throw new ApiError(404, 'ACTIVITY_NOT_FOUND', 'Hoạt động chưa được mở.');
     const activity = activityResult.rows[0];

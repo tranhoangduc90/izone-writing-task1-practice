@@ -22,11 +22,13 @@ export function createTeacherAuthMiddleware({ config, pool, verifyGoogleToken })
       WHERE email=$1 AND status='active' AND (google_subject IS NULL OR google_subject=$2)
       RETURNING email,role,can_access_all_classes`, [email, subject]);
     if (account.rowCount !== 1 || !['admin', 'teacher'].includes(account.rows[0].role)) return res.status(403).json({ ok: false, error: 'ACCESS_DENIED' });
-    const canManage = account.rows[0].role === 'admin' || account.rows[0].can_access_all_classes === true;
+    // Quyền toàn hệ thống của dashboard Writing chỉ dựa trên role=admin.
+    // Cờ cũ can_access_all_classes không được dùng để vượt phạm vi lớp của giảng viên.
+    const canManage = account.rows[0].role === 'admin';
     req.reviewer = {
       email: account.rows[0].email,
       role: account.rows[0].role,
-      canAccessAllClasses: Boolean(account.rows[0].can_access_all_classes),
+      canAccessAllClasses: canManage,
       canManage
     };
     return next();

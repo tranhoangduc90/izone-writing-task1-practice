@@ -111,7 +111,7 @@ export function createProvisionalStudentService({ pool, pepper }) {
     return { activityId: row.activity_id, classId: row.class_id, studentRef: row.canonical_student_ref };
   }
 
-  async function listPending({ activitySlug, classRef = null }) {
+  async function listPending({ activitySlug, classRef = null, reviewerEmail = '', canAccessAllClasses = false }) {
     const result = await pool.query(`SELECT provisional.student_public_id AS "studentRef",provisional.display_alias AS "displayName",
       scope.public_id AS "classRef",scope.class_name_snapshot AS "className",provisional.status AS "reconciliationStatus",
       provisional.created_at AS "registeredAt"
@@ -120,7 +120,12 @@ export function createProvisionalStudentService({ pool, pepper }) {
       JOIN writing_practice.activity activity ON activity.id=scope.activity_id
       WHERE activity.slug=$1 AND provisional.status IN ('pending','conflict')
         AND ($2::uuid IS NULL OR scope.public_id=$2::uuid)
-      ORDER BY provisional.created_at`, [activitySlug, classRef]);
+        AND ($3::boolean OR EXISTS (
+          SELECT 1 FROM mapping.reviewer_class_access access
+          WHERE access.reviewer_email=$4
+            AND access.erp_course_class_id=scope.erp_course_class_id
+        ))
+      ORDER BY provisional.created_at`, [activitySlug, classRef, canAccessAllClasses, reviewerEmail]);
     return result.rows;
   }
 

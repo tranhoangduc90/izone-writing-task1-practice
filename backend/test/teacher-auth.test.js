@@ -24,11 +24,13 @@ test('mọi tài khoản teacher active được xác thực để xem dashboard
   assert.equal(result.req.reviewer.canManage, false);
 });
 
-test('admin hoặc tài khoản được cấp toàn quyền vẫn có thể quản trị', async () => {
+test('chỉ role admin được quản trị và xem toàn bộ lớp', async () => {
   const admin = await authorize({ email: payload.email, role: 'admin', can_access_all_classes: false });
-  const manager = await authorize({ email: payload.email, role: 'teacher', can_access_all_classes: true });
+  const legacyManager = await authorize({ email: payload.email, role: 'teacher', can_access_all_classes: true });
   assert.equal(admin.req.reviewer.canManage, true);
-  assert.equal(manager.req.reviewer.canManage, true);
+  assert.equal(admin.req.reviewer.canAccessAllClasses, true);
+  assert.equal(legacyManager.req.reviewer.canManage, false);
+  assert.equal(legacyManager.req.reviewer.canAccessAllClasses, false);
 });
 
 test('tài khoản ngoài teacher list vẫn bị từ chối', async () => {

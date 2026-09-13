@@ -106,24 +106,53 @@ test('Task 2 Draft job receives vocabulary artifacts from the passed Idea 2 chec
   assert.equal(queries.some(sql => sql.includes("result_artifacts<>'{}'::jsonb")), true);
 });
 
-test('Draft completion requires an official LMS link and then locks the section', async () => {
-  const queries = [];
-  const pool = transactionalPool([
-    { rowCount: 1, rows: [{ id: 'attempt-id', session_id: 'session-id', section_key: 'draft', version: 3 }] },
-    { rowCount: 1, rows: [] },
-    { rowCount: 1, rows: [] },
-    { rowCount: 1, rows: [{ fail_streak: 0 }] }
-  ], queries);
-  const service = createWritingPracticeService({ pool });
-  const result = await service.completeJob({
-    jobRef: 'job-ref',
-    leaseToken: 'lease-ref',
-    resultStatus: 'passed',
-    feedback: 'Đã có kết quả.',
-    artifacts: { lmsUrl: 'https://practice.izone.edu.vn/shared/writing-essays/example/edit?page=0' }
-  });
-  assert.equal(result.resultStatus, 'passed');
-  assert.equal(queries.some(sql => sql.includes('SET locked=true')), true);
+test('Draft completion accepts both official LMS link formats and then locks the section', async () => {
+  const officialUrls = [
+    'https://practice.izone.edu.vn/shared/writing-essays/example/edit?page=0',
+    `https://ducizone.ddns.net/writing/shared/writing-essays/${'a'.repeat(48)}/edit`
+  ];
+  for (const lmsUrl of officialUrls) {
+    const queries = [];
+    const pool = transactionalPool([
+      { rowCount: 1, rows: [{ id: 'attempt-id', session_id: 'session-id', section_key: 'draft', version: 3 }] },
+      { rowCount: 1, rows: [] },
+      { rowCount: 1, rows: [] },
+      { rowCount: 1, rows: [{ fail_streak: 0 }] }
+    ], queries);
+    const service = createWritingPracticeService({ pool });
+    const result = await service.completeJob({
+      jobRef: 'job-ref',
+      leaseToken: 'lease-ref',
+      resultStatus: 'passed',
+      feedback: 'Đã có kết quả.',
+      artifacts: { lmsUrl }
+    });
+    assert.equal(result.resultStatus, 'passed');
+    assert.equal(queries.some(sql => sql.includes('SET locked=true')), true);
+  }
+});
+
+test('Draft completion rejects malformed links for the new Writing viewer before PostgreSQL', async () => {
+  const valid = `https://ducizone.ddns.net/writing/shared/writing-essays/${'a'.repeat(48)}/edit`;
+  const invalidUrls = [
+    valid.replace('ducizone.ddns.net', 'other.invalid'),
+    valid.replace('/writing/', '/wrong/'),
+    `${valid}?preview=1`,
+    `${valid}#result`,
+    valid.replace('a'.repeat(48), 'a'.repeat(47)),
+    valid.replace('/edit', '/view'),
+    valid.replace('https://', 'https://user:password@')
+  ];
+  for (const lmsUrl of invalidUrls) {
+    let connected = false;
+    const pool = { connect: async () => { connected = true; throw new Error('Không được kết nối'); } };
+    const service = createWritingPracticeService({ pool });
+    await assert.rejects(
+      service.completeJob({ jobRef: 'job-ref', leaseToken: 'lease-ref', resultStatus: 'passed', feedback: 'X', artifacts: { lmsUrl } }),
+      error => error.code === 'INVALID_LMS_URL'
+    );
+    assert.equal(connected, false);
+  }
 });
 
 test('Draft completion rejects a forged LMS host before writing to PostgreSQL', async () => {

@@ -12,11 +12,15 @@ function normalizeLmsUrl(value) {
   if (typeof value !== 'string' || value.length > 2048) return null;
   try {
     const url = new URL(value);
-    return url.protocol === 'https:'
+    // Giữ link LMS cũ; viewer mới chỉ nhận đúng trang edit với mã 48 ký tự hex.
+    // Host, path, query hoặc credential không đúng bị chặn trước khi ghi kết quả.
+    const legacy = url.protocol === 'https:'
       && url.hostname.toLowerCase() === 'practice.izone.edu.vn'
-      && url.pathname.startsWith('/shared/writing-essays/')
-      ? url.href
-      : null;
+      && url.pathname.startsWith('/shared/writing-essays/');
+    const viewer = url.origin === 'https://ducizone.ddns.net'
+      && !url.username && !url.password && !url.search && !url.hash
+      && /^\/writing\/shared\/writing-essays\/[a-f0-9]{48}\/edit$/.test(url.pathname);
+    return legacy || viewer ? url.href : null;
   } catch { return null; }
 }
 

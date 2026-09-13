@@ -34,7 +34,7 @@ Check lưu bài trước, rồi API tạo một `check_attempt` bất biến. Wo
 - `/claim` nhận tối đa một job thuộc `workerPool=task2`, kèm `jobRef`, `leaseToken`, section, snapshot, lịch sử Comment và phiên bản prompt.
 - Topic Sentence/Idea 1/Idea 2 đọc đúng Prompt Registry, gọi Gemini và hoàn tất với `passed|needs_revision`.
 - Khi Idea 2 đạt, workflow kiểm tra JSON rồi lưu `artifacts.vocabulary`; Draft sau đó nhận lại artifact này qua `contextArtifacts`.
-- Draft được chuyển nội bộ sang workflow chấm từng câu, tạo LMS, kiểm tra host/link và hoàn tất cùng lease.
+- Draft được chuyển nội bộ sang workflow chấm từng câu, tạo trang kết quả Writing, kiểm tra đúng host/path/mã bài và hoàn tất cùng lease; API tiếp tục nhận link LMS cũ để giữ tương thích.
 - Lỗi kỹ thuật gọi `/fail`; API quản lý tối đa ba lần thử và workflow recovery dùng chung trả lease hết hạn về hàng đợi.
 
 Không có webhook Apps Script/Google Docs trong luồng web mới. Các workflow cũ chỉ là nguồn tham khảo về hợp đồng sư phạm và pipeline LMS.

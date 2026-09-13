@@ -67,7 +67,7 @@ Yêu cầu Google ID token của giảng viên có quyền; mở vòng mới và
 Base path: `/api/v1/internal/grading-jobs`. Mọi request dùng Bearer token riêng và không đi qua trình duyệt.
 
 - `POST /claim`: `{ "workerId": "...", "maxJobs": 1, "leaseSeconds": 420 }`.
-- `POST /:jobRef/complete`: lease token, `passed|needs_revision`, feedback văn bản và `artifacts` tùy chọn. Với Draft, chỉ chấp nhận `passed` cùng `artifacts.lmsUrl` thuộc đúng trang kết quả Writing trên LMS IZONE.
+- `POST /:jobRef/complete`: lease token, `passed|needs_revision`, feedback văn bản và `artifacts` tùy chọn. Với Draft, chỉ chấp nhận `passed` cùng `artifacts.lmsUrl` thuộc trang LMS cũ hoặc đúng trang chỉnh sửa của Writing viewer mới; host, path, mã bài, query, fragment và credential đều được kiểm nghiêm ngặt.
 - `POST /:jobRef/fail`: lease token, mã lỗi và cờ có thể thử lại.
 - `POST /recover`: trả công việc hết lease về hàng đợi hoặc đóng sau lần thử thứ ba.
 

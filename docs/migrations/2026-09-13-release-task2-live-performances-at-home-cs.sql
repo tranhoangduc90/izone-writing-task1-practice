@@ -306,27 +306,79 @@ BEGIN
   )
   SELECT count(*) INTO v_class_difference_count FROM differences;
 
-  WITH source_roster AS (
-    SELECT scope.erp_course_class_id, roster.student_public_id, roster.display_name
-    FROM writing_practice.activity_roster roster
-    JOIN writing_practice.activity_class_scope scope ON scope.id = roster.activity_class_id
-    JOIN writing_practice.activity activity ON activity.id = scope.activity_id
-    WHERE activity.slug = 'writing-task2-public-health-spending'
-      AND scope.erp_course_class_id IN (1184, 1283)
-      AND scope.status = 'active'
-      AND roster.active
-  ), target_roster AS (
-    SELECT scope.erp_course_class_id, roster.student_public_id, roster.display_name
-    FROM writing_practice.activity_roster roster
-    JOIN writing_practice.activity_class_scope scope ON scope.id = roster.activity_class_id
+  WITH target_scope AS (
+    SELECT scope.id, scope.erp_course_class_id
+    FROM writing_practice.activity_class_scope scope
     JOIN writing_practice.activity activity ON activity.id = scope.activity_id
     WHERE activity.slug = 'writing-task2-live-performances-at-home'
       AND scope.status = 'active'
-      AND roster.active
+  ), approved AS (
+    SELECT DISTINCT
+      scope.erp_course_class_id,
+      review.erp_student_contact_id,
+      review.public_id AS student_public_id,
+      COALESCE(
+        NULLIF(trim(review.erp_student_name_snapshot), ''),
+        NULLIF(trim(review.classroom_name_snapshot), ''),
+        'Học viên'
+      ) AS display_name
+    FROM target_scope scope
+    JOIN mapping.classroom_course_mapping course
+      ON course.erp_course_class_id = scope.erp_course_class_id
+      AND course.status = 'approved'
+    JOIN mapping.classroom_roster_snapshot classroom
+      ON classroom.classroom_course_id = course.classroom_course_id
+      AND classroom.roster_state = 'active'
+    JOIN mapping.student_mapping_review review
+      ON review.erp_course_class_id = course.erp_course_class_id
+      AND review.classroom_user_id = classroom.classroom_user_id
+      AND review.status = 'approved'
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM mapping.erp_class_membership_snapshot membership
+      WHERE membership.erp_course_class_id = scope.erp_course_class_id
+        AND membership.erp_student_contact_id = review.erp_student_contact_id
+        AND lower(trim(COALESCE(membership.registration_status, ''))) IN ('dropped', 'on_hold')
+    )
+  ), manual_override AS (
+    SELECT DISTINCT
+      scope.erp_course_class_id,
+      roster_override.erp_student_contact_id,
+      roster_override.student_public_id,
+      trim(roster_override.display_name) AS display_name
+    FROM writing_practice.activity_roster_override roster_override
+    JOIN target_scope scope ON scope.id = roster_override.activity_class_id
+    WHERE roster_override.active
+      AND NOT EXISTS (
+        SELECT 1
+        FROM mapping.erp_class_membership_snapshot membership
+        WHERE membership.erp_course_class_id = scope.erp_course_class_id
+          AND membership.erp_student_contact_id = roster_override.erp_student_contact_id
+          AND lower(trim(COALESCE(membership.registration_status, ''))) IN ('dropped', 'on_hold')
+      )
+  ), expected_roster AS (
+    SELECT erp_course_class_id, student_public_id, display_name FROM approved
+    UNION
+    SELECT
+      manual.erp_course_class_id,
+      manual.student_public_id,
+      manual.display_name
+    FROM manual_override manual
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM approved
+      WHERE approved.erp_course_class_id = manual.erp_course_class_id
+        AND approved.erp_student_contact_id = manual.erp_student_contact_id
+    )
+  ), actual_roster AS (
+    SELECT scope.erp_course_class_id, roster.student_public_id, roster.display_name
+    FROM writing_practice.activity_roster roster
+    JOIN target_scope scope ON scope.id = roster.activity_class_id
+    WHERE roster.active
   ), differences AS (
-    (SELECT * FROM target_roster EXCEPT SELECT * FROM source_roster)
+    (SELECT * FROM actual_roster EXCEPT SELECT * FROM expected_roster)
     UNION ALL
-    (SELECT * FROM source_roster EXCEPT SELECT * FROM target_roster)
+    (SELECT * FROM expected_roster EXCEPT SELECT * FROM actual_roster)
   )
   SELECT count(*) INTO v_roster_difference_count FROM differences;
 

@@ -46,6 +46,10 @@ const writingPairIntake=z.object({
  docId:z.string().trim().min(1).max(160),
  linkIndex:z.number().int().min(1).max(100),
  classCode:z.string().trim().min(1).max(80),
+ larkMeta:z.object({classCode:z.string().trim().min(1).max(80),imageUrls:z.object({
+   1:z.string().max(20000),2:z.string().max(20000),
+   3:z.string().max(20000),4:z.string().max(20000)
+ })}),
  sourceModifiedAt:z.string().trim().min(1).max(80),
  documentKind:z.enum(['google_docs','docx']),
  verifiedMime:z.string().trim().min(1).max(160),

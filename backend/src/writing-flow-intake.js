@@ -15,6 +15,9 @@ const MIME = {
 export function createWritingFlowIntake({ pool, encryptionKey }) {
   const key = keyFromHex(encryptionKey);
   return async function intakePairs(input) {
+    if (input.larkMeta.classCode !== input.classCode) {
+      throw new ApiError(400, 'LARK_CLASS_MISMATCH', 'Mã lớp không khớp hồ sơ homework.');
+    }
     if (input.classCode.toUpperCase() === 'IC2288') {
       return { status: 'excluded', reason: 'CLASS_EXCLUDED', detectedCount: 0,
         registeredCount: 0, receipts: [] };
@@ -44,6 +47,14 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
       const topic = pair.topic.trim();
       const image = pair.image.trim();
       const essay = pair.essay.trim();
+      const chartLink = input.larkMeta.imageUrls[pair.essaySlot] ?? '';
+      const expectedType = chartLink ? 'task_1' : 'task_2';
+      if (pair.taskType !== expectedType || image !== chartLink) {
+        throw new ApiError(400, 'LARK_TASK_TYPE_MISMATCH', 'Loại đề hoặc ảnh không khớp ô homework.');
+      }
+      if (chartLink && !/^https?:\/\/\S+$/i.test(chartLink)) {
+        throw new ApiError(400, 'LARK_CHART_LINK_INVALID', 'Link ảnh biểu đồ không hợp lệ.');
+      }
       if (!topic || !essay) throw new ApiError(400, 'INTAKE_PAIR_INCOMPLETE', 'Đề hoặc bài làm trống.');
       const sourceJson = JSON.stringify([pair.taskType, topic, image, essay]);
       const revision = sha256(sourceJson);

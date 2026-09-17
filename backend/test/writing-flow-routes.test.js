@@ -71,9 +71,12 @@ test('tiếp nhận từng cặp bắt buộc token nội bộ và identity củ
   const body = {
     operationKey: 'scan-demo', recordId: 'record-demo', docId: 'doc-demo',
     linkIndex: 2, classCode: 'IC2200', sourceModifiedAt: '2026-09-17T08:00:00.000Z',
+    larkMeta: { classCode: 'IC2200', imageUrls: {
+      1: '', 2: '', 3: '', 4: 'https://example.test/chart-four',
+    } },
     documentKind: 'google_docs', verifiedMime: 'application/vnd.google-apps.document',
     expectedCount: 1, pairs: [{ essaySlot: 4, taskType: 'task_1',
-      topic: 'Đề giả', image: '', essay: 'Bài giả' }],
+      topic: 'Đề giả', image: 'https://example.test/chart-four', essay: 'Bài giả' }],
   };
   const accepted = await request(makeApp(null)).post(url)
     .set('Authorization', `Bearer ${config.internalApiToken}`).send(body);

@@ -43,10 +43,15 @@ function input() {
   return {
     operationKey: 'scan-demo', recordId: 'record-demo', docId: 'doc-demo',
     linkIndex: 2, classCode: 'IC2200', sourceModifiedAt: '2026-09-17T08:00:00.000Z',
+    larkMeta: { classCode: 'IC2200', imageUrls: {
+      1: 'https://example.test/chart-one', 2: '', 3: '', 4: 'https://example.test/chart-four',
+    } },
     documentKind: 'google_docs', verifiedMime: 'application/vnd.google-apps.document',
     expectedCount: 3, pairs: [1, 2, 4].map(essaySlot => ({
       essaySlot, taskType: essaySlot === 2 ? 'task_2' : 'task_1',
-      topic: `Đề giả ${essaySlot}`, image: '', essay: `Bài giả ${essaySlot}`,
+      topic: `Đề giả ${essaySlot}`,
+      image: essaySlot === 2 ? '' : `https://example.test/chart-${essaySlot === 1 ? 'one' : 'four'}`,
+      essay: `Bài giả ${essaySlot}`,
     })),
   };
 }
@@ -86,7 +91,22 @@ test('MIME sai hoặc thiếu khóa mã hóa dừng trước khi mở transactio
 test('IC2288 không tạo bản ghi chấm dù có bài trong file', async () => {
   const { pool, writes } = fakePool();
   const intake = createWritingFlowIntake({ pool, encryptionKey: '11'.repeat(32) });
-  const result = await intake({ ...input(), classCode: 'ic2288' });
+  const source = input();
+  source.classCode = 'ic2288';
+  source.larkMeta.classCode = 'ic2288';
+  const result = await intake(source);
   assert.equal(result.reason, 'CLASS_EXCLUDED');
+  assert.equal(writes.length, 0);
+});
+
+test('không nhận lớp hoặc loại đề khác với bốn field homework', async () => {
+  const { pool, writes } = fakePool();
+  const intake = createWritingFlowIntake({ pool, encryptionKey: '11'.repeat(32) });
+  const wrongClass = input();
+  wrongClass.larkMeta.classCode = 'IC9999';
+  await assert.rejects(intake(wrongClass), error => error.code === 'LARK_CLASS_MISMATCH');
+  const wrongTask = input();
+  wrongTask.pairs[1].taskType = 'task_1';
+  await assert.rejects(intake(wrongTask), error => error.code === 'LARK_TASK_TYPE_MISMATCH');
   assert.equal(writes.length, 0);
 });

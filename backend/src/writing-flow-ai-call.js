@@ -45,7 +45,8 @@ export function createWritingFlowAiCall({ pool, encryptionKey }) {
         if (existing.prompt_sha256 !== promptSha256) {
           throw new ApiError(409, 'AI_PROMPT_CHANGED', 'Nội dung gửi AI đã đổi trong cùng lượt.');
         }
-        return { callId: existing.call_id, operationKey: existing.operation_key,
+        return { pairId, revision, stageKey, attemptId, batchIndex,
+          callId: existing.call_id, operationKey: existing.operation_key,
           status: existing.status,
           result: existing.result_ciphertext ? JSON.parse(open(existing.result_ciphertext, key)) : null };
       }
@@ -67,7 +68,8 @@ export function createWritingFlowAiCall({ pool, encryptionKey }) {
         operationKey, promptSha256, prior ? 'reused' : 'sent',
         prior?.call_id ?? null, prior?.result_sha256 ?? null,
         prior?.result_ciphertext ?? null, prior ? new Date() : null]);
-      return { callId: inserted.rows[0].call_id, operationKey,
+      return { pairId, revision, stageKey, attemptId, batchIndex,
+        callId: inserted.rows[0].call_id, operationKey,
         status: prior ? 'reused' : 'sent',
         result: prior ? JSON.parse(open(prior.result_ciphertext, key)) : null };
     });
@@ -105,7 +107,8 @@ export function createWritingFlowAiCall({ pool, encryptionKey }) {
       const call = callResult.rows[0];
       if (call.status === 'succeeded' && outcome === 'succeeded'
         && call.result_sha256 === resultSha) {
-        return { callId: call.call_id, status: 'succeeded', alreadyRecorded: true };
+        return { pairId, revision, stageKey, attemptId, batchIndex,
+          operationKey, callId: call.call_id, status: 'succeeded', alreadyRecorded: true };
       }
       if (call.status !== 'sent') {
         throw new ApiError(409, 'AI_CALL_ALREADY_FINISHED', 'Lần gọi AI đã được ghi nhận.');
@@ -116,7 +119,8 @@ export function createWritingFlowAiCall({ pool, encryptionKey }) {
             result_sha256=$6,result_ciphertext=$7,error_code=$8,finished_at=now()
         WHERE call_id=$1`, [call.call_id, outcome, gatewayOperationId,
         provider, route, resultSha, resultCiphertext, errorCode]);
-      return { callId: call.call_id, status: outcome, alreadyRecorded: false };
+      return { pairId, revision, stageKey, attemptId, batchIndex,
+        operationKey, callId: call.call_id, status: outcome, alreadyRecorded: false };
     });
   }
 

@@ -12,6 +12,22 @@ function decode(value, key) {
   return JSON.parse(open(value, key));
 }
 
+// Nhận vào: lời xác nhận đã tạo trang cho một cặp bài.
+// Việc chính: chỉ nhận link xem có cùng mã trang, version và bằng chứng đọc lại.
+// Trả ra: lỗi rõ ràng trước khi lưu bàn giao ghi vào homework.
+export function verifyWritingRenderResult(result) {
+  const match = /^https:\/\/ducizone\.ddns\.net\/writing\/shared\/writing-essays\/([a-f0-9]{48})\/view\?v=(\d+)$/u
+    .exec(String(result?.resultUrl || ''));
+  if (result?.readbackOk !== true || !match
+    || result.writerGroupId !== match[1]
+    || !Number.isInteger(result.version) || result.version < 1
+    || Number(match[2]) !== result.version
+    || !Number.isInteger(result.correctionsCount) || result.correctionsCount < 1) {
+    throw new ApiError(409, 'RENDER_READBACK_MISSING',
+      'Chưa xác nhận đúng trang kết quả của bài này.');
+  }
+}
+
 // Nhận vào: mã cặp, phiên bản và yêu cầu bàn giao đã ghi bền.
 // Việc chính: khóa cặp/bước, chống nhận hai lần, cấp lượt thử và nạp thành quả đã mã hóa.
 // Trả ra: đúng đầu vào của một giai đoạn hoặc trạng thái đã chạy/chưa được phép.
@@ -239,6 +255,7 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
           || typeof result.resultUrl !== 'string' || !result.resultUrl.startsWith('https://'))) {
         throw new ApiError(409, 'DELIVERY_READBACK_MISSING', 'Chưa xác nhận link trong đúng homework.');
       }
+      if (stageKey === 'render') verifyWritingRenderResult(result);
       if (stageKey === 'deliver') {
         const rendered = await client.query(`SELECT result_ciphertext
           FROM writing_flow.stage_result

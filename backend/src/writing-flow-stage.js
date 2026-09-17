@@ -189,7 +189,8 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
     const resultCiphertext = seal(resultJson, key);
     return withTransaction(pool, async client => {
       const pairResult = await client.query(`
-        SELECT pair_id, submission_revision, status, homework_file_id
+        SELECT pair_id, submission_revision, status, homework_file_id,
+               source_link_index, essay_slot
           FROM writing_flow.pair WHERE pair_id=$1 FOR UPDATE`, [pairId]);
       if (pairResult.rowCount !== 1) throw new ApiError(404, 'PAIR_NOT_FOUND', 'Không tìm thấy bài chấm.');
       const pair = pairResult.rows[0];
@@ -225,6 +226,19 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
         && (result.readbackOk !== true || result.homeworkFileId !== pair.homework_file_id
           || typeof result.resultUrl !== 'string' || !result.resultUrl.startsWith('https://'))) {
         throw new ApiError(409, 'DELIVERY_READBACK_MISSING', 'Chưa xác nhận link trong đúng homework.');
+      }
+      if (stageKey === 'deliver') {
+        const rendered = await client.query(`SELECT result_ciphertext
+          FROM writing_flow.stage_result
+          WHERE pair_id=$1 AND stage_key='render' AND status='succeeded'`, [pairId]);
+        const savedResult = rendered.rowCount === 1
+          ? decode(rendered.rows[0].result_ciphertext, key) : null;
+        if (!savedResult || result.resultUrl !== savedResult.resultUrl
+          || Number(result.essaySlot) !== Number(pair.essay_slot)
+          || Number(result.sourceLinkIndex) !== Number(pair.source_link_index)) {
+          throw new ApiError(409, 'DELIVERY_RESULT_MISMATCH',
+            'Link hoặc vị trí ghi không khớp cặp bài đã chấm.');
+        }
       }
       await client.query(`UPDATE writing_flow.stage_attempt
         SET status='succeeded',result_sha256=$2,result_ciphertext=$3,finished_at=now()

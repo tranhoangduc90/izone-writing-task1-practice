@@ -12,7 +12,7 @@ const config = {
   adminApiToken: 'a'.repeat(32),
 };
 
-function makeApp(role, overrides = {}) {
+function makeApp(role, overrides = {}, stageOverrides = {}) {
   const service = {
     listPairs: async () => [{ pair_id: reviewId, status: 'needs_review' }],
     listReviews: async () => [{ review_id: reviewId, status: 'open' }],
@@ -25,6 +25,12 @@ function makeApp(role, overrides = {}) {
     pool: { query: async () => ({ rows: [] }) },
     service: {},
     writingFlowService: service,
+    writingFlowStage: {
+      claim: async () => ({ status: 'started' }),
+      complete: async () => ({ status: 'succeeded' }),
+      fail: async () => ({ status: 'retry_requested' }),
+      ...stageOverrides,
+    },
     adminAuth: (req, res, next) => {
       if (!role) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED' });
       req.reviewer = { role, email: 'teacher@example.invalid' };
@@ -76,5 +82,26 @@ test('tiếp nhận từng cặp bắt buộc token nội bộ và identity củ
   const invalid = await request(makeApp(null)).post(url)
     .set('Authorization', `Bearer ${config.internalApiToken}`)
     .send({ ...body, linkIndex: 0 });
+  assert.equal(invalid.status, 400);
+});
+
+test('giai đoạn chỉ chạy qua API nội bộ và mang đúng cặp, phiên bản, bàn giao', async () => {
+  let received;
+  const app = makeApp(null, {}, { claim: async input => {
+    received = input;
+    return { status: 'started' };
+  } });
+  const url = '/api/v1/internal/writing-flow/stages/claim';
+  const body = { pairId: reviewId, revision: 'a'.repeat(64), stageKey: 'critic',
+    handoffId: requestId, executionId: 'execution-demo' };
+  assert.equal((await request(app).post(url).send(body)).status, 401);
+  const accepted = await request(app).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`).send(body);
+  assert.equal(accepted.status, 200);
+  assert.equal(received.stageKey, 'critic');
+  assert.equal(received.handoffId, requestId);
+  const invalid = await request(app).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`)
+    .send({ ...body, stageKey: 'unknown' });
   assert.equal(invalid.status, 400);
 });

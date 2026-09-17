@@ -59,6 +59,15 @@ const writingPairIntake=z.object({
    contentSha256:z.string().regex(/^[0-9a-f]{64}$/).optional()
  })).min(1).max(4)
 });
+const writingStage=z.enum(['precheck','main','critic','arbiter','render','deliver']);
+const writingClaim=z.object({pairId:uuid,revision:z.string().regex(/^[0-9a-f]{64}$/),
+ stageKey:writingStage,handoffId:uuid,executionId:z.string().trim().min(1).max(80)});
+const writingComplete=z.object({pairId:uuid,revision:z.string().regex(/^[0-9a-f]{64}$/),
+ stageKey:writingStage,attemptId:uuid,result:z.record(z.string(),z.unknown()),
+ nextStage:writingStage.nullable().default(null)});
+const writingFail=z.object({pairId:uuid,revision:z.string().regex(/^[0-9a-f]{64}$/),
+ stageKey:writingStage,attemptId:uuid,errorCode:z.string().trim().min(1).max(100),
+ unknown:z.boolean().default(false)});
 const parse=(schema,value,code='INVALID_REQUEST')=>{const r=schema.safeParse(value);if(!r.success)throw new ApiError(400,code,'Dữ liệu gửi lên không hợp lệ.');return r.data;};
 const asyncRoute=fn=>(req,res,next)=>Promise.resolve(fn(req,res,next)).catch(next);
 function sameSecret(actual,expected){const a=Buffer.from(String(actual||'')),b=Buffer.from(String(expected||''));return a.length>0&&a.length===b.length&&crypto.timingSafeEqual(a,b);}
@@ -92,15 +101,18 @@ export function writingWriteRateLimit(req) {
 function cors(config){return(req,res,next)=>{const origin=req.get('origin');if(origin&&!config.allowedOrigins.has(origin))return res.status(403).json({ok:false,error:'ORIGIN_NOT_ALLOWED'});if(origin){res.set('Access-Control-Allow-Origin',origin);res.set('Vary','Origin');}res.set('Access-Control-Allow-Methods','GET, POST, PUT, OPTIONS');res.set('Access-Control-Allow-Headers','Authorization, Content-Type, If-None-Match, If-Match');res.set('Access-Control-Expose-Headers','ETag, Retry-After');res.set('Cache-Control','no-store');return req.method==='OPTIONS'?res.status(204).end():next();};}
 function csvCell(value){const text=String(value??'');return /[",\r\n]/.test(text)?`"${text.replaceAll('"','""')}"`:text;}
 
-export function createApp({config,pool,service,lessonService=service,provisionalService=null,lmsResultService=null,teacherCommentService=null,teacherClassAccess=null,writingFlowService=null,adminAuth=(_q,r)=>r.status(503).json({ok:false,error:'ADMIN_AUTH_NOT_CONFIGURED'})}){
+export function createApp({config,pool,service,lessonService=service,provisionalService=null,lmsResultService=null,teacherCommentService=null,teacherClassAccess=null,writingFlowService=null,writingFlowStage=null,adminAuth=(_q,r)=>r.status(503).json({ok:false,error:'ADMIN_AUTH_NOT_CONFIGURED'})}){
  const app=express();app.disable('x-powered-by');app.set('trust proxy',config.trustProxyHops);app.use(helmet());app.use(cors(config));
  const classAccess=teacherClassAccess||createTeacherClassAccessService({pool});
  const teacherManage=(q,r,next)=>q.reviewer?.canManage===true?next():r.status(403).json({ok:false,error:'MANAGE_PERMISSION_REQUIRED'});
  const writingFlowAdmin=(q,r,next)=>reviewerIsAdmin(q.reviewer)?next():r.status(403).json({ok:false,error:'ADMIN_PERMISSION_REQUIRED'});
  const writingFlowReady=(q,r,next)=>writingFlowService?next():r.status(503).json({ok:false,error:'WRITING_FLOW_NOT_READY'});
+ const writingStageReady=(q,r,next)=>writingFlowStage?next():r.status(503).json({ok:false,error:'WRITING_STAGE_NOT_READY'});
  const dashboardScope=q=>({reviewerEmail:q.reviewer.email,canAccessAllClasses:reviewerIsAdmin(q.reviewer)});
  // Một lớp có thể dùng chung một địa chỉ mạng. Ngưỡng đọc này vẫn chịu được 40 học viên polling 2 giây/lần.
- app.use(rateLimit({windowMs:60_000,limit:2400,standardHeaders:'draft-8',legacyHeaders:false,message:{ok:false,error:'RATE_LIMITED'}}));app.use(express.json({limit:'96kb',strict:true}));
+ app.use(rateLimit({windowMs:60_000,limit:2400,standardHeaders:'draft-8',legacyHeaders:false,message:{ok:false,error:'RATE_LIMITED'}}));
+ app.use('/api/v1/internal/writing-flow',express.json({limit:'512kb',strict:true}));
+ app.use(express.json({limit:'96kb',strict:true}));
  app.get('/health',(_q,r)=>r.json({ok:true}));app.get('/ready',asyncRoute(async(_q,r)=>{await pool.query('SELECT 1');r.json({ok:true});}));
  // Hai lớp: mỗi phiên có quota riêng, đồng thời toàn bộ request ghi từ một IP vẫn có trần chống lạm dụng.
  const writes=[
@@ -141,6 +153,15 @@ export function createApp({config,pool,service,lessonService=service,provisional
  app.post('/api/v1/internal/writing-flow/intake',internal,writingFlowReady,asyncRoute(async(q,r)=>{
    const receipt=await writingFlowService.intakePairs(parse(writingPairIntake,q.body));
    r.status(202).json({ok:true,receipt});
+ }));
+ app.post('/api/v1/internal/writing-flow/stages/claim',internal,writingStageReady,asyncRoute(async(q,r)=>{
+   r.json({ok:true,claim:await writingFlowStage.claim(parse(writingClaim,q.body))});
+ }));
+ app.post('/api/v1/internal/writing-flow/stages/complete',internal,writingStageReady,asyncRoute(async(q,r)=>{
+   r.json({ok:true,completion:await writingFlowStage.complete(parse(writingComplete,q.body))});
+ }));
+ app.post('/api/v1/internal/writing-flow/stages/fail',internal,writingStageReady,asyncRoute(async(q,r)=>{
+   r.json({ok:true,failure:await writingFlowStage.fail(parse(writingFail,q.body))});
  }));
  app.post('/api/v1/internal/grading-jobs/claim',internal,asyncRoute(async(q,r)=>r.json({ok:true,jobs:await service.claimJobs(parse(claim,q.body))})));
  app.post('/api/v1/internal/grading-jobs/:jobRef/complete',internal,asyncRoute(async(q,r)=>r.json({ok:true,job:await service.completeJob({jobRef:parse(uuid,q.params.jobRef),...parse(complete,q.body)})})));

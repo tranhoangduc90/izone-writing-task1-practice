@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node src/server.js",
     "test": "node --test",
-    "check": "node --check src/server.js && node --check src/app.js && node --check src/config.js && node --check src/db.js && node --check src/service.js && node --check src/lesson-service.js && node --check src/provisional-service.js && node --check src/teacher-auth.js && node --check src/teacher-class-access.js && node --check src/teacher-comment-service.js && node --check src/lms-result-service.js && node --check src/writing-flow-service.js && node --check src/writing-flow-intake.js"
+    "check": "node --check src/server.js && node --check src/app.js && node --check src/config.js && node --check src/db.js && node --check src/service.js && node --check src/lesson-service.js && node --check src/provisional-service.js && node --check src/teacher-auth.js && node --check src/teacher-class-access.js && node --check src/teacher-comment-service.js && node --check src/lms-result-service.js && node --check src/writing-flow-service.js && node --check src/writing-flow-intake.js && node --check src/writing-flow-crypto.js && node --check src/writing-flow-stage.js"
   },
   "dependencies": {
     "express": "5.2.1",

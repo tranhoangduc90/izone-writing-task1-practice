@@ -8,6 +8,7 @@ import { createProvisionalStudentService } from './provisional-service.js';
 import { createTeacherCommentService } from './teacher-comment-service.js';
 import { createLmsResultService } from './lms-result-service.js';
 import { createWritingFlowService } from './writing-flow-service.js';
+import { createWritingFlowStage } from './writing-flow-stage.js';
 
 const config = loadConfig();
 const pool = createDatabasePool(config);
@@ -20,6 +21,7 @@ const app = createApp({
   provisionalService,
   lmsResultService: createLmsResultService({ pool }),
   writingFlowService: createWritingFlowService({ pool, encryptionKey: config.writingFlowEncryptionKey }),
+  writingFlowStage: createWritingFlowStage({ pool, encryptionKey: config.writingFlowEncryptionKey }),
   teacherCommentService: createTeacherCommentService({ pool }),
   adminAuth: createTeacherAuthMiddleware({ config, pool })
 });

@@ -8,6 +8,12 @@ API nội bộ `/api/v1/internal/writing-flow/intake` nhận một tài liệu �
 
 Khóa mã hóa 32 byte được cấp qua `WRITING_FLOW_ENCRYPTION_KEY` trên máy chủ, không lưu trong Git hoặc database. Nếu chưa có khóa, API từ chối tiếp nhận rõ ràng. API đang ở nhánh thử; chưa có workflow production nào gọi route này.
 
+## Mỗi giai đoạn chấm
+
+Workflow nhận `pairId`, phiên bản, mã bàn giao và gọi `/api/v1/internal/writing-flow/stages/claim`. API chỉ cấp một lượt thử cho cặp/bước đó và trả dữ liệu nguồn cùng thành quả các bước trước đã giải mã qua kênh nội bộ. Workflow hoàn tất gọi `stages/complete`, lỗi gọi `stages/fail`. Thành công được mã hóa và ghi bền rồi mới có bàn giao cho workflow sau; lỗi tạo yêu cầu thử lại ngay, tối đa ba lượt trong một chu kỳ. Sau lượt thứ ba, cặp vào **Cần kiểm tra**. Kết quả AI đến muộn vẫn được lưu nhưng không ghi đè lượt đã chốt hoặc phiên bản mới.
+
+Thứ tự: kiểm trước khi chấm → chấm chính → phản biện → phân xử khi cần → xuất kết quả → ghi link vào homework. Bước ghi link chỉ được chốt khi workflow gửi bằng chứng đã đọc lại đúng file và URL HTTPS. Backend không tự đi đọc Google Docs; tính đúng của bằng chứng vẫn phải được kiểm trong workflow thử. Không có giới hạn ba bài đồng thời ở API này; n8n điều tiết concurrency.
+
 ## Người vận hành thấy gì
 
 Mở `writing-flow.html`, đăng nhập bằng tài khoản Google có quyền quản trị. Trang hiện số bài ở từng trạng thái theo lớp, các bài gần đây và danh sách **Cần kiểm tra**. Mỗi dòng ghi rõ hồ sơ nguồn, file homework, link thứ mấy và bài số mấy. Trang không hiện nội dung bài hoặc kết quả chấm chi tiết.

@@ -1,22 +1,11 @@
-import crypto from 'node:crypto';
 import { withTransaction } from './db.js';
 import { ApiError } from './service.js';
+import { keyFromHex, seal, sha256 } from './writing-flow-crypto.js';
 
 const MIME = {
   google_docs: 'application/vnd.google-apps.document',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 };
-
-function sha256(value) {
-  return crypto.createHash('sha256').update(value).digest('hex');
-}
-
-function seal(value, key) {
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-  const body = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
-  return Buffer.concat([iv, cipher.getAuthTag(), body]);
-}
 
 // Nhận vào: từng tài liệu đã được ToolTG đọc, MIME và giờ sửa xác minh qua Drive.
 // Việc chính: ghi tất cả cặp bài của tài liệu trong một transaction, mã hóa nội dung
@@ -24,7 +13,7 @@ function seal(value, key) {
 // Trả ra: mã cặp/trạng thái để đối chiếu số phát hiện với số đã ghi.
 // Khi lỗi: rollback toàn tài liệu; ToolTG không được dời mốc quét.
 export function createWritingFlowIntake({ pool, encryptionKey }) {
-  const key = encryptionKey ? Buffer.from(encryptionKey, 'hex') : null;
+  const key = keyFromHex(encryptionKey);
   return async function intakePairs(input) {
     if (input.classCode.toUpperCase() === 'IC2288') {
       return { status: 'excluded', reason: 'CLASS_EXCLUDED', detectedCount: 0,

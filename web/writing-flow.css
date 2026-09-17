@@ -1,0 +1,11 @@
+.flow-shell { max-width: 1100px; }
+.flow-shell h2 { margin: 2rem 0 0.75rem; }
+.flow-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 0.7rem; }
+.flow-summary article, .flow-row { background: white; border: 1px solid #dce2eb; border-radius: 0.8rem; padding: 0.9rem; }
+.flow-summary strong { display: block; font-size: 1.7rem; }
+.flow-list { display: grid; gap: 0.65rem; }
+.flow-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.flow-row p { margin: 0.2rem 0; }
+.flow-meta { color: #4b5870; font-size: 0.9rem; }
+.flow-row button { flex: none; }
+@media (max-width: 620px) { .flow-row { display: block; } .flow-row button { margin-top: 0.6rem; } }

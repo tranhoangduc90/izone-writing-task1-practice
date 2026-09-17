@@ -73,10 +73,12 @@ export function writingWriteRateLimit(req) {
 function cors(config){return(req,res,next)=>{const origin=req.get('origin');if(origin&&!config.allowedOrigins.has(origin))return res.status(403).json({ok:false,error:'ORIGIN_NOT_ALLOWED'});if(origin){res.set('Access-Control-Allow-Origin',origin);res.set('Vary','Origin');}res.set('Access-Control-Allow-Methods','GET, POST, PUT, OPTIONS');res.set('Access-Control-Allow-Headers','Authorization, Content-Type, If-None-Match, If-Match');res.set('Access-Control-Expose-Headers','ETag, Retry-After');res.set('Cache-Control','no-store');return req.method==='OPTIONS'?res.status(204).end():next();};}
 function csvCell(value){const text=String(value??'');return /[",\r\n]/.test(text)?`"${text.replaceAll('"','""')}"`:text;}
 
-export function createApp({config,pool,service,lessonService=service,provisionalService=null,lmsResultService=null,teacherCommentService=null,teacherClassAccess=null,adminAuth=(_q,r)=>r.status(503).json({ok:false,error:'ADMIN_AUTH_NOT_CONFIGURED'})}){
+export function createApp({config,pool,service,lessonService=service,provisionalService=null,lmsResultService=null,teacherCommentService=null,teacherClassAccess=null,writingFlowService=null,adminAuth=(_q,r)=>r.status(503).json({ok:false,error:'ADMIN_AUTH_NOT_CONFIGURED'})}){
  const app=express();app.disable('x-powered-by');app.set('trust proxy',config.trustProxyHops);app.use(helmet());app.use(cors(config));
  const classAccess=teacherClassAccess||createTeacherClassAccessService({pool});
  const teacherManage=(q,r,next)=>q.reviewer?.canManage===true?next():r.status(403).json({ok:false,error:'MANAGE_PERMISSION_REQUIRED'});
+ const writingFlowAdmin=(q,r,next)=>reviewerIsAdmin(q.reviewer)?next():r.status(403).json({ok:false,error:'ADMIN_PERMISSION_REQUIRED'});
+ const writingFlowReady=(q,r,next)=>writingFlowService?next():r.status(503).json({ok:false,error:'WRITING_FLOW_NOT_READY'});
  const dashboardScope=q=>({reviewerEmail:q.reviewer.email,canAccessAllClasses:reviewerIsAdmin(q.reviewer)});
  // Một lớp có thể dùng chung một địa chỉ mạng. Ngưỡng đọc này vẫn chịu được 40 học viên polling 2 giây/lần.
  app.use(rateLimit({windowMs:60_000,limit:2400,standardHeaders:'draft-8',legacyHeaders:false,message:{ok:false,error:'RATE_LIMITED'}}));app.use(express.json({limit:'96kb',strict:true}));
@@ -139,6 +141,28 @@ export function createApp({config,pool,service,lessonService=service,provisional
  app.post('/api/v1/admin/live/sessions/:sessionRef/teacher-comments',writes,adminAuth,asyncRoute(async(q,r)=>{const ref=parse(uuid,q.params.sessionRef);await classAccess.assertSession(q.reviewer,ref);r.status(201).json({ok:true,thread:await commentsReady().create({sessionRef:ref,actorRef:q.reviewer.email,...parse(teacherCommentCreate,q.body)})});}));
  app.post('/api/v1/admin/teacher-comments/:threadRef/replies',writes,adminAuth,asyncRoute(async(q,r)=>{const ref=parse(uuid,q.params.threadRef);await classAccess.assertCommentThread(q.reviewer,ref);r.status(201).json({ok:true,thread:await commentsReady().reply({threadRef:ref,actorRole:'teacher',actorRef:q.reviewer.email,...parse(teacherCommentReply,q.body)})});}));
  app.post('/api/v1/admin/teacher-comments/:threadRef/status',writes,adminAuth,asyncRoute(async(q,r)=>{const ref=parse(uuid,q.params.threadRef);await classAccess.assertCommentThread(q.reviewer,ref);r.json({ok:true,thread:await commentsReady().setStatus({threadRef:ref,actorRef:q.reviewer.email,...parse(teacherCommentStatus,q.body)})});}));
+ // Quản trị viên xem trạng thái từng cặp; API không trả bài làm hoặc kết quả chi tiết.
+ app.get('/api/v1/admin/writing-flow/summary',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(_q,r)=>{
+   r.json({ok:true,summary:await writingFlowService.summary()});
+ }));
+ app.get('/api/v1/admin/writing-flow/pairs',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
+   const limit=parse(z.coerce.number().int().min(1).max(200),q.query.limit??100);
+   const offset=parse(z.coerce.number().int().min(0).max(100000),q.query.offset??0);
+   const classCode=q.query.classCode?parse(z.string().trim().min(1).max(80),q.query.classCode):null;
+   r.json({ok:true,pairs:await writingFlowService.listPairs({classCode,limit,offset})});
+ }));
+ app.get('/api/v1/admin/writing-flow/reviews',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
+   const limit=parse(z.coerce.number().int().min(1).max(200),q.query.limit??100);
+   const offset=parse(z.coerce.number().int().min(0).max(100000),q.query.offset??0);
+   r.json({ok:true,reviews:await writingFlowService.listReviews({limit,offset})});
+ }));
+ // Bấm chạy lại chỉ ghi yêu cầu bền; workflow retry phải nhận và xác nhận sau đó.
+ app.post('/api/v1/admin/writing-flow/reviews/:reviewId/retry',writes,adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
+   const reviewId=parse(uuid,q.params.reviewId);
+   const {requestId}=parse(z.object({requestId:uuid}),q.body);
+   const review=await writingFlowService.requestRetry({reviewId,requestId,actorRef:q.reviewer.email});
+   r.status(202).json({ok:true,review});
+ }));
  app.post('/api/v1/admin/attempts/:attemptRef/retry',writes,adminAuth,teacherManage,asyncRoute(async(q,r)=>r.status(202).json({ok:true,attempt:await lessonService.retryFailedAttempt({attemptRef:parse(uuid,q.params.attemptRef),actorRef:q.reviewer.email})})));
  app.post('/api/v1/admin/lesson-sessions/:sessionRef/sections/:section/reopen',adminAuth,teacherManage,asyncRoute(async(q,r)=>r.json({ok:true,session:await lessonService.reopenSection({sessionRef:parse(uuid,q.params.sessionRef),section:parse(lessonSection,q.params.section),actorRef:q.reviewer.email,...parse(reopen,q.body)})})));
  app.use((_q,r)=>r.status(404).json({ok:false,error:'NOT_FOUND'}));app.use((error,_q,r,_n)=>{if(error instanceof ApiError)return r.status(error.status).json({ok:false,error:error.code,message:error.message,...(error.current?{current:error.current}:{})});const requestId=crypto.randomUUID();console.error(`Writing Task 1 API error request_id=${requestId} type=${error?.name||'Error'} code=${error?.code||'none'}`);return r.status(500).json({ok:false,error:'INTERNAL_ERROR',requestId});});return app;

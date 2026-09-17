@@ -75,6 +75,7 @@ const writingSourceIssue=z.object({
  classCode:z.string().trim().min(1).max(80).nullable().default(null),
  reasonCode:z.enum(['FILE_TYPE_UNSUPPORTED','FETCH_FAILED','PARSER_FAILED',
    'MIME_UNVERIFIED','SOURCE_METADATA_MISSING','SOURCE_LINK_INVALID','CLASS_MISSING',
+   'SOURCE_CHANGED_DURING_SCAN','TITLE_WRITING','VIETNAMESE_WRITING','TOPIC_NOT_FOUND',
    'INTAKE_TOPIC_MISSING','INTAKE_CHART_LINK_INVALID',
    'INTAKE_CHART_LINK_AMBIGUOUS','INTAKE_TASK_TYPE_MISMATCH'])
 });
@@ -100,6 +101,21 @@ const writingScanAck=z.object({
 });
 const writingScanCursor=z.object({
  appId:z.string().trim().min(1).max(120),tableId:z.string().trim().min(1).max(120)
+});
+const writingScanReceipts=z.object({
+ appId:z.string().trim().min(1).max(120),tableId:z.string().trim().min(1).max(120),
+ recordId:z.string().trim().min(1).max(120),docId:z.string().trim().min(1).max(160).nullable(),
+ linkIndex:z.number().int().min(1).max(100),
+ expectedPairs:z.array(z.object({essaySlot:z.number().int().min(1).max(4),
+   revision:z.string().regex(/^[0-9a-f]{64}$/)})).max(4),
+ expectedIssues:z.array(z.object({essaySlot:z.number().int().min(1).max(4).nullable(),
+   reasonCode:z.string().trim().min(1).max(100)})).max(4)
+}).superRefine((value,context)=>{
+ const slots=[...value.expectedPairs.map(pair=>pair.essaySlot),
+   ...value.expectedIssues.map(issue=>issue.essaySlot)];
+ if(slots.length===0||slots.length>4||new Set(slots).size!==slots.length){
+   context.addIssue({code:'custom',message:'Danh sách ô cần đối chiếu không hợp lệ.'});
+ }
 });
 const writingStage=z.enum(['precheck','main','critic','arbiter','render','deliver']);
 const writingClaim=z.object({pairId:uuid,revision:z.string().regex(/^[0-9a-f]{64}$/),
@@ -230,6 +246,9 @@ export function createApp({config,pool,service,lessonService=service,provisional
  app.post('/api/v1/internal/writing-flow/scans/finish-ready',internal,writingScanReady,asyncRoute(async(q,r)=>{
    const {limit}=parse(z.object({limit:z.number().int().min(1).max(200).default(100)}),q.body);
    r.json({ok:true,scans:await writingFlowScan.finishReady({limit})});
+ }));
+ app.post('/api/v1/internal/writing-flow/scans/receipts',internal,writingScanReady,asyncRoute(async(q,r)=>{
+   r.json({ok:true,receipts:await writingFlowScan.receipts(parse(writingScanReceipts,q.body))});
  }));
  app.post('/api/v1/internal/writing-flow/stages/claim',internal,writingStageReady,asyncRoute(async(q,r)=>{
    r.json({ok:true,claim:await writingFlowStage.claim(parse(writingClaim,q.body))});

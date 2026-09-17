@@ -49,6 +49,7 @@ function makeApp(role, overrides = {}, stageOverrides = {}, aiOverrides = {}) {
       finish: async () => ({ runId: reviewId, status: 'complete' }),
       due: async () => [],
       finishReady: async () => [],
+      receipts: async () => ({ pairIds: [reviewId], issueKeys: [] }),
     },
     adminAuth: (req, res, next) => {
       if (!role) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED' });
@@ -73,6 +74,23 @@ test('lượt quét cần token và danh sách đã đọc hết trang', async (
     .set('Authorization', `Bearer ${config.internalApiToken}`).send(body);
   assert.equal(accepted.status, 201);
   assert.equal(accepted.body.scan.count, 1);
+});
+
+test('đọc lại biên nhận từng ô chỉ dùng token nội bộ', async () => {
+  const url = '/api/v1/internal/writing-flow/scans/receipts';
+  const body = { appId: 'app-demo', tableId: 'table-demo',
+    recordId: 'record-demo', docId: 'doc-demo', linkIndex: 2,
+    expectedPairs: [{ essaySlot: 1, revision: 'a'.repeat(64) }],
+    expectedIssues: [] };
+  assert.equal((await request(makeApp(null)).post(url).send(body)).status, 401);
+  const accepted = await request(makeApp(null)).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`).send(body);
+  assert.equal(accepted.status, 200);
+  assert.deepEqual(accepted.body.receipts.pairIds, [reviewId]);
+  const duplicate = await request(makeApp(null)).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`)
+    .send({ ...body, expectedIssues: [{ essaySlot: 1, reasonCode: 'PARSER_FAILED' }] });
+  assert.equal(duplicate.status, 400);
 });
 
 test('chỉ quản trị viên thấy danh sách bài cần kiểm tra', async () => {

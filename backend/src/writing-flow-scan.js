@@ -258,5 +258,42 @@ export function createWritingFlowScan({ pool }) {
       for (const row of runs.rows) completed.push(await this.finish({ runId: row.run_id }));
       return completed;
     },
+
+    // Nhận vào: các ô bài hoặc lỗi mà bộ đọc tài liệu vừa gửi sang bước tiếp nhận.
+    // Việc chính: đọc lại đúng biên nhận từ database, thay vì tin HTTP 200 của workflow con.
+    // Trả ra: mã cặp và mã lỗi để xác nhận cả tài liệu trong sổ quét.
+    // Khi thiếu một ô: trả lỗi, giữ link pending cho lần thử lại.
+    async receipts({ appId, tableId, recordId, docId, linkIndex,
+      expectedPairs = [], expectedIssues = [] }) {
+      const pairIds = [];
+      const issueKeys = [];
+      const scope = [appId, tableId, recordId, docId, linkIndex];
+      for (const expected of expectedPairs) {
+        const match = await pool.query(`SELECT pair_id FROM writing_flow.pair
+          WHERE source_app_id=$1 AND source_table_id=$2 AND source_record_id=$3
+            AND homework_file_id=$4 AND source_link_index=$5
+            AND essay_slot=$6 AND submission_revision=$7 AND status<>'superseded'
+          ORDER BY created_at DESC LIMIT 1`,
+        [...scope, expected.essaySlot, expected.revision]);
+        if (match.rowCount !== 1) {
+          throw new ApiError(409, 'SCAN_PAIR_RECEIPT_MISSING', 'Thiếu biên nhận bài của một ô.');
+        }
+        pairIds.push(match.rows[0].pair_id);
+      }
+      for (const expected of expectedIssues) {
+        const match = await pool.query(`SELECT issue_key FROM writing_flow.source_issue
+          WHERE source_app_id=$1 AND source_table_id=$2 AND source_record_id=$3
+            AND homework_file_id IS NOT DISTINCT FROM $4
+            AND source_link_index=$5 AND essay_slot IS NOT DISTINCT FROM $6
+            AND reason_code=$7 AND status='open'
+          ORDER BY last_seen_at DESC LIMIT 1`,
+        [...scope, expected.essaySlot, expected.reasonCode]);
+        if (match.rowCount !== 1) {
+          throw new ApiError(409, 'SCAN_ISSUE_RECEIPT_MISSING', 'Thiếu biên nhận lỗi của một ô.');
+        }
+        issueKeys.push(match.rows[0].issue_key);
+      }
+      return { pairIds, issueKeys };
+    },
   };
 }

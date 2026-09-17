@@ -10,6 +10,7 @@ import { createLmsResultService } from './lms-result-service.js';
 import { createWritingFlowService } from './writing-flow-service.js';
 import { createWritingFlowStage } from './writing-flow-stage.js';
 import { createWritingFlowHandoff } from './writing-flow-handoff.js';
+import { createWritingFlowAiCall } from './writing-flow-ai-call.js';
 
 const config = loadConfig();
 const pool = createDatabasePool(config);
@@ -24,6 +25,7 @@ const app = createApp({
   writingFlowService: createWritingFlowService({ pool, encryptionKey: config.writingFlowEncryptionKey }),
   writingFlowStage: createWritingFlowStage({ pool, encryptionKey: config.writingFlowEncryptionKey }),
   writingFlowHandoff: createWritingFlowHandoff({ pool }),
+  writingFlowAiCall: createWritingFlowAiCall({ pool, encryptionKey: config.writingFlowEncryptionKey }),
   teacherCommentService: createTeacherCommentService({ pool }),
   adminAuth: createTeacherAuthMiddleware({ config, pool })
 });

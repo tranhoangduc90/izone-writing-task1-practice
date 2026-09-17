@@ -83,6 +83,14 @@ const writingComplete=z.object({pairId:uuid,revision:z.string().regex(/^[0-9a-f]
 const writingFail=z.object({pairId:uuid,revision:z.string().regex(/^[0-9a-f]{64}$/),
  stageKey:writingStage,attemptId:uuid,errorCode:z.string().trim().min(1).max(100),
  unknown:z.boolean().default(false)});
+const writingAiStage=z.enum(['precheck','main','critic','arbiter']);
+const writingAiBase={pairId:uuid,revision:z.string().regex(/^[0-9a-f]{64}$/),
+ stageKey:writingAiStage,attemptId:uuid,batchIndex:z.number().int().min(0).max(100)};
+const writingAiStart=z.object({...writingAiBase,promptSha256:z.string().regex(/^[0-9a-f]{64}$/)});
+const writingAiFinish=z.object({...writingAiBase,operationKey:z.string().trim().min(1).max(160),
+ outcome:z.enum(['succeeded','failed','unknown']),gatewayOperationId:uuid.nullable().optional(),
+ provider:z.string().trim().max(100).nullable().optional(),route:z.string().trim().max(100).nullable().optional(),
+ result:z.record(z.string(),z.unknown()).nullable().optional(),errorCode:z.string().trim().max(100).nullable().optional()});
 const parse=(schema,value,code='INVALID_REQUEST')=>{const r=schema.safeParse(value);if(!r.success)throw new ApiError(400,code,'Dữ liệu gửi lên không hợp lệ.');return r.data;};
 const asyncRoute=fn=>(req,res,next)=>Promise.resolve(fn(req,res,next)).catch(next);
 function sameSecret(actual,expected){const a=Buffer.from(String(actual||'')),b=Buffer.from(String(expected||''));return a.length>0&&a.length===b.length&&crypto.timingSafeEqual(a,b);}
@@ -116,7 +124,7 @@ export function writingWriteRateLimit(req) {
 function cors(config){return(req,res,next)=>{const origin=req.get('origin');if(origin&&!config.allowedOrigins.has(origin))return res.status(403).json({ok:false,error:'ORIGIN_NOT_ALLOWED'});if(origin){res.set('Access-Control-Allow-Origin',origin);res.set('Vary','Origin');}res.set('Access-Control-Allow-Methods','GET, POST, PUT, OPTIONS');res.set('Access-Control-Allow-Headers','Authorization, Content-Type, If-None-Match, If-Match');res.set('Access-Control-Expose-Headers','ETag, Retry-After');res.set('Cache-Control','no-store');return req.method==='OPTIONS'?res.status(204).end():next();};}
 function csvCell(value){const text=String(value??'');return /[",\r\n]/.test(text)?`"${text.replaceAll('"','""')}"`:text;}
 
-export function createApp({config,pool,service,lessonService=service,provisionalService=null,lmsResultService=null,teacherCommentService=null,teacherClassAccess=null,writingFlowService=null,writingFlowStage=null,writingFlowHandoff=null,adminAuth=(_q,r)=>r.status(503).json({ok:false,error:'ADMIN_AUTH_NOT_CONFIGURED'})}){
+export function createApp({config,pool,service,lessonService=service,provisionalService=null,lmsResultService=null,teacherCommentService=null,teacherClassAccess=null,writingFlowService=null,writingFlowStage=null,writingFlowHandoff=null,writingFlowAiCall=null,adminAuth=(_q,r)=>r.status(503).json({ok:false,error:'ADMIN_AUTH_NOT_CONFIGURED'})}){
  const app=express();app.disable('x-powered-by');app.set('trust proxy',config.trustProxyHops);app.use(helmet());app.use(cors(config));
  const classAccess=teacherClassAccess||createTeacherClassAccessService({pool});
  const teacherManage=(q,r,next)=>q.reviewer?.canManage===true?next():r.status(403).json({ok:false,error:'MANAGE_PERMISSION_REQUIRED'});
@@ -124,6 +132,7 @@ export function createApp({config,pool,service,lessonService=service,provisional
  const writingFlowReady=(q,r,next)=>writingFlowService?next():r.status(503).json({ok:false,error:'WRITING_FLOW_NOT_READY'});
  const writingStageReady=(q,r,next)=>writingFlowStage?next():r.status(503).json({ok:false,error:'WRITING_STAGE_NOT_READY'});
  const writingHandoffReady=(q,r,next)=>writingFlowHandoff?next():r.status(503).json({ok:false,error:'WRITING_HANDOFF_NOT_READY'});
+ const writingAiReady=(q,r,next)=>writingFlowAiCall?next():r.status(503).json({ok:false,error:'WRITING_AI_CALL_NOT_READY'});
  const dashboardScope=q=>({reviewerEmail:q.reviewer.email,canAccessAllClasses:reviewerIsAdmin(q.reviewer)});
  // Một lớp có thể dùng chung một địa chỉ mạng. Ngưỡng đọc này vẫn chịu được 40 học viên polling 2 giây/lần.
  app.use(rateLimit({windowMs:60_000,limit:2400,standardHeaders:'draft-8',legacyHeaders:false,message:{ok:false,error:'RATE_LIMITED'}}));
@@ -182,6 +191,12 @@ export function createApp({config,pool,service,lessonService=service,provisional
  }));
  app.post('/api/v1/internal/writing-flow/stages/fail',internal,writingStageReady,asyncRoute(async(q,r)=>{
    r.json({ok:true,failure:await writingFlowStage.fail(parse(writingFail,q.body))});
+ }));
+ app.post('/api/v1/internal/writing-flow/ai-calls/start',internal,writingAiReady,asyncRoute(async(q,r)=>{
+   r.json({ok:true,call:await writingFlowAiCall.start(parse(writingAiStart,q.body))});
+ }));
+ app.post('/api/v1/internal/writing-flow/ai-calls/finish',internal,writingAiReady,asyncRoute(async(q,r)=>{
+   r.json({ok:true,call:await writingFlowAiCall.finish(parse(writingAiFinish,q.body))});
  }));
  app.post('/api/v1/internal/writing-flow/handoffs/due',internal,writingHandoffReady,asyncRoute(async(q,r)=>{
    const limit=parse(z.object({limit:z.number().int().min(1).max(100).default(20)}),q.body).limit;

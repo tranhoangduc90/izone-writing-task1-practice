@@ -12,7 +12,7 @@ const config = {
   adminApiToken: 'a'.repeat(32),
 };
 
-function makeApp(role, overrides = {}, stageOverrides = {}) {
+function makeApp(role, overrides = {}, stageOverrides = {}, aiOverrides = {}) {
   const service = {
     listPairs: async () => [{ pair_id: reviewId, status: 'needs_review' }],
     listReviews: async () => [{ review_id: reviewId, status: 'open' }],
@@ -36,6 +36,11 @@ function makeApp(role, overrides = {}, stageOverrides = {}) {
     writingFlowHandoff: {
       due: async limit => [{ handoffId: reviewId, stageKey: 'main', sendCount: limit }],
       recoverExpired: async () => [],
+    },
+    writingFlowAiCall: {
+      start: async input => ({ status: 'sent', operationKey: `writing:${input.attemptId}:0` }),
+      finish: async () => ({ status: 'succeeded' }),
+      ...aiOverrides,
     },
     adminAuth: (req, res, next) => {
       if (!role) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED' });
@@ -140,4 +145,24 @@ test('bàn giao và cứu bước quá hạn chỉ mở bằng token nội bộ'
   assert.equal(due.body.handoffs[0].sendCount, 5);
   assert.equal((await request(app).post(recoverUrl)
     .set('Authorization', `Bearer ${config.internalApiToken}`).send({})).status, 200);
+});
+
+test('ghi lần gọi AI chỉ nhận lượt chấm hợp lệ qua token nội bộ', async () => {
+  let received;
+  const app = makeApp(null, {}, {}, { start: async input => {
+    received = input;
+    return { status: 'sent', operationKey: 'writing:demo:0' };
+  } });
+  const url = '/api/v1/internal/writing-flow/ai-calls/start';
+  const body = { pairId: reviewId, revision: 'a'.repeat(64), stageKey: 'main',
+    attemptId: requestId, batchIndex: 0, promptSha256: 'b'.repeat(64) };
+  assert.equal((await request(app).post(url).send(body)).status, 401);
+  const accepted = await request(app).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`).send(body);
+  assert.equal(accepted.status, 200);
+  assert.equal(received.pairId, reviewId);
+  assert.equal(received.promptSha256, 'b'.repeat(64));
+  assert.equal((await request(app).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`)
+    .send({ ...body, stageKey: 'deliver' })).status, 400);
 });

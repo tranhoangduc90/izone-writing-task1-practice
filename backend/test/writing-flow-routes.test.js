@@ -45,6 +45,9 @@ function makeApp(role, overrides = {}, stageOverrides = {}, aiOverrides = {}) {
     writingFlowScan: {
       cursor: async () => ({ scannedThroughAt: null }),
       begin: async input => ({ runId: reviewId, count: input.items.length }),
+      prepare: async input => ({ itemKey: input.itemKey, status: 'planned',
+        operationCount: input.receiptRequest.expectedPairs.length
+          + input.receiptRequest.expectedIssues.length }),
       acknowledge: async input => ({ itemKey: input.itemKey, status: input.status }),
       finish: async () => ({ runId: reviewId, status: 'complete' }),
       due: async () => [],
@@ -62,6 +65,25 @@ function makeApp(role, overrides = {}, stageOverrides = {}, aiOverrides = {}) {
     },
   });
 }
+
+test('kế hoạch từng ô phải lưu qua token nội bộ trước khi phát không chờ', async () => {
+  const url = '/api/v1/internal/writing-flow/scans/prepare';
+  const body = { runId: reviewId, itemKey: 'a'.repeat(64), status: 'partial',
+    detectedSlotCount: 2, receiptRequest: { appId: 'app-demo',
+      tableId: 'table-demo', recordId: 'record-demo', docId: 'doc-demo',
+      linkIndex: 2, expectedPairs: [{ essaySlot: 1, revision: 'b'.repeat(64) }],
+      expectedIssues: [{ essaySlot: 2, reasonCode: 'SOURCE_MISSING' }] } };
+  assert.equal((await request(makeApp(null)).post(url).send(body)).status, 401);
+  const bad = await request(makeApp(null)).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`)
+    .send({ ...body, receiptRequest: { ...body.receiptRequest,
+      expectedPairs: [{ essaySlot: 2, revision: 'b'.repeat(64) }] } });
+  assert.equal(bad.status, 400);
+  const accepted = await request(makeApp(null)).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`).send(body);
+  assert.equal(accepted.status, 200);
+  assert.equal(accepted.body.item.operationCount, 2);
+});
 
 test('lượt quét cần token và danh sách đã đọc hết trang', async () => {
   const url = '/api/v1/internal/writing-flow/scans/begin';

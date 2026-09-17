@@ -149,6 +149,52 @@ export function createWritingFlowScan({ pool }) {
       });
     },
 
+    // Nhận vào: danh sách ô dự kiến của một link trước khi gửi từng ô đi độc lập.
+    // Việc chính: khóa kế hoạch trong database để workflow đọc nguồn không phải chờ từng ô.
+    // Trả ra: mã kế hoạch bền; gửi lại cùng kế hoạch là an toàn.
+    // Khi thiếu biên nhận: link còn pending và mốc quét không được chốt.
+    async prepare({ runId, itemKey: key, status, detectedSlotCount, receiptRequest }) {
+      const pairCount = receiptRequest.expectedPairs.length;
+      const issueCount = receiptRequest.expectedIssues.length;
+      if (status === 'accepted' && (!pairCount || issueCount)
+        || status === 'partial' && (!pairCount || !issueCount)
+        || status === 'issue' && (pairCount || !issueCount)
+        || detectedSlotCount !== null && detectedSlotCount !== pairCount + issueCount) {
+        throw new ApiError(400, 'SCAN_PLAN_COUNT_INVALID', 'Kế hoạch ô không khớp trạng thái link.');
+      }
+      const plan = { status, detectedSlotCount, receiptRequest };
+      const planSha256 = digest(plan);
+      return withTransaction(pool, async client => {
+        const found = await client.query(`SELECT i.status,i.receipt_plan_sha256,
+            i.source_record_id,i.homework_file_id,i.source_link_index,
+            r.status AS run_status,r.source_app_id,r.source_table_id
+          FROM writing_flow.scan_item i JOIN writing_flow.scan_run r ON r.run_id=i.run_id
+          WHERE i.run_id=$1 AND i.item_key=$2 FOR UPDATE OF i`, [runId, key]);
+        if (!found.rowCount) throw new ApiError(404, 'SCAN_ITEM_NOT_FOUND', 'Không thấy link trong lượt quét.');
+        const item = found.rows[0];
+        if (item.run_status !== 'open' || item.status !== 'pending') {
+          throw new ApiError(409, 'SCAN_ITEM_NOT_PENDING', 'Link không còn chờ tiếp nhận.');
+        }
+        if (receiptRequest.appId !== item.source_app_id
+          || receiptRequest.tableId !== item.source_table_id
+          || receiptRequest.recordId !== item.source_record_id
+          || receiptRequest.docId !== item.homework_file_id
+          || receiptRequest.linkIndex !== item.source_link_index) {
+          throw new ApiError(409, 'SCAN_PLAN_SCOPE_MISMATCH', 'Kế hoạch ô không thuộc link này.');
+        }
+        if (item.receipt_plan_sha256 && item.receipt_plan_sha256 !== planSha256) {
+          throw new ApiError(409, 'SCAN_PLAN_CONFLICT', 'Link đã có kế hoạch ô khác.');
+        }
+        if (!item.receipt_plan_sha256) {
+          await client.query(`UPDATE writing_flow.scan_item
+            SET receipt_plan=$3,receipt_plan_sha256=$4,planned_at=now()
+            WHERE run_id=$1 AND item_key=$2`, [runId, key, plan, planSha256]);
+        }
+        return { itemKey: key, status: 'planned', operationCount: pairCount + issueCount,
+          planSha256 };
+      });
+    },
+
     // Nhận vào: biên nhận cặp bài, khóa lỗi nguồn hoặc kết luận tài liệu trống.
     // Việc chính: kiểm các mã thật trong database trước khi công nhận một link đã xử lý.
     // Trả ra: trạng thái bền của link; gửi trùng cùng trạng thái là an toàn.
@@ -333,6 +379,26 @@ export function createWritingFlowScan({ pool }) {
     // Việc chính: chốt từng bảng bằng cùng phép kiểm của finish.
     // Trả ra: mã lượt đã chốt; lỗi một bảng không đổi mốc bảng khác.
     async finishReady({ limit = 100 } = {}) {
+      // Mỗi ô đã được gửi không chờ. Chỉ biên nhận đọc lại từ database mới chốt link.
+      const planned = await pool.query(`SELECT i.run_id,i.item_key,i.receipt_plan
+        FROM writing_flow.scan_item i JOIN writing_flow.scan_run r ON r.run_id=i.run_id
+        WHERE i.status='pending' AND i.receipt_plan IS NOT NULL AND r.status='open'
+        ORDER BY i.next_send_at,i.run_id,i.item_key LIMIT $1`, [limit]);
+      for (const item of planned.rows) {
+        const plan = item.receipt_plan;
+        let receipts;
+        try {
+          receipts = await this.receipts(plan.receiptRequest);
+        } catch (error) {
+          if (['SCAN_PAIR_RECEIPT_MISSING','SCAN_ISSUE_RECEIPT_MISSING'].includes(error.code)) {
+            continue;
+          }
+          throw error;
+        }
+        await this.acknowledge({ runId: item.run_id, itemKey: item.item_key,
+          status: plan.status, detectedSlotCount: plan.detectedSlotCount,
+          pairIds: receipts.pairIds, issueKeys: receipts.issueKeys });
+      }
       const runs = await pool.query(`SELECT r.run_id FROM writing_flow.scan_run r
         WHERE r.status='open' AND NOT EXISTS (
           SELECT 1 FROM writing_flow.scan_item i

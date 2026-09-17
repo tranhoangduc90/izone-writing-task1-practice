@@ -123,6 +123,12 @@ const writingScanReceipts=z.object({
    context.addIssue({code:'custom',message:'Danh sách ô cần đối chiếu không hợp lệ.'});
  }
 });
+const writingScanPrepare=z.object({
+ runId:uuid,itemKey:z.string().regex(/^[0-9a-f]{64}$/),
+ status:z.enum(['accepted','partial','issue']),
+ detectedSlotCount:z.number().int().min(0).max(4).nullable(),
+ receiptRequest:writingScanReceipts
+});
 const writingStage=z.enum(['precheck','main','critic','arbiter','render','deliver']);
 const writingClaim=z.object({pairId:uuid,revision:z.string().regex(/^[0-9a-f]{64}$/),
  stageKey:writingStage,handoffId:uuid,executionId:z.string().trim().min(1).max(80)});
@@ -241,6 +247,9 @@ export function createApp({config,pool,service,lessonService=service,provisional
  }));
  app.post('/api/v1/internal/writing-flow/scans/acknowledge',internal,writingScanReady,asyncRoute(async(q,r)=>{
    r.json({ok:true,item:await writingFlowScan.acknowledge(parse(writingScanAck,q.body))});
+ }));
+ app.post('/api/v1/internal/writing-flow/scans/prepare',internal,writingScanReady,asyncRoute(async(q,r)=>{
+   r.json({ok:true,item:await writingFlowScan.prepare(parse(writingScanPrepare,q.body))});
  }));
  app.post('/api/v1/internal/writing-flow/scans/finish',internal,writingScanReady,asyncRoute(async(q,r)=>{
    r.json({ok:true,scan:await writingFlowScan.finish(parse(z.object({runId:uuid}),q.body))});

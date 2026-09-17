@@ -42,6 +42,12 @@ function makeApp(role, overrides = {}, stageOverrides = {}, aiOverrides = {}) {
       finish: async () => ({ status: 'succeeded' }),
       ...aiOverrides,
     },
+    writingFlowScan: {
+      cursor: async () => ({ scannedThroughAt: null }),
+      begin: async input => ({ runId: reviewId, count: input.items.length }),
+      acknowledge: async input => ({ itemKey: input.itemKey, status: input.status }),
+      finish: async () => ({ runId: reviewId, status: 'complete' }),
+    },
     adminAuth: (req, res, next) => {
       if (!role) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED' });
       req.reviewer = { role, email: 'teacher@example.invalid' };
@@ -49,6 +55,23 @@ function makeApp(role, overrides = {}, stageOverrides = {}, aiOverrides = {}) {
     },
   });
 }
+
+test('lượt quét cần token và danh sách đã đọc hết trang', async () => {
+  const url = '/api/v1/internal/writing-flow/scans/begin';
+  const body = { requestKey: requestId, appId: 'app-demo', tableId: 'table-demo',
+    scannedThroughAt: '2026-09-17T08:00:00Z', pageCount: 1,
+    reachedEnd: true, items: [{ recordId: 'record-demo', docId: 'doc-demo',
+      linkIndex: 2, classCode: 'IC2200' }] };
+  assert.equal((await request(makeApp(null)).post(url).send(body)).status, 401);
+  const bad = await request(makeApp(null)).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`)
+    .send({ ...body, reachedEnd: false });
+  assert.equal(bad.status, 400);
+  const accepted = await request(makeApp(null)).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`).send(body);
+  assert.equal(accepted.status, 201);
+  assert.equal(accepted.body.scan.count, 1);
+});
 
 test('chỉ quản trị viên thấy danh sách bài cần kiểm tra', async () => {
   assert.equal((await request(makeApp(null)).get('/api/v1/admin/writing-flow/reviews')).status, 401);

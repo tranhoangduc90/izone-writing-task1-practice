@@ -78,6 +78,29 @@ const writingSourceIssue=z.object({
    'INTAKE_TOPIC_MISSING','INTAKE_CHART_LINK_INVALID',
    'INTAKE_CHART_LINK_AMBIGUOUS','INTAKE_TASK_TYPE_MISMATCH'])
 });
+const writingScanItem=z.object({
+ recordId:z.string().trim().min(1).max(120),
+ docId:z.string().trim().min(1).max(160).nullable(),
+ linkIndex:z.number().int().min(1).max(100),
+ classCode:z.string().trim().min(1).max(80).nullable().optional()
+});
+const writingScanBegin=z.object({
+ requestKey:uuid,appId:z.string().trim().min(1).max(120),
+ tableId:z.string().trim().min(1).max(120),
+ scannedThroughAt:z.string().trim().min(1).max(80),
+ pageCount:z.number().int().min(1).max(10000),reachedEnd:z.literal(true),
+ items:z.array(writingScanItem).max(20000)
+});
+const writingScanAck=z.object({
+ runId:uuid,itemKey:z.string().regex(/^[0-9a-f]{64}$/),
+ status:z.enum(['accepted','partial','issue','excluded','empty']),
+ pairIds:z.array(uuid).max(4).default([]),
+ issueKeys:z.array(z.string().regex(/^[0-9a-f]{64}$/)).max(4).default([]),
+ detectedSlotCount:z.number().int().min(0).max(4).nullable().default(null)
+});
+const writingScanCursor=z.object({
+ appId:z.string().trim().min(1).max(120),tableId:z.string().trim().min(1).max(120)
+});
 const writingStage=z.enum(['precheck','main','critic','arbiter','render','deliver']);
 const writingClaim=z.object({pairId:uuid,revision:z.string().regex(/^[0-9a-f]{64}$/),
  stageKey:writingStage,handoffId:uuid,executionId:z.string().trim().min(1).max(80)});
@@ -128,7 +151,7 @@ export function writingWriteRateLimit(req) {
 function cors(config){return(req,res,next)=>{const origin=req.get('origin');if(origin&&!config.allowedOrigins.has(origin))return res.status(403).json({ok:false,error:'ORIGIN_NOT_ALLOWED'});if(origin){res.set('Access-Control-Allow-Origin',origin);res.set('Vary','Origin');}res.set('Access-Control-Allow-Methods','GET, POST, PUT, OPTIONS');res.set('Access-Control-Allow-Headers','Authorization, Content-Type, If-None-Match, If-Match');res.set('Access-Control-Expose-Headers','ETag, Retry-After');res.set('Cache-Control','no-store');return req.method==='OPTIONS'?res.status(204).end():next();};}
 function csvCell(value){const text=String(value??'');return /[",\r\n]/.test(text)?`"${text.replaceAll('"','""')}"`:text;}
 
-export function createApp({config,pool,service,lessonService=service,provisionalService=null,lmsResultService=null,teacherCommentService=null,teacherClassAccess=null,writingFlowService=null,writingFlowStage=null,writingFlowHandoff=null,writingFlowAiCall=null,adminAuth=(_q,r)=>r.status(503).json({ok:false,error:'ADMIN_AUTH_NOT_CONFIGURED'})}){
+export function createApp({config,pool,service,lessonService=service,provisionalService=null,lmsResultService=null,teacherCommentService=null,teacherClassAccess=null,writingFlowService=null,writingFlowStage=null,writingFlowHandoff=null,writingFlowAiCall=null,writingFlowScan=null,adminAuth=(_q,r)=>r.status(503).json({ok:false,error:'ADMIN_AUTH_NOT_CONFIGURED'})}){
  const app=express();app.disable('x-powered-by');app.set('trust proxy',config.trustProxyHops);app.use(helmet());app.use(cors(config));
  const classAccess=teacherClassAccess||createTeacherClassAccessService({pool});
  const teacherManage=(q,r,next)=>q.reviewer?.canManage===true?next():r.status(403).json({ok:false,error:'MANAGE_PERMISSION_REQUIRED'});
@@ -137,6 +160,7 @@ export function createApp({config,pool,service,lessonService=service,provisional
  const writingStageReady=(q,r,next)=>writingFlowStage?next():r.status(503).json({ok:false,error:'WRITING_STAGE_NOT_READY'});
  const writingHandoffReady=(q,r,next)=>writingFlowHandoff?next():r.status(503).json({ok:false,error:'WRITING_HANDOFF_NOT_READY'});
  const writingAiReady=(q,r,next)=>writingFlowAiCall?next():r.status(503).json({ok:false,error:'WRITING_AI_CALL_NOT_READY'});
+ const writingScanReady=(q,r,next)=>writingFlowScan?next():r.status(503).json({ok:false,error:'WRITING_SCAN_NOT_READY'});
  const dashboardScope=q=>({reviewerEmail:q.reviewer.email,canAccessAllClasses:reviewerIsAdmin(q.reviewer)});
  // Một lớp có thể dùng chung một địa chỉ mạng. Ngưỡng đọc này vẫn chịu được 40 học viên polling 2 giây/lần.
  app.use(rateLimit({windowMs:60_000,limit:2400,standardHeaders:'draft-8',legacyHeaders:false,message:{ok:false,error:'RATE_LIMITED'}}));
@@ -186,6 +210,18 @@ export function createApp({config,pool,service,lessonService=service,provisional
  app.post('/api/v1/internal/writing-flow/source-issues',internal,writingFlowReady,asyncRoute(async(q,r)=>{
    r.status(202).json({ok:true,issue:await writingFlowService.recordSourceIssue(
      parse(writingSourceIssue,q.body))});
+ }));
+ app.post('/api/v1/internal/writing-flow/scans/cursor',internal,writingScanReady,asyncRoute(async(q,r)=>{
+   r.json({ok:true,cursor:await writingFlowScan.cursor(parse(writingScanCursor,q.body))});
+ }));
+ app.post('/api/v1/internal/writing-flow/scans/begin',internal,writingScanReady,asyncRoute(async(q,r)=>{
+   r.status(201).json({ok:true,scan:await writingFlowScan.begin(parse(writingScanBegin,q.body))});
+ }));
+ app.post('/api/v1/internal/writing-flow/scans/acknowledge',internal,writingScanReady,asyncRoute(async(q,r)=>{
+   r.json({ok:true,item:await writingFlowScan.acknowledge(parse(writingScanAck,q.body))});
+ }));
+ app.post('/api/v1/internal/writing-flow/scans/finish',internal,writingScanReady,asyncRoute(async(q,r)=>{
+   r.json({ok:true,scan:await writingFlowScan.finish(parse(z.object({runId:uuid}),q.body))});
  }));
  app.post('/api/v1/internal/writing-flow/stages/claim',internal,writingStageReady,asyncRoute(async(q,r)=>{
    r.json({ok:true,claim:await writingFlowStage.claim(parse(writingClaim,q.body))});

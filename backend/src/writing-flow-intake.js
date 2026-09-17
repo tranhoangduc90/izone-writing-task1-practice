@@ -137,12 +137,14 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
              status, result_sha256, result_ciphertext, finished_at)
           VALUES ($1,'intake',1,1,$2,'succeeded',$3,$4,now())`,
         [pairId, `intake:${pairId}`, pair.resultSha256, pair.resultCiphertext]);
-        await client.query(`
+        const handoff = await client.query(`
           INSERT INTO writing_flow.handoff
             (pair_id, from_stage, to_stage, source_result_sha256, next_send_at)
-          VALUES ($1,'intake','precheck',$2,now())`,
+          VALUES ($1,'intake','precheck',$2,now())
+          RETURNING handoff_id`,
         [pairId, pair.resultSha256]);
-        receipts.push({ essaySlot: pair.essaySlot, pairId, status: 'received' });
+        receipts.push({ essaySlot: pair.essaySlot, pairId, status: 'received',
+          revision: pair.revision, handoffId: handoff.rows[0].handoff_id });
       }
       if (receipts.length !== input.expectedCount) {
         throw new ApiError(500, 'INTAKE_READBACK_COUNT_MISMATCH', 'Chưa ghi đủ trạng thái các bài.');

@@ -32,6 +32,10 @@ function fakePool() {
           source_modified_at: values[5], status: 'received' });
         return { rows: [{ pair_id }], rowCount: 1 };
       }
+      if (sql.includes('INSERT INTO writing_flow.handoff')) {
+        const handoff_id = `handoff-${writes.filter(row => row.sql.includes('INSERT INTO writing_flow.handoff')).length}`;
+        return { rows: [{ handoff_id }], rowCount: 1 };
+      }
       return { rowCount: 1, rows: [] };
     },
     release() {},
@@ -61,12 +65,15 @@ test('ba ô 1, 2, 4 tạo ba bàn giao; quét lại và sửa một ô không ch
   const intake = createWritingFlowIntake({ pool, encryptionKey: '11'.repeat(32) });
   const first = await intake(input());
   assert.deepEqual(first.receipts.map(row => row.essaySlot), [1, 2, 4]);
+  assert.ok(first.receipts.every(row => row.status === 'received'
+    && /^[0-9a-f]{64}$/.test(row.revision) && row.handoffId));
   assert.equal(writes.filter(row => row.sql.includes('INSERT INTO writing_flow.handoff')).length, 3);
   const resolved = writes.filter(row => row.sql.includes('UPDATE writing_flow.source_issue'));
   assert.deepEqual(resolved.map(row => row.values[3]), [1, 2, 4]);
   assert.ok(resolved.every(row => row.sql.includes('essay_slot=$4')));
   const duplicate = await intake(input());
   assert.deepEqual(duplicate.receipts.map(row => row.status), ['existing', 'existing', 'existing']);
+  assert.ok(duplicate.receipts.every(row => !row.handoffId));
   assert.equal(writes.filter(row => row.sql.includes('INSERT INTO writing_flow.handoff')).length, 3);
   const revised = input();
   revised.sourceModifiedAt = '2026-09-17T08:05:00.000Z';

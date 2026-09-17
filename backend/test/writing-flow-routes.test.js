@@ -155,13 +155,13 @@ test('ghi lần gọi AI chỉ nhận lượt chấm hợp lệ qua token nội 
   } });
   const url = '/api/v1/internal/writing-flow/ai-calls/start';
   const body = { pairId: reviewId, revision: 'a'.repeat(64), stageKey: 'main',
-    attemptId: requestId, batchIndex: 0, promptSha256: 'b'.repeat(64) };
+    attemptId: requestId, batchIndex: 0, prompt: 'Đề và bài giả lập' };
   assert.equal((await request(app).post(url).send(body)).status, 401);
   const accepted = await request(app).post(url)
     .set('Authorization', `Bearer ${config.internalApiToken}`).send(body);
   assert.equal(accepted.status, 200);
   assert.equal(received.pairId, reviewId);
-  assert.equal(received.promptSha256, 'b'.repeat(64));
+  assert.equal(received.prompt, 'Đề và bài giả lập');
   assert.equal((await request(app).post(url)
     .set('Authorization', `Bearer ${config.internalApiToken}`)
     .send({ ...body, stageKey: 'deliver' })).status, 400);

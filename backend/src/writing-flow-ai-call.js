@@ -13,8 +13,9 @@ export function createWritingFlowAiCall({ pool, encryptionKey }) {
       'Chưa cấu hình nơi lưu bài chấm.');
   }
 
-  async function start({ pairId, revision, stageKey, attemptId, batchIndex, promptSha256 }) {
+  async function start({ pairId, revision, stageKey, attemptId, batchIndex, prompt }) {
     requireKey();
+    const promptSha256 = sha256(prompt);
     return withTransaction(pool, async client => {
       const pairResult = await client.query(`
         SELECT submission_revision,status FROM writing_flow.pair

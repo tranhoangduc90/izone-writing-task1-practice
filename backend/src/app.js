@@ -86,7 +86,7 @@ const writingFail=z.object({pairId:uuid,revision:z.string().regex(/^[0-9a-f]{64}
 const writingAiStage=z.enum(['precheck','main','critic','arbiter']);
 const writingAiBase={pairId:uuid,revision:z.string().regex(/^[0-9a-f]{64}$/),
  stageKey:writingAiStage,attemptId:uuid,batchIndex:z.number().int().min(0).max(100)};
-const writingAiStart=z.object({...writingAiBase,promptSha256:z.string().regex(/^[0-9a-f]{64}$/)});
+const writingAiStart=z.object({...writingAiBase,prompt:z.string().min(1).max(100000)});
 const writingAiFinish=z.object({...writingAiBase,operationKey:z.string().trim().min(1).max(160),
  outcome:z.enum(['succeeded','failed','unknown']),gatewayOperationId:uuid.nullable().optional(),
  provider:z.string().trim().max(100).nullable().optional(),route:z.string().trim().max(100).nullable().optional(),

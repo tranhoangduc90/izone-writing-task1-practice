@@ -1,13 +1,38 @@
 import { withTransaction } from './db.js';
 import { ApiError } from './service.js';
 import { keyFromHex, open, seal, sha256 } from './writing-flow-crypto.js';
+import { LEASE_SECONDS } from './writing-flow-stage.js';
 
 // Nhận vào: một nhóm câu của đúng cặp và lượt chấm đã cấp.
-// Việc chính: lưu mã gọi AI; lần thử sau dùng lại kết quả chắc chắn thành công.
+// Việc chính: lưu mã gọi AI; lần thử sau chỉ dùng lại kết quả thành công
+// của đúng mã cặp. Bài có phiên bản khác nhận mã cặp khác khi tiếp nhận.
 // Trả ra: mã gọi cổng AI hoặc kết quả đã lưu, chỉ qua API nội bộ.
 // Khi lỗi: rollback; bài giữ nguyên trạng thái để chạy lại đúng bước.
 export function createWritingFlowAiCall({ pool, encryptionKey }) {
   const key = keyFromHex(encryptionKey);
+  // Nhận vào: cặp, giai đoạn và lượt AI hiện hành.
+  // Việc chính: kéo dài thời hạn giữ lượt khi bắt đầu/xong từng lần gọi AI;
+  // lượt cũ hoặc đã được cứu không thể gia hạn nhầm lượt mới.
+  // Trả ra: không có dữ liệu; nếu không còn quyền trước khi gọi AI thì báo lỗi.
+  async function extendActiveLease(client, { pairId, stageKey, attemptId }, required) {
+    const seconds = LEASE_SECONDS[stageKey];
+    if (!['precheck', 'main', 'critic', 'arbiter'].includes(stageKey) || !seconds) {
+      throw new ApiError(400, 'AI_STAGE_INVALID', 'Bước gọi AI không hợp lệ.');
+    }
+    const renewed = await client.query(`
+      UPDATE writing_flow.stage_result AS s
+         SET lease_expires_at=now()+($4::integer*interval '1 second'),
+             updated_at=now()
+        FROM writing_flow.stage_attempt AS a
+       WHERE s.pair_id=$1 AND s.stage_key=$2 AND s.status='running'
+         AND a.attempt_id=$3 AND a.pair_id=s.pair_id AND a.stage_key=s.stage_key
+         AND a.cycle_no=s.cycle_no AND a.attempt_no=s.attempt_count
+         AND a.status='sent'`, [pairId, stageKey, attemptId, seconds]);
+    if (required && renewed.rowCount !== 1) {
+      throw new ApiError(409, 'AI_STAGE_LEASE_MISMATCH',
+        'Lượt chấm không còn quyền gọi AI.');
+    }
+  }
   function requireKey() {
     if (!key) throw new ApiError(503, 'WRITING_FLOW_ENCRYPTION_NOT_READY',
       'Chưa cấu hình nơi lưu bài chấm.');
@@ -45,6 +70,7 @@ export function createWritingFlowAiCall({ pool, encryptionKey }) {
         if (existing.prompt_sha256 !== promptSha256) {
           throw new ApiError(409, 'AI_PROMPT_CHANGED', 'Nội dung gửi AI đã đổi trong cùng lượt.');
         }
+        await extendActiveLease(client, { pairId, stageKey, attemptId }, true);
         return { pairId, revision, stageKey, attemptId, batchIndex,
           callId: existing.call_id, operationKey: existing.operation_key,
           status: existing.status,
@@ -68,6 +94,7 @@ export function createWritingFlowAiCall({ pool, encryptionKey }) {
         operationKey, promptSha256, prior ? 'reused' : 'sent',
         prior?.call_id ?? null, prior?.result_sha256 ?? null,
         prior?.result_ciphertext ?? null, prior ? new Date() : null]);
+      await extendActiveLease(client, { pairId, stageKey, attemptId }, true);
       return { pairId, revision, stageKey, attemptId, batchIndex,
         callId: inserted.rows[0].call_id, operationKey,
         status: prior ? 'reused' : 'sent',
@@ -107,6 +134,7 @@ export function createWritingFlowAiCall({ pool, encryptionKey }) {
       const call = callResult.rows[0];
       if (call.status === 'succeeded' && outcome === 'succeeded'
         && call.result_sha256 === resultSha) {
+        await extendActiveLease(client, { pairId, stageKey, attemptId }, false);
         return { pairId, revision, stageKey, attemptId, batchIndex,
           operationKey, callId: call.call_id, status: 'succeeded', alreadyRecorded: true };
       }
@@ -119,6 +147,9 @@ export function createWritingFlowAiCall({ pool, encryptionKey }) {
             result_sha256=$6,result_ciphertext=$7,error_code=$8,finished_at=now()
         WHERE call_id=$1`, [call.call_id, outcome, gatewayOperationId,
         provider, route, resultSha, resultCiphertext, errorCode]);
+      if (outcome === 'succeeded') {
+        await extendActiveLease(client, { pairId, stageKey, attemptId }, false);
+      }
       return { pairId, revision, stageKey, attemptId, batchIndex,
         operationKey, callId: call.call_id, status: outcome, alreadyRecorded: false };
     });

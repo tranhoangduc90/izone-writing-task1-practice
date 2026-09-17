@@ -11,8 +11,14 @@ test('biên nhận lần gọi AI giữ định danh nhóm khi bắt đầu và 
   const attemptId = '22222222-2222-4222-8222-222222222222';
   const batchIndex = 4;
   const operationKey = 'writing:request-demo:4';
+  const renewals = [];
+  const reuseLookups = [];
   const client = {
-    async query(sql) {
+    async query(sql, values) {
+      if (sql.includes('UPDATE writing_flow.stage_result AS s')) {
+        renewals.push(values);
+        return { rowCount: 1, rows: [] };
+      }
       if (sql.includes('SELECT submission_revision,status')) return {
         rowCount: 1, rows: [{ submission_revision: revision, status: 'running' }],
       };
@@ -20,8 +26,13 @@ test('biên nhận lần gọi AI giữ định danh nhóm khi bắt đầu và 
         rowCount: 1, rows: [{ request_key: 'request-demo', status: 'sent',
           stage_status: 'running' }],
       };
-      if (sql.includes('SELECT call_id,prompt_sha256')) return { rowCount: 0, rows: [] };
-      if (sql.includes('SELECT call_id,result_ciphertext')) return { rowCount: 0, rows: [] };
+      if (sql.includes('SELECT call_id,prompt_sha256')) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('SELECT call_id,result_ciphertext')) {
+        reuseLookups.push(values);
+        return { rowCount: 0, rows: [] };
+      }
       if (sql.includes('INSERT INTO writing_flow.ai_call')) return {
         rowCount: 1, rows: [{ call_id: '33333333-3333-4333-8333-333333333333' }],
       };
@@ -51,4 +62,10 @@ test('biên nhận lần gọi AI giữ định danh nhóm khi bắt đầu và 
     stageKey: finished.stageKey, attemptId: finished.attemptId,
     batchIndex: finished.batchIndex, operationKey: finished.operationKey },
   { ...scope, operationKey });
+  assert.deepEqual(renewals, [
+    [pairId, 'main', attemptId, 600],
+    [pairId, 'main', attemptId, 600],
+  ]);
+  assert.equal(reuseLookups.length, 1);
+  assert.equal(reuseLookups[0][0], pairId);
 });

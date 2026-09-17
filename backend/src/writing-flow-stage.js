@@ -4,7 +4,7 @@ import { ApiError } from './service.js';
 import { keyFromHex, open, seal, sha256 } from './writing-flow-crypto.js';
 
 const STAGES = ['precheck', 'main', 'critic', 'arbiter', 'render', 'deliver'];
-const LEASE_SECONDS = { precheck: 600, main: 600, critic: 600, arbiter: 600, render: 300, deliver: 180 };
+export const LEASE_SECONDS = { precheck: 600, main: 600, critic: 600, arbiter: 600, render: 300, deliver: 180 };
 const NEXT = { precheck: ['main'], main: ['critic'], critic: ['arbiter', 'render'],
   arbiter: ['render'], render: ['deliver'], deliver: [null] };
 

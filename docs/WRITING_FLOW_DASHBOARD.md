@@ -22,6 +22,8 @@ Mở `writing-flow.html`, đăng nhập bằng tài khoản Google có quyền q
 
 Sau ba lượt chấm hoặc ghi kết quả chưa xong, một bài xuất hiện trong **Cần kiểm tra** với bước lỗi và lý do gần nhất. Sau khi kiểm, quản trị viên chọn **Chạy lại từ bước này**. API ghi yêu cầu vào `writing_flow.manual_review` và `writing_flow.handoff` trong cùng transaction. Trang đọc lại trạng thái `Đã yêu cầu chạy lại`; trạng thái này chưa có nghĩa bài đã được chấm hoặc link đã được ghi. Workflow retry phải nhận yêu cầu, xác nhận và chỉ chạy lại đúng bước lỗi.
 
+Các link không đọc được hoặc khác Google Docs/DOCX xuất hiện riêng ở **Tài liệu chưa nhận được**. Workflow tiếp nhận gửi mã lỗi bằng token nội bộ; API chỉ lưu mã hồ sơ, mã file, lớp, thứ tự link và lý do, không lưu URL gốc hay nội dung bài. Khi cùng file được tiếp nhận thành công, mục lỗi tương ứng tự chuyển sang đã xử lý.
+
 ## Quyền và dữ liệu
 
 - Chỉ tài khoản `mapping.reviewer_account` với `role=admin` đọc trang hoặc yêu cầu retry. Các tài khoản giảng viên khác nhận 403.

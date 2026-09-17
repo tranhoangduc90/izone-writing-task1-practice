@@ -10,6 +10,34 @@ import { createWritingFlowIntake } from './writing-flow-intake.js';
 export function createWritingFlowService({ pool, encryptionKey = null }) {
   return {
     intakePairs: createWritingFlowIntake({ pool, encryptionKey }),
+    async recordSourceIssue({ recordId, docId = null, linkIndex = null,
+      classCode = null, reasonCode }) {
+      // Chỉ lưu định danh kỹ thuật và mã lỗi; không lưu link gốc hoặc bài học viên.
+      const issueKey = crypto.createHash('sha256')
+        .update(JSON.stringify([recordId, docId ?? '', linkIndex ?? 0, reasonCode]))
+        .digest('hex');
+      const result = await pool.query(`
+        INSERT INTO writing_flow.source_issue
+          (issue_key,source_record_id,homework_file_id,source_link_index,class_code,reason_code)
+        VALUES ($1,$2,$3,$4,$5,$6)
+        ON CONFLICT (issue_key) DO UPDATE
+          SET status='open',resolved_at=NULL,
+              occurrence_count=writing_flow.source_issue.occurrence_count+1,
+              last_seen_at=now()
+        RETURNING issue_key,status,reason_code,occurrence_count`,
+      [issueKey, recordId, docId, linkIndex, classCode, reasonCode]);
+      return result.rows[0];
+    },
+
+    async listSourceIssues({ limit = 100, offset = 0 } = {}) {
+      const result = await pool.query(`
+        SELECT issue_key,source_record_id,homework_file_id,source_link_index,
+               class_code,reason_code,occurrence_count,first_seen_at,last_seen_at
+          FROM writing_flow.source_issue WHERE status='open'
+         ORDER BY last_seen_at DESC,issue_key
+         LIMIT $1 OFFSET $2`, [limit, offset]);
+      return result.rows;
+    },
     async summary() {
       const result = await pool.query(`
         SELECT class_code, status, count(*)::integer AS pair_count

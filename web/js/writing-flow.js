@@ -99,6 +99,21 @@ function renderReviews(reviews) {
   }
 }
 
+function renderSourceIssues(issues) {
+  const root = $('flow-source-issues'); root.replaceChildren();
+  if (!issues.length) return root.append(makeText('p', 'Không có tài liệu cần kiểm tra.', 'muted'));
+  for (const issue of issues) {
+    const row = document.createElement('article'); row.className = 'flow-row';
+    const body = document.createElement('div');
+    const location = `Lớp ${issue.class_code || 'chưa rõ'} · Hồ sơ ${issue.source_record_id}`
+      + (issue.homework_file_id ? ` · Tài liệu ${issue.homework_file_id}` : '')
+      + (issue.source_link_index ? ` · link ${issue.source_link_index}` : '');
+    body.append(makeText('strong', `Chưa nhận bài: ${issue.reason_code}`),
+      makeText('p', location, 'flow-meta'));
+    row.append(body); root.append(row);
+  }
+}
+
 function populateClasses(rows) {
   const select = $('flow-class');
   const selected = select.value;
@@ -119,6 +134,16 @@ async function loadAllReviews() {
   throw new Error('Danh sách cần kiểm tra quá dài để tải đầy đủ.');
 }
 
+async function loadAllSourceIssues() {
+  const issues = [];
+  for (let offset = 0; offset <= 100000; offset += 200) {
+    const page = (await state.api.writingSourceIssues(offset, 200)).data.issues || [];
+    issues.push(...page);
+    if (page.length < 200) return issues;
+  }
+  throw new Error('Danh sách tài liệu lỗi quá dài để tải đầy đủ.');
+}
+
 async function loadPairs(classCode, count) {
   const pairs = [];
   while (pairs.length < count) {
@@ -135,15 +160,17 @@ async function refresh() {
   if (!state.token || !state.api) return;
   try {
     const selectedBeforeLoad = $('flow-class').value;
-    const [allPairs, summaryResult, allReviews] = await Promise.all([
-      loadPairs(selectedBeforeLoad, state.pairLimit), state.api.writingSummary(), loadAllReviews(),
+    const [allPairs, summaryResult, allReviews, sourceIssues] = await Promise.all([
+      loadPairs(selectedBeforeLoad, state.pairLimit), state.api.writingSummary(),
+      loadAllReviews(), loadAllSourceIssues(),
     ]);
     const summary = summaryResult.data.summary || [];
-    populateClasses([...summary, ...allReviews]);
+    populateClasses([...summary, ...allReviews, ...sourceIssues]);
     const selectedClass = $('flow-class').value;
     renderSummary(summary, selectedClass);
     renderPairs(allPairs);
     renderReviews(allReviews.filter(review => !selectedClass || review.class_code === selectedClass));
+    renderSourceIssues(sourceIssues.filter(issue => !selectedClass || issue.class_code === selectedClass));
     const totalPairs = summary
       .filter(row => !selectedClass || row.class_code === selectedClass)
       .reduce((total, row) => total + Number(row.pair_count || 0), 0);

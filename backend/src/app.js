@@ -63,6 +63,14 @@ const writingPairIntake=z.object({
    contentSha256:z.string().regex(/^[0-9a-f]{64}$/).optional()
  })).min(1).max(4)
 });
+const writingSourceIssue=z.object({
+ recordId:z.string().trim().min(1).max(120),
+ docId:z.string().trim().min(1).max(160).nullable().default(null),
+ linkIndex:z.number().int().min(1).max(100).nullable().default(null),
+ classCode:z.string().trim().min(1).max(80).nullable().default(null),
+ reasonCode:z.enum(['FILE_TYPE_UNSUPPORTED','FETCH_FAILED','PARSER_FAILED',
+   'MIME_UNVERIFIED','SOURCE_METADATA_MISSING','SOURCE_LINK_INVALID','CLASS_MISSING'])
+});
 const writingStage=z.enum(['precheck','main','critic','arbiter','render','deliver']);
 const writingClaim=z.object({pairId:uuid,revision:z.string().regex(/^[0-9a-f]{64}$/),
  stageKey:writingStage,handoffId:uuid,executionId:z.string().trim().min(1).max(80)});
@@ -159,6 +167,10 @@ export function createApp({config,pool,service,lessonService=service,provisional
    const receipt=await writingFlowService.intakePairs(parse(writingPairIntake,q.body));
    r.status(202).json({ok:true,receipt});
  }));
+ app.post('/api/v1/internal/writing-flow/source-issues',internal,writingFlowReady,asyncRoute(async(q,r)=>{
+   r.status(202).json({ok:true,issue:await writingFlowService.recordSourceIssue(
+     parse(writingSourceIssue,q.body))});
+ }));
  app.post('/api/v1/internal/writing-flow/stages/claim',internal,writingStageReady,asyncRoute(async(q,r)=>{
    r.json({ok:true,claim:await writingFlowStage.claim(parse(writingClaim,q.body))});
  }));
@@ -212,6 +224,11 @@ export function createApp({config,pool,service,lessonService=service,provisional
    const limit=parse(z.coerce.number().int().min(1).max(200),q.query.limit??100);
    const offset=parse(z.coerce.number().int().min(0).max(100000),q.query.offset??0);
    r.json({ok:true,reviews:await writingFlowService.listReviews({limit,offset})});
+ }));
+ app.get('/api/v1/admin/writing-flow/source-issues',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
+   const limit=parse(z.coerce.number().int().min(1).max(200),q.query.limit??100);
+   const offset=parse(z.coerce.number().int().min(0).max(100000),q.query.offset??0);
+   r.json({ok:true,issues:await writingFlowService.listSourceIssues({limit,offset})});
  }));
  // Bấm chạy lại chỉ ghi yêu cầu bền; workflow retry phải nhận và xác nhận sau đó.
  app.post('/api/v1/admin/writing-flow/reviews/:reviewId/retry',writes,adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{

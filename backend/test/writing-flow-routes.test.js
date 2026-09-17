@@ -16,6 +16,8 @@ function makeApp(role, overrides = {}, stageOverrides = {}) {
   const service = {
     listPairs: async () => [{ pair_id: reviewId, status: 'needs_review' }],
     listReviews: async () => [{ review_id: reviewId, status: 'open' }],
+    listSourceIssues: async () => [{ issue_key: 'a'.repeat(64), reason_code: 'FETCH_FAILED' }],
+    recordSourceIssue: async input => ({ issue_key: 'a'.repeat(64), reason_code: input.reasonCode }),
     requestRetry: async input => ({ reviewId: input.reviewId, status: 'retry_requested' }),
     intakePairs: async () => ({ detectedCount: 1, registeredCount: 1, receipts: [] }),
     ...overrides,
@@ -49,6 +51,20 @@ test('chỉ quản trị viên thấy danh sách bài cần kiểm tra', async (
   const response = await request(makeApp('admin')).get('/api/v1/admin/writing-flow/reviews');
   assert.equal(response.status, 200);
   assert.equal(response.body.reviews[0].review_id, reviewId);
+});
+
+test('lỗi nguồn có danh sách riêng và route ghi chỉ dùng token nội bộ', async () => {
+  assert.equal((await request(makeApp('teacher')).get('/api/v1/admin/writing-flow/source-issues')).status, 403);
+  const listed = await request(makeApp('admin')).get('/api/v1/admin/writing-flow/source-issues');
+  assert.equal(listed.status, 200);
+  assert.equal(listed.body.issues[0].reason_code, 'FETCH_FAILED');
+  const url = '/api/v1/internal/writing-flow/source-issues';
+  assert.equal((await request(makeApp(null)).post(url).send({})).status, 401);
+  const recorded = await request(makeApp(null)).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`)
+    .send({ recordId: 'record-demo', docId: 'doc-demo', linkIndex: 2,
+      classCode: 'IC2200', reasonCode: 'FETCH_FAILED' });
+  assert.equal(recorded.status, 202);
 });
 
 test('nút chạy lại gửi mã yêu cầu tới dịch vụ, không tuyên bố bài đã chấm xong', async () => {

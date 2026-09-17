@@ -40,6 +40,25 @@ const teacherCommentCreate=z.object({sectionKey:lessonSection,fieldKey:lessonSec
  .superRefine((value,context)=>{if(value.end<=value.start||value.end-value.start>2000)context.addIssue({code:'custom',path:['end'],message:'Đoạn comment không hợp lệ.'});});
 const teacherCommentReply=z.object({body:teacherCommentBody,requestId:uuid});
 const teacherCommentStatus=z.object({status:z.enum(['open','addressed']),requestId:uuid});
+const writingPairIntake=z.object({
+ operationKey:z.string().trim().min(1).max(120),
+ recordId:z.string().trim().min(1).max(120),
+ docId:z.string().trim().min(1).max(160),
+ linkIndex:z.number().int().min(1).max(100),
+ classCode:z.string().trim().min(1).max(80),
+ sourceModifiedAt:z.string().trim().min(1).max(80),
+ documentKind:z.enum(['google_docs','docx']),
+ verifiedMime:z.string().trim().min(1).max(160),
+ expectedCount:z.number().int().min(1).max(4),
+ pairs:z.array(z.object({
+   essaySlot:z.number().int().min(1).max(4),
+   taskType:z.enum(['task_1','task_2']),
+   topic:z.string().max(20000), image:z.string().max(20000),
+   essay:z.string().max(40000),
+   revision:z.string().regex(/^[0-9a-f]{64}$/).optional(),
+   contentSha256:z.string().regex(/^[0-9a-f]{64}$/).optional()
+ })).min(1).max(4)
+});
 const parse=(schema,value,code='INVALID_REQUEST')=>{const r=schema.safeParse(value);if(!r.success)throw new ApiError(400,code,'Dữ liệu gửi lên không hợp lệ.');return r.data;};
 const asyncRoute=fn=>(req,res,next)=>Promise.resolve(fn(req,res,next)).catch(next);
 function sameSecret(actual,expected){const a=Buffer.from(String(actual||'')),b=Buffer.from(String(expected||''));return a.length>0&&a.length===b.length&&crypto.timingSafeEqual(a,b);}
@@ -119,6 +138,10 @@ export function createApp({config,pool,service,lessonService=service,provisional
  app.get('/api/v1/attempts/:attemptRef',asyncRoute(async(q,r)=>{const attempt=await service.getAttempt(parse(uuid,q.params.attemptRef));const tag=`"attempt-${attempt.version}"`;if(q.get('if-none-match')===tag)return r.status(304).end();r.set('ETag',tag);return r.json({ok:true,attempt});}));
  app.post('/api/v1/attempts/:attemptRef/retry',writes,asyncRoute(async(q,r)=>r.status(202).json({ok:true,attempt:await service.retryAttempt(parse(uuid,q.params.attemptRef))})));
  const internal=(q,r,next)=>sameSecret((q.get('authorization')||'').replace(/^Bearer\s+/i,''),config.internalApiToken)?next():r.status(401).json({ok:false,error:'UNAUTHORIZED'});
+ app.post('/api/v1/internal/writing-flow/intake',internal,writingFlowReady,asyncRoute(async(q,r)=>{
+   const receipt=await writingFlowService.intakePairs(parse(writingPairIntake,q.body));
+   r.status(202).json({ok:true,receipt});
+ }));
  app.post('/api/v1/internal/grading-jobs/claim',internal,asyncRoute(async(q,r)=>r.json({ok:true,jobs:await service.claimJobs(parse(claim,q.body))})));
  app.post('/api/v1/internal/grading-jobs/:jobRef/complete',internal,asyncRoute(async(q,r)=>r.json({ok:true,job:await service.completeJob({jobRef:parse(uuid,q.params.jobRef),...parse(complete,q.body)})})));
  app.post('/api/v1/internal/grading-jobs/:jobRef/fail',internal,asyncRoute(async(q,r)=>r.json({ok:true,job:await service.failJob({jobRef:parse(uuid,q.params.jobRef),...parse(fail,q.body)})})));

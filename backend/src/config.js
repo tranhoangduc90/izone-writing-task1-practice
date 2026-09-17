@@ -9,7 +9,8 @@ const schema = z.object({
   TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(3).default(1),
   INTERNAL_API_TOKEN: z.string().min(32),
   GOOGLE_CLIENT_ID: z.string().trim().min(1),
-  PROVISIONAL_STUDENT_PIN_PEPPER: z.string().min(32)
+  PROVISIONAL_STUDENT_PIN_PEPPER: z.string().min(32),
+  WRITING_FLOW_ENCRYPTION_KEY: z.string().regex(/^[a-fA-F0-9]{64}$/).optional()
 });
 
 export function loadConfig(env = process.env) {
@@ -23,6 +24,7 @@ export function loadConfig(env = process.env) {
     trustProxyHops: value.TRUST_PROXY_HOPS,
     internalApiToken: value.INTERNAL_API_TOKEN,
     googleClientId: value.GOOGLE_CLIENT_ID,
-    provisionalStudentPinPepper: value.PROVISIONAL_STUDENT_PIN_PEPPER
+    provisionalStudentPinPepper: value.PROVISIONAL_STUDENT_PIN_PEPPER,
+    writingFlowEncryptionKey: value.WRITING_FLOW_ENCRYPTION_KEY || null
   };
 }

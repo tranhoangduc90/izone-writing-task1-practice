@@ -17,6 +17,7 @@ function makeApp(role, overrides = {}) {
     listPairs: async () => [{ pair_id: reviewId, status: 'needs_review' }],
     listReviews: async () => [{ review_id: reviewId, status: 'open' }],
     requestRetry: async input => ({ reviewId: input.reviewId, status: 'retry_requested' }),
+    intakePairs: async () => ({ detectedCount: 1, registeredCount: 1, receipts: [] }),
     ...overrides,
   };
   return createApp({
@@ -56,4 +57,24 @@ test('nút chạy lại gửi mã yêu cầu tới dịch vụ, không tuyên b�
   assert.equal((await request(app)
     .post(`/api/v1/admin/writing-flow/reviews/${reviewId}/retry`)
     .send({ requestId: 'not-a-uuid' })).status, 400);
+});
+
+test('tiếp nhận từng cặp bắt buộc token nội bộ và identity của file', async () => {
+  const url = '/api/v1/internal/writing-flow/intake';
+  assert.equal((await request(makeApp('admin')).post(url).send({})).status, 401);
+  const body = {
+    operationKey: 'scan-demo', recordId: 'record-demo', docId: 'doc-demo',
+    linkIndex: 2, classCode: 'IC2200', sourceModifiedAt: '2026-09-17T08:00:00.000Z',
+    documentKind: 'google_docs', verifiedMime: 'application/vnd.google-apps.document',
+    expectedCount: 1, pairs: [{ essaySlot: 4, taskType: 'task_1',
+      topic: 'Đề giả', image: '', essay: 'Bài giả' }],
+  };
+  const accepted = await request(makeApp(null)).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`).send(body);
+  assert.equal(accepted.status, 202);
+  assert.equal(accepted.body.receipt.registeredCount, 1);
+  const invalid = await request(makeApp(null)).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`)
+    .send({ ...body, linkIndex: 0 });
+  assert.equal(invalid.status, 400);
 });

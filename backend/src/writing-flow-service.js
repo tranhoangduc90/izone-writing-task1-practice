@@ -1,13 +1,15 @@
 import crypto from 'node:crypto';
 import { withTransaction } from './db.js';
 import { ApiError } from './service.js';
+import { createWritingFlowIntake } from './writing-flow-intake.js';
 
 // Nhận vào: pool PostgreSQL và yêu cầu của quản trị viên đã xác thực.
 // Việc chính: chỉ đọc trạng thái từng cặp hoặc ghi yêu cầu chạy lại vào hàng bàn giao bền.
 // Trả ra: trạng thái, mã cặp và bước; không đọc bài làm hay kết quả đã mã hóa.
 // Khi lỗi: transaction hoàn tác; màn hình nhận mã lỗi và giữ mục Cần kiểm tra.
-export function createWritingFlowService({ pool }) {
+export function createWritingFlowService({ pool, encryptionKey = null }) {
   return {
+    intakePairs: createWritingFlowIntake({ pool, encryptionKey }),
     async summary() {
       const result = await pool.query(`
         SELECT class_code, status, count(*)::integer AS pair_count

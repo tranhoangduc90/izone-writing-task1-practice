@@ -2,6 +2,12 @@
 
 **Trạng thái 17/09/2026:** bản xây trên nhánh riêng, chưa phát hành. Cần migration `writing_flow`, API nhận/giao giai đoạn và workflow retry hoạt động trước khi bật trang cho người vận hành.
 
+## Tiếp nhận từng bài
+
+API nội bộ `/api/v1/internal/writing-flow/intake` nhận một tài liệu đã tách tối đa bốn ô bài trong một request. Nó kiểm loại file bằng MIME thật, giờ sửa từ Drive, mã lớp, đúng số ô có bài và loại đề của từng ô. API tự tính dấu nội dung, mã hóa đề/bài, ghi từng cặp và yêu cầu bàn giao trong cùng transaction. Quét lại cùng nội dung trả cặp cũ; sửa ô 4 chỉ tạo lượt mới cho ô 4; bản đọc file cũ không được đẩy vào chấm. Nếu một cặp ghi thất bại, cả tài liệu rollback và mốc quét ToolTG phải giữ nguyên.
+
+Khóa mã hóa 32 byte được cấp qua `WRITING_FLOW_ENCRYPTION_KEY` trên máy chủ, không lưu trong Git hoặc database. Nếu chưa có khóa, API từ chối tiếp nhận rõ ràng. API đang ở nhánh thử; chưa có workflow production nào gọi route này.
+
 ## Người vận hành thấy gì
 
 Mở `writing-flow.html`, đăng nhập bằng tài khoản Google có quyền quản trị. Trang hiện số bài ở từng trạng thái theo lớp, các bài gần đây và danh sách **Cần kiểm tra**. Mỗi dòng ghi rõ hồ sơ nguồn, file homework, link thứ mấy và bài số mấy. Trang không hiện nội dung bài hoặc kết quả chấm chi tiết.

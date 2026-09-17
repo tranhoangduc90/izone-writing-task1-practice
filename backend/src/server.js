@@ -19,7 +19,7 @@ const app = createApp({
   lessonService: createLessonPracticeService({ pool, provisionalService }),
   provisionalService,
   lmsResultService: createLmsResultService({ pool }),
-  writingFlowService: createWritingFlowService({ pool }),
+  writingFlowService: createWritingFlowService({ pool, encryptionKey: config.writingFlowEncryptionKey }),
   teacherCommentService: createTeacherCommentService({ pool }),
   adminAuth: createTeacherAuthMiddleware({ config, pool })
 });

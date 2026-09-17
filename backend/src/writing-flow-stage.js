@@ -99,7 +99,11 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
         && stage.input_sha256 !== handoff.source_result_sha256) {
         throw new ApiError(409, 'STAGE_INPUT_CHANGED', 'Đầu vào bước chấm không khớp bản đã lưu.');
       }
-      if (stage.status === 'needs_review') return { status: 'needs_review', pairId, stageKey };
+      if (stage.status === 'needs_review') {
+        await client.query(`UPDATE writing_flow.handoff SET status='acknowledged',
+          acknowledged_at=now() WHERE handoff_id=$1`, [handoffId]);
+        return { status: 'needs_review', pairId, stageKey };
+      }
       if (stage.status === 'running' && stage.lease_expires_at
         && new Date(stage.lease_expires_at).getTime() > Date.now()) {
         return { status: 'already_running', pairId, stageKey };

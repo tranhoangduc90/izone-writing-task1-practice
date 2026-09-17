@@ -31,6 +31,10 @@ function makeApp(role, overrides = {}, stageOverrides = {}) {
       fail: async () => ({ status: 'retry_requested' }),
       ...stageOverrides,
     },
+    writingFlowHandoff: {
+      due: async limit => [{ handoffId: reviewId, stageKey: 'main', sendCount: limit }],
+      recoverExpired: async () => [],
+    },
     adminAuth: (req, res, next) => {
       if (!role) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED' });
       req.reviewer = { role, email: 'teacher@example.invalid' };
@@ -107,4 +111,17 @@ test('giai đoạn chỉ chạy qua API nội bộ và mang đúng cặp, phiên
     .set('Authorization', `Bearer ${config.internalApiToken}`)
     .send({ ...body, stageKey: 'unknown' });
   assert.equal(invalid.status, 400);
+});
+
+test('bàn giao và cứu bước quá hạn chỉ mở bằng token nội bộ', async () => {
+  const app = makeApp(null);
+  const dueUrl = '/api/v1/internal/writing-flow/handoffs/due';
+  const recoverUrl = '/api/v1/internal/writing-flow/handoffs/recover';
+  assert.equal((await request(app).post(dueUrl).send({})).status, 401);
+  const due = await request(app).post(dueUrl)
+    .set('Authorization', `Bearer ${config.internalApiToken}`).send({ limit: 5 });
+  assert.equal(due.status, 200);
+  assert.equal(due.body.handoffs[0].sendCount, 5);
+  assert.equal((await request(app).post(recoverUrl)
+    .set('Authorization', `Bearer ${config.internalApiToken}`).send({})).status, 200);
 });

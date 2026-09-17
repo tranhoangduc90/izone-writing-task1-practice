@@ -4,7 +4,7 @@
 
 ## Tiếp nhận từng bài
 
-API nội bộ `/api/v1/internal/writing-flow/intake` nhận một tài liệu đã tách tối đa bốn ô bài trong một request. Nó kiểm loại file bằng MIME thật, giờ sửa từ Drive, mã lớp, đúng số ô có bài và loại đề của từng ô. API tự tính dấu nội dung, mã hóa đề/bài, ghi từng cặp và yêu cầu bàn giao trong cùng transaction. Quét lại cùng nội dung trả cặp cũ; sửa ô 4 chỉ tạo lượt mới cho ô 4; bản đọc file cũ không được đẩy vào chấm. Nếu một cặp ghi thất bại, cả tài liệu rollback và mốc quét ToolTG phải giữ nguyên.
+API nội bộ `/api/v1/internal/writing-flow/intake` nhận một tài liệu đã tách tối đa bốn ô bài trong một request. Nó kiểm loại file bằng MIME thật, giờ sửa từ Drive, mã lớp, đúng số ô có bài và loại đề của từng ô. Mã lớp được đối chiếu với field Lark `Lớp`; loại đề và ảnh của từng ô được đối chiếu với bốn field `Ảnh biểu đồ` tương ứng. API tự tính dấu nội dung, mã hóa đề/bài, ghi từng cặp và yêu cầu bàn giao trong cùng transaction. Quét lại cùng nội dung trả cặp cũ; sửa ô 4 chỉ tạo lượt mới cho ô 4; bản đọc file cũ không được đẩy vào chấm. Nếu một cặp ghi thất bại, cả tài liệu rollback và mốc quét ToolTG phải giữ nguyên.
 
 Khóa mã hóa 32 byte được cấp qua `WRITING_FLOW_ENCRYPTION_KEY` trên máy chủ, không lưu trong Git hoặc database. Nếu chưa có khóa, API từ chối tiếp nhận rõ ràng. API đang ở nhánh thử; chưa có workflow production nào gọi route này.
 
@@ -13,6 +13,8 @@ Khóa mã hóa 32 byte được cấp qua `WRITING_FLOW_ENCRYPTION_KEY` trên m�
 Workflow nhận `pairId`, phiên bản, mã bàn giao và gọi `/api/v1/internal/writing-flow/stages/claim`. API chỉ cấp một lượt thử cho cặp/bước đó và trả dữ liệu nguồn cùng thành quả các bước trước đã giải mã qua kênh nội bộ. Workflow hoàn tất gọi `stages/complete`, lỗi gọi `stages/fail`. Thành công được mã hóa và ghi bền rồi mới có bàn giao cho workflow sau; lỗi tạo yêu cầu thử lại ngay, tối đa ba lượt trong một chu kỳ. Sau lượt thứ ba, cặp vào **Cần kiểm tra**. Kết quả AI đến muộn vẫn được lưu nhưng không ghi đè lượt đã chốt hoặc phiên bản mới.
 
 Thứ tự: kiểm trước khi chấm → chấm chính → phản biện → phân xử khi cần → xuất kết quả → ghi link vào homework. Bước ghi link chỉ được chốt khi workflow gửi bằng chứng đã đọc lại đúng file và URL HTTPS. Backend không tự đi đọc Google Docs; tính đúng của bằng chứng vẫn phải được kiểm trong workflow thử. Không có giới hạn ba bài đồng thời ở API này; n8n điều tiết concurrency.
+
+API `handoffs/due` cấp các bàn giao chưa được bước sau xác nhận để n8n gọi lại cùng mã, không chờ workflow sau hoàn tất. API `handoffs/recover` tìm bước đã thực sự bắt đầu nhưng quá hạn: hai lượt đầu tạo bàn giao thử lại, lượt thứ ba đưa vào **Cần kiểm tra**. Cả hai route chỉ nhận token nội bộ. Workflow n8n gọi chúng vẫn cần được dựng và thử trước khi vận hành.
 
 ## Người vận hành thấy gì
 

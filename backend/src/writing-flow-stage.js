@@ -23,7 +23,9 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
     if (!STAGES.includes(stageKey)) throw new ApiError(400, 'STAGE_INVALID', 'Bước chấm không hợp lệ.');
     return withTransaction(pool, async client => {
       const pairResult = await client.query(`
-        SELECT pair_id, submission_revision, status, source_ciphertext
+        SELECT pair_id, submission_revision, status, source_ciphertext,
+               source_record_id, homework_file_id, source_link_index,
+               essay_slot, class_code, document_kind, source_modified_at
           FROM writing_flow.pair WHERE pair_id = $1 FOR UPDATE`, [pairId]);
       if (pairResult.rowCount !== 1) throw new ApiError(404, 'PAIR_NOT_FOUND', 'Không tìm thấy bài chấm.');
       const pair = pairResult.rows[0];
@@ -165,7 +167,14 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
         requestKey, cycleNo: stage.cycle_no,
         source: (() => {
           const [taskType, topic, image, essay] = decode(pair.source_ciphertext, key);
-          return { taskType, topic, image, essay };
+          return { taskType, topic, image, essay,
+            recordId: pair.source_record_id,
+            homeworkFileId: pair.homework_file_id,
+            sourceLinkIndex: pair.source_link_index,
+            essaySlot: pair.essay_slot,
+            classCode: pair.class_code,
+            documentKind: pair.document_kind,
+            sourceModifiedAt: new Date(pair.source_modified_at).toISOString() };
         })(),
         previous: Object.fromEntries(results.rows.map(row => [row.stage_key, decode(row.result_ciphertext, key)])),
       };

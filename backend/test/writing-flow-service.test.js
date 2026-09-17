@@ -46,3 +46,19 @@ test('chưa đủ ba lượt thì không phát yêu cầu chấm lại từ danh
     error => error.code === 'REVIEW_STATE_CHANGED');
   assert.equal(state.handoffs, 0);
 });
+
+test('lỗi nguồn của hai ô cùng file có khóa riêng', async () => {
+  const writes = [];
+  const pool = { query: async (sql, values) => {
+    writes.push({ sql, values });
+    return { rows: [{ issue_key: values[0], status: 'open' }] };
+  } };
+  const service = createWritingFlowService({ pool });
+  const base = { recordId: 'record-demo', docId: 'doc-demo',
+    linkIndex: 2, classCode: 'IC2200', reasonCode: 'INTAKE_TOPIC_MISSING' };
+  const first = await service.recordSourceIssue({ ...base, essaySlot: 1 });
+  const second = await service.recordSourceIssue({ ...base, essaySlot: 2 });
+  assert.notEqual(first.issue_key, second.issue_key);
+  assert.equal(writes[0].values[4], 1);
+  assert.equal(writes[1].values[4], 2);
+});

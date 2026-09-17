@@ -62,6 +62,9 @@ test('ba ô 1, 2, 4 tạo ba bàn giao; quét lại và sửa một ô không ch
   const first = await intake(input());
   assert.deepEqual(first.receipts.map(row => row.essaySlot), [1, 2, 4]);
   assert.equal(writes.filter(row => row.sql.includes('INSERT INTO writing_flow.handoff')).length, 3);
+  const resolved = writes.filter(row => row.sql.includes('UPDATE writing_flow.source_issue'));
+  assert.deepEqual(resolved.map(row => row.values[3]), [1, 2, 4]);
+  assert.ok(resolved.every(row => row.sql.includes('essay_slot=$4')));
   const duplicate = await intake(input());
   assert.deepEqual(duplicate.receipts.map(row => row.status), ['existing', 'existing', 'existing']);
   assert.equal(writes.filter(row => row.sql.includes('INSERT INTO writing_flow.handoff')).length, 3);

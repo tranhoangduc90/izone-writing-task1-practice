@@ -101,14 +101,28 @@ function renderReviews(reviews) {
 
 function renderSourceIssues(issues) {
   const root = $('flow-source-issues'); root.replaceChildren();
-  if (!issues.length) return root.append(makeText('p', 'Không có tài liệu cần kiểm tra.', 'muted'));
+  if (!issues.length) return root.append(makeText('p', 'Không có bài hoặc tài liệu cần kiểm tra.', 'muted'));
+  const reasonLabels = {
+    FILE_TYPE_UNSUPPORTED: 'File không phải Google Docs hoặc DOCX',
+    FETCH_FAILED: 'Không mở được tài liệu',
+    PARSER_FAILED: 'Không đọc được nội dung bài',
+    MIME_UNVERIFIED: 'Chưa xác minh loại file',
+    SOURCE_METADATA_MISSING: 'Thiếu thông tin file',
+    SOURCE_LINK_INVALID: 'Link tài liệu không hợp lệ',
+    CLASS_MISSING: 'Thiếu mã lớp',
+    INTAKE_TOPIC_MISSING: 'Ô bài có bài làm nhưng thiếu đề',
+    INTAKE_CHART_LINK_INVALID: 'Link ảnh biểu đồ không hợp lệ',
+    INTAKE_CHART_LINK_AMBIGUOUS: 'Ô ảnh biểu đồ có nhiều link',
+    INTAKE_TASK_TYPE_MISMATCH: 'Loại đề không khớp ảnh biểu đồ',
+  };
   for (const issue of issues) {
     const row = document.createElement('article'); row.className = 'flow-row';
     const body = document.createElement('div');
     const location = `Lớp ${issue.class_code || 'chưa rõ'} · Hồ sơ ${issue.source_record_id}`
       + (issue.homework_file_id ? ` · Tài liệu ${issue.homework_file_id}` : '')
-      + (issue.source_link_index ? ` · link ${issue.source_link_index}` : '');
-    body.append(makeText('strong', `Chưa nhận bài: ${issue.reason_code}`),
+      + (issue.source_link_index ? ` · link ${issue.source_link_index}` : '')
+      + (issue.essay_slot ? ` · bài số ${issue.essay_slot}` : '');
+    body.append(makeText('strong', reasonLabels[issue.reason_code] || issue.reason_code),
       makeText('p', location, 'flow-meta'));
     row.append(body); root.append(row);
   }

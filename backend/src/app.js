@@ -67,9 +67,12 @@ const writingSourceIssue=z.object({
  recordId:z.string().trim().min(1).max(120),
  docId:z.string().trim().min(1).max(160).nullable().default(null),
  linkIndex:z.number().int().min(1).max(100).nullable().default(null),
+ essaySlot:z.number().int().min(1).max(4).nullable().default(null),
  classCode:z.string().trim().min(1).max(80).nullable().default(null),
  reasonCode:z.enum(['FILE_TYPE_UNSUPPORTED','FETCH_FAILED','PARSER_FAILED',
-   'MIME_UNVERIFIED','SOURCE_METADATA_MISSING','SOURCE_LINK_INVALID','CLASS_MISSING'])
+   'MIME_UNVERIFIED','SOURCE_METADATA_MISSING','SOURCE_LINK_INVALID','CLASS_MISSING',
+   'INTAKE_TOPIC_MISSING','INTAKE_CHART_LINK_INVALID',
+   'INTAKE_CHART_LINK_AMBIGUOUS','INTAKE_TASK_TYPE_MISMATCH'])
 });
 const writingStage=z.enum(['precheck','main','critic','arbiter','render','deliver']);
 const writingClaim=z.object({pairId:uuid,revision:z.string().regex(/^[0-9a-f]{64}$/),

@@ -147,10 +147,16 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
       if (receipts.length !== input.expectedCount) {
         throw new ApiError(500, 'INTAKE_READBACK_COUNT_MISMATCH', 'Chưa ghi đủ trạng thái các bài.');
       }
-      await client.query(`UPDATE writing_flow.source_issue
-        SET status='resolved',resolved_at=now(),last_seen_at=now()
-        WHERE source_record_id=$1 AND homework_file_id=$2 AND source_link_index=$3
-          AND status='open'`, [input.recordId, input.docId, input.linkIndex]);
+      // Chỉ xóa lỗi đúng ô đã nhận; lỗi ô khác trong cùng file vẫn còn để xử lý.
+      for (const receipt of receipts) {
+        if (!['received', 'existing'].includes(receipt.status)) continue;
+        await client.query(`UPDATE writing_flow.source_issue
+          SET status='resolved',resolved_at=now(),last_seen_at=now()
+          WHERE source_record_id=$1 AND homework_file_id=$2
+            AND source_link_index=$3 AND (essay_slot=$4 OR essay_slot IS NULL)
+            AND status='open'`,
+        [input.recordId, input.docId, input.linkIndex, receipt.essaySlot]);
+      }
       return { detectedCount: input.expectedCount, registeredCount: receipts.length, receipts };
     });
   };

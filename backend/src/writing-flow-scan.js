@@ -134,6 +134,15 @@ export function createWritingFlowScan({ pool }) {
             VALUES ($1,$2,$3,$4,$5,$6)`,
           [runId, item.itemKey, item.recordId, item.docId, item.linkIndex, item.classCode ?? null]);
         }
+        // Lượt mới của cùng hồ sơ làm biên nhận chốt cũ hết hiệu lực.
+        await client.query(`UPDATE writing_flow.record_closure c
+          SET status='superseded'
+          FROM writing_flow.scan_run r
+          WHERE c.run_id=r.run_id AND r.source_app_id=$1
+            AND r.source_table_id=$2 AND c.run_id<>$3
+            AND c.source_record_id=ANY($4::text[])
+            AND c.status IN ('pending','done')`,
+        [appId, tableId, runId, [...new Set(manifest.map(item => item.recordId))]]);
         return { runId, status: 'open', appId, tableId, requestKey,
           previousCursor: cursor.rows[0].scanned_through_at,
           items: manifest.map(({ itemKey: key, recordId, linkIndex }) => ({ itemKey: key, recordId, linkIndex })) };
@@ -267,6 +276,13 @@ export function createWritingFlowScan({ pool }) {
           await client.query(`UPDATE writing_flow.scan_run
             SET status='complete',completed_at=now() WHERE run_id=$1`, [runId]);
         }
+        // Từng hồ sơ có bài hoặc lỗi nguồn được kiểm chốt riêng, không chờ luồng chấm.
+        await client.query(`INSERT INTO writing_flow.record_closure
+          (run_id,source_record_id)
+          SELECT DISTINCT run_id,source_record_id
+          FROM writing_flow.scan_item WHERE run_id=$1
+            AND status IN ('accepted','partial','issue')
+          ON CONFLICT DO NOTHING`, [runId]);
         const cursor = await client.query(`SELECT scanned_through_at
           FROM writing_flow.scan_cursor WHERE source_app_id=$1 AND source_table_id=$2`,
         [row.source_app_id, row.source_table_id]);
@@ -325,6 +341,71 @@ export function createWritingFlowScan({ pool }) {
       const completed = [];
       for (const row of runs.rows) completed.push(await this.finish({ runId: row.run_id }));
       return completed;
+    },
+
+    // Nhận vào: số hồ sơ tối đa cần kiểm tra trong nhịp này.
+    // Việc chính: cấp lại hồ sơ chưa chốt mỗi 30 giây; chỉ một lượt cấp thắng khóa.
+    // Trả ra: định danh hồ sơ, không chứa bài hay link riêng tư.
+    async dueClosures({ limit = 100 } = {}) {
+      const result = await pool.query(`WITH ready AS (
+        SELECT c.run_id,c.source_record_id
+        FROM writing_flow.record_closure c
+        JOIN writing_flow.scan_run r ON r.run_id=c.run_id
+        WHERE c.status='pending' AND r.status='complete'
+          AND c.next_check_at<=now()
+        ORDER BY c.next_check_at,c.run_id,c.source_record_id
+        LIMIT $1 FOR UPDATE OF c SKIP LOCKED
+      )
+      UPDATE writing_flow.record_closure c
+      SET check_count=c.check_count+1,last_checked_at=now(),
+          next_check_at=now()+interval '30 seconds'
+      FROM ready,writing_flow.scan_run r
+      WHERE c.run_id=ready.run_id
+        AND c.source_record_id=ready.source_record_id
+        AND r.run_id=c.run_id
+      RETURNING c.run_id,c.source_record_id,c.check_count,
+        r.source_app_id,r.source_table_id`, [limit]);
+      return result.rows.map(row => ({ runId: row.run_id,
+        recordId: row.source_record_id, appId: row.source_app_id,
+        tableId: row.source_table_id, checkCount: row.check_count }));
+    },
+
+    // Nhận vào: thời điểm Lark vừa đọc lại và đúng mã lượt quét.
+    // Việc chính: chốt sổ chỉ khi các cặp của lượt ấy vẫn được giao đầy đủ.
+    // Khi có bản sửa mới: giữ mục chờ để kiểm lại, không công nhận timestamp cũ.
+    async completeClosure({ runId, appId, tableId, recordId, finishedAtMs }) {
+      if (!Number.isSafeInteger(finishedAtMs) || finishedAtMs <= 0
+        || finishedAtMs > Date.now() + 60_000) {
+        throw new ApiError(400, 'CLOSURE_TIMESTAMP_INVALID',
+          'Thời điểm đọc lại từ Lark không hợp lệ.');
+      }
+      const eligible = await this.closureEligibility({ appId, tableId, recordId });
+      if (!eligible.eligible || eligible.runId !== runId) {
+        throw new ApiError(409, 'CLOSURE_ELIGIBILITY_CHANGED',
+          'Hồ sơ đã thay đổi hoặc còn bài chưa giao link.');
+      }
+      return withTransaction(pool, async client => {
+        const found = await client.query(`SELECT status,lark_finished_at_ms
+          FROM writing_flow.record_closure
+          WHERE run_id=$1 AND source_record_id=$2 FOR UPDATE`,
+        [runId, recordId]);
+        if (!found.rowCount || found.rows[0].status === 'superseded') {
+          throw new ApiError(409, 'CLOSURE_RUN_SUPERSEDED',
+            'Lượt quét của hồ sơ đã được thay thế.');
+        }
+        if (found.rows[0].status === 'done') {
+          if (Number(found.rows[0].lark_finished_at_ms) !== finishedAtMs) {
+            throw new ApiError(409, 'CLOSURE_TIMESTAMP_CONFLICT',
+              'Thời điểm Lark không khớp biên nhận đã chốt.');
+          }
+          return { status: 'done', runId, recordId };
+        }
+        await client.query(`UPDATE writing_flow.record_closure
+          SET status='done',closed_at=now(),lark_finished_at_ms=$3
+          WHERE run_id=$1 AND source_record_id=$2`,
+        [runId, recordId, finishedAtMs]);
+        return { status: 'done', runId, recordId };
+      });
     },
 
     // Nhận vào: các ô bài hoặc lỗi mà bộ đọc tài liệu vừa gửi sang bước tiếp nhận.

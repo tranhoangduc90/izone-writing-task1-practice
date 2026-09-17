@@ -51,6 +51,9 @@ function makeApp(role, overrides = {}, stageOverrides = {}, aiOverrides = {}) {
       finishReady: async () => [],
       receipts: async () => ({ pairIds: [reviewId], issueKeys: [] }),
       closureEligibility: async () => ({ eligible: false, reason: 'PAIR_NOT_DELIVERED' }),
+      dueClosures: async () => [{ runId: reviewId, recordId: 'record-demo' }],
+      completeClosure: async () => ({ status: 'done', runId: reviewId,
+        recordId: 'record-demo' }),
     },
     adminAuth: (req, res, next) => {
       if (!role) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED' });
@@ -103,6 +106,23 @@ test('điều kiện chốt hồ sơ chỉ đọc được bằng token nội b�
   assert.equal(result.status, 200);
   assert.deepEqual(result.body.closure,
     { eligible: false, reason: 'PAIR_NOT_DELIVERED' });
+});
+
+test('hàng chốt hồ sơ và biên nhận chốt chỉ dùng token nội bộ', async () => {
+  const dueUrl = '/api/v1/internal/writing-flow/scans/closure-due';
+  assert.equal((await request(makeApp(null)).post(dueUrl).send({ limit: 10 })).status, 401);
+  const due = await request(makeApp(null)).post(dueUrl)
+    .set('Authorization', `Bearer ${config.internalApiToken}`).send({ limit: 10 });
+  assert.equal(due.status, 200);
+  assert.equal(due.body.records[0].recordId, 'record-demo');
+  const completeUrl = '/api/v1/internal/writing-flow/scans/closure-complete';
+  const body = { runId: reviewId, appId: 'app-demo', tableId: 'table-demo',
+    recordId: 'record-demo', finishedAtMs: 1780000000000 };
+  assert.equal((await request(makeApp(null)).post(completeUrl).send(body)).status, 401);
+  const complete = await request(makeApp(null)).post(completeUrl)
+    .set('Authorization', `Bearer ${config.internalApiToken}`).send(body);
+  assert.equal(complete.status, 200);
+  assert.equal(complete.body.closure.status, 'done');
 });
 
 test('chỉ quản trị viên thấy danh sách bài cần kiểm tra', async () => {

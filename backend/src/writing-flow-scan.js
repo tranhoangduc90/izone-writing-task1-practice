@@ -11,6 +11,74 @@ const itemKey = item => digest([item.recordId, item.docId ?? '', item.linkIndex]
 // Khi lỗi: giao dịch hoàn tác và mốc quét không đổi.
 export function createWritingFlowScan({ pool }) {
   return {
+    // Nhận vào: định danh một hồ sơ homework đã được quét.
+    // Việc chính: đối chiếu lượt quét mới nhất, lỗi nguồn và kết quả giao từng ô.
+    // Trả ra: điều kiện chốt cùng danh sách link để workflow đối chiếu Lark trước khi ghi.
+    // Khi chưa đủ dữ liệu: giữ hồ sơ mở và nêu mã lý do, không tự ghi Lark.
+    async closureEligibility({ appId, tableId, recordId }) {
+      const latest = await pool.query(`SELECT r.run_id,r.status,r.scanned_through_at
+        FROM writing_flow.scan_run r
+        JOIN writing_flow.scan_item i ON i.run_id=r.run_id
+        WHERE r.source_app_id=$1 AND r.source_table_id=$2
+          AND i.source_record_id=$3
+        ORDER BY r.started_at DESC,r.run_id DESC LIMIT 1`,
+      [appId, tableId, recordId]);
+      if (!latest.rowCount) return { eligible: false, reason: 'SCAN_NOT_FOUND' };
+      const run = latest.rows[0];
+      if (run.status !== 'complete') {
+        return { eligible: false, reason: 'SCAN_NOT_COMPLETE', runId: run.run_id };
+      }
+      const items = await pool.query(`SELECT source_link_index,homework_file_id,
+          status,expected_pair_count,receipt_pair_ids
+        FROM writing_flow.scan_item
+        WHERE run_id=$1 AND source_record_id=$2
+        ORDER BY source_link_index`, [run.run_id, recordId]);
+      const links = items.rows.map(item => ({
+        linkIndex: item.source_link_index, docId: item.homework_file_id,
+      }));
+      if (items.rows.some(item => !['accepted', 'empty'].includes(item.status))) {
+        return { eligible: false, reason: 'SCAN_ITEM_UNRESOLVED',
+          runId: run.run_id, links };
+      }
+      const issues = await pool.query(`SELECT count(*)::integer AS issue_count
+        FROM writing_flow.source_issue
+        WHERE source_app_id=$1 AND source_table_id=$2
+          AND source_record_id=$3 AND status='open'`,
+      [appId, tableId, recordId]);
+      if (Number(issues.rows[0]?.issue_count) > 0) {
+        return { eligible: false, reason: 'SOURCE_ISSUE_OPEN',
+          runId: run.run_id, links };
+      }
+      let expected = 0;
+      for (const item of items.rows) {
+        if (item.status === 'empty') continue;
+        const pairIds = item.receipt_pair_ids;
+        if (!Array.isArray(pairIds)
+          || pairIds.length !== item.expected_pair_count
+          || new Set(pairIds).size !== pairIds.length) {
+          return { eligible: false, reason: 'SCAN_RECEIPT_MISMATCH',
+            runId: run.run_id, links };
+        }
+        const pairs = await pool.query(`SELECT p.pair_id,p.status,
+            s.status AS delivery_status
+          FROM writing_flow.pair p
+          LEFT JOIN writing_flow.stage_result s
+            ON s.pair_id=p.pair_id AND s.stage_key='deliver'
+          WHERE p.pair_id=ANY($1::uuid[])`, [pairIds]);
+        expected += Number(item.expected_pair_count);
+        if (pairs.rowCount !== item.expected_pair_count
+          || pairs.rows.some(pair => pair.status !== 'delivered'
+            || pair.delivery_status !== 'succeeded')) {
+          return { eligible: false, reason: 'PAIR_NOT_DELIVERED',
+            runId: run.run_id, links };
+        }
+      }
+      if (!expected) return { eligible: false, reason: 'NO_WRITING_PAIR',
+        runId: run.run_id, links };
+      return { eligible: true, reason: 'ALL_PAIRS_DELIVERED',
+        runId: run.run_id, scannedThroughAt: run.scanned_through_at,
+        expectedPairCount: expected, links };
+    },
     async begin({ requestKey, appId, tableId, scannedThroughAt, pageCount, reachedEnd, items }) {
       if (!reachedEnd) throw new ApiError(409, 'SCAN_NOT_COMPLETE', 'Chưa đọc hết các trang hồ sơ.');
       const cutoff = new Date(scannedThroughAt);
@@ -165,10 +233,10 @@ export function createWritingFlowScan({ pool }) {
         await client.query(`UPDATE writing_flow.scan_item
           SET status=$3,expected_pair_count=$4,receipt_pair_count=$5,
               receipt_issue_count=$6,source_issue_keys=$7,receipt_sha256=$8,
-              acknowledged_at=now()
+              receipt_pair_ids=$9,acknowledged_at=now()
           WHERE run_id=$1 AND item_key=$2`,
         [runId, key, status, detectedSlotCount, pairIds.length,
-          issueKeys.length, issueKeys, receiptSha256]);
+          issueKeys.length, issueKeys, receiptSha256, pairIds]);
         return { itemKey: key, status };
       });
     },

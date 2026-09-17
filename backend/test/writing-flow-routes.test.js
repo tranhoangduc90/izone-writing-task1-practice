@@ -50,6 +50,7 @@ function makeApp(role, overrides = {}, stageOverrides = {}, aiOverrides = {}) {
       due: async () => [],
       finishReady: async () => [],
       receipts: async () => ({ pairIds: [reviewId], issueKeys: [] }),
+      closureEligibility: async () => ({ eligible: false, reason: 'PAIR_NOT_DELIVERED' }),
     },
     adminAuth: (req, res, next) => {
       if (!role) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED' });
@@ -91,6 +92,17 @@ test('đọc lại biên nhận từng ô chỉ dùng token nội bộ', async (
     .set('Authorization', `Bearer ${config.internalApiToken}`)
     .send({ ...body, expectedIssues: [{ essaySlot: 1, reasonCode: 'PARSER_FAILED' }] });
   assert.equal(duplicate.status, 400);
+});
+
+test('điều kiện chốt hồ sơ chỉ đọc được bằng token nội bộ', async () => {
+  const url = '/api/v1/internal/writing-flow/scans/closure-eligibility';
+  const body = { appId: 'app-demo', tableId: 'table-demo', recordId: 'record-demo' };
+  assert.equal((await request(makeApp(null)).post(url).send(body)).status, 401);
+  const result = await request(makeApp(null)).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`).send(body);
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body.closure,
+    { eligible: false, reason: 'PAIR_NOT_DELIVERED' });
 });
 
 test('chỉ quản trị viên thấy danh sách bài cần kiểm tra', async () => {

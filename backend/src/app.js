@@ -102,6 +102,9 @@ const writingScanAck=z.object({
 const writingScanCursor=z.object({
  appId:z.string().trim().min(1).max(120),tableId:z.string().trim().min(1).max(120)
 });
+const writingScanClosure=writingScanCursor.extend({
+ recordId:z.string().trim().min(1).max(120)
+});
 const writingScanReceipts=z.object({
  appId:z.string().trim().min(1).max(120),tableId:z.string().trim().min(1).max(120),
  recordId:z.string().trim().min(1).max(120),docId:z.string().trim().min(1).max(160).nullable(),
@@ -249,6 +252,9 @@ export function createApp({config,pool,service,lessonService=service,provisional
  }));
  app.post('/api/v1/internal/writing-flow/scans/receipts',internal,writingScanReady,asyncRoute(async(q,r)=>{
    r.json({ok:true,receipts:await writingFlowScan.receipts(parse(writingScanReceipts,q.body))});
+ }));
+ app.post('/api/v1/internal/writing-flow/scans/closure-eligibility',internal,writingScanReady,asyncRoute(async(q,r)=>{
+   r.json({ok:true,closure:await writingFlowScan.closureEligibility(parse(writingScanClosure,q.body))});
  }));
  app.post('/api/v1/internal/writing-flow/stages/claim',internal,writingStageReady,asyncRoute(async(q,r)=>{
    r.json({ok:true,claim:await writingFlowStage.claim(parse(writingClaim,q.body))});

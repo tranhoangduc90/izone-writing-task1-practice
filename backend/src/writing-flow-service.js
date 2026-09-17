@@ -10,30 +10,33 @@ import { createWritingFlowIntake } from './writing-flow-intake.js';
 export function createWritingFlowService({ pool, encryptionKey = null }) {
   return {
     intakePairs: createWritingFlowIntake({ pool, encryptionKey }),
-    async recordSourceIssue({ recordId, docId = null, linkIndex = null,
+    async recordSourceIssue({ appId, tableId, recordId, docId = null, linkIndex = null,
       essaySlot = null, classCode = null, reasonCode }) {
       // Chỉ lưu định danh kỹ thuật và mã lỗi; không lưu link gốc hoặc bài học viên.
       const issueKey = crypto.createHash('sha256')
-        .update(JSON.stringify([recordId, docId ?? '', linkIndex ?? 0,
+        .update(JSON.stringify([appId, tableId, recordId, docId ?? '', linkIndex ?? 0,
           essaySlot ?? 0, reasonCode]))
         .digest('hex');
       const result = await pool.query(`
         INSERT INTO writing_flow.source_issue
-          (issue_key,source_record_id,homework_file_id,source_link_index,
+          (issue_key,source_app_id,source_table_id,source_record_id,
+           homework_file_id,source_link_index,
            essay_slot,class_code,reason_code)
-        VALUES ($1,$2,$3,$4,$5,$6,$7)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
         ON CONFLICT (issue_key) DO UPDATE
           SET status='open',resolved_at=NULL,
               occurrence_count=writing_flow.source_issue.occurrence_count+1,
               last_seen_at=now()
         RETURNING issue_key,status,reason_code,occurrence_count`,
-      [issueKey, recordId, docId, linkIndex, essaySlot, classCode, reasonCode]);
+      [issueKey, appId, tableId, recordId,
+        docId, linkIndex, essaySlot, classCode, reasonCode]);
       return result.rows[0];
     },
 
     async listSourceIssues({ limit = 100, offset = 0 } = {}) {
       const result = await pool.query(`
-        SELECT issue_key,source_record_id,homework_file_id,source_link_index,
+        SELECT issue_key,source_app_id,source_table_id,source_record_id,
+               homework_file_id,source_link_index,
                essay_slot,class_code,reason_code,occurrence_count,first_seen_at,last_seen_at
           FROM writing_flow.source_issue WHERE status='open'
          ORDER BY last_seen_at DESC,issue_key
@@ -51,7 +54,8 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
 
     async listPairs({ classCode = null, limit = 100, offset = 0 } = {}) {
       const result = await pool.query(`
-        SELECT p.pair_id, p.class_code, p.source_record_id, p.homework_file_id,
+        SELECT p.pair_id, p.class_code, p.source_app_id, p.source_table_id,
+               p.source_record_id, p.homework_file_id,
                p.source_link_index, p.essay_slot, p.task_type, p.status,
                p.created_at, p.updated_at,
                current_stage.stage_key, current_stage.stage_status,
@@ -74,7 +78,8 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
       const result = await pool.query(`
         SELECT r.review_id, r.pair_id, r.stage_key, r.cycle_no, r.status,
                r.error_code, r.opened_at, r.checked_at, r.retry_requested_at,
-               s.attempt_count, p.class_code, p.source_record_id,
+               s.attempt_count, p.class_code, p.source_app_id,
+               p.source_table_id, p.source_record_id,
                p.homework_file_id, p.source_link_index, p.essay_slot,
                p.task_type
           FROM writing_flow.manual_review AS r

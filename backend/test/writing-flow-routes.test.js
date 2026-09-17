@@ -67,7 +67,8 @@ test('lỗi nguồn có danh sách riêng và route ghi chỉ dùng token nội 
   assert.equal((await request(makeApp(null)).post(url).send({})).status, 401);
   const recorded = await request(makeApp(null)).post(url)
     .set('Authorization', `Bearer ${config.internalApiToken}`)
-    .send({ recordId: 'record-demo', docId: 'doc-demo', linkIndex: 2,
+    .send({ appId: 'app-demo', tableId: 'table-demo',
+      recordId: 'record-demo', docId: 'doc-demo', linkIndex: 2,
       classCode: 'IC2200', reasonCode: 'FETCH_FAILED' });
   assert.equal(recorded.status, 202);
 });
@@ -94,7 +95,8 @@ test('tiếp nhận từng cặp bắt buộc token nội bộ và identity củ
   const url = '/api/v1/internal/writing-flow/intake';
   assert.equal((await request(makeApp('admin')).post(url).send({})).status, 401);
   const body = {
-    operationKey: 'scan-demo', recordId: 'record-demo', docId: 'doc-demo',
+    operationKey: 'scan-demo', appId: 'app-demo', tableId: 'table-demo',
+    recordId: 'record-demo', docId: 'doc-demo',
     linkIndex: 2, classCode: 'IC2200', sourceModifiedAt: '2026-09-17T08:00:00.000Z',
     larkMeta: { classCode: 'IC2200', imageUrls: {
       1: '', 2: '', 3: '', 4: 'https://example.test/chart-four',

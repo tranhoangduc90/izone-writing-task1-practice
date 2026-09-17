@@ -42,6 +42,8 @@ const teacherCommentReply=z.object({body:teacherCommentBody,requestId:uuid});
 const teacherCommentStatus=z.object({status:z.enum(['open','addressed']),requestId:uuid});
 const writingPairIntake=z.object({
  operationKey:z.string().trim().min(1).max(120),
+ appId:z.string().trim().min(1).max(120),
+ tableId:z.string().trim().min(1).max(120),
  recordId:z.string().trim().min(1).max(120),
  docId:z.string().trim().min(1).max(160),
  linkIndex:z.number().int().min(1).max(100),
@@ -64,6 +66,8 @@ const writingPairIntake=z.object({
  })).min(1).max(4)
 });
 const writingSourceIssue=z.object({
+ appId:z.string().trim().min(1).max(120),
+ tableId:z.string().trim().min(1).max(120),
  recordId:z.string().trim().min(1).max(120),
  docId:z.string().trim().min(1).max(160).nullable().default(null),
  linkIndex:z.number().int().min(1).max(100).nullable().default(null),

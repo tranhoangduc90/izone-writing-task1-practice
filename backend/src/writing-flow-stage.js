@@ -24,7 +24,8 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
     return withTransaction(pool, async client => {
       const pairResult = await client.query(`
         SELECT pair_id, submission_revision, status, source_ciphertext,
-               source_record_id, homework_file_id, source_link_index,
+               source_app_id, source_table_id, source_record_id,
+               homework_file_id, source_link_index,
                essay_slot, class_code, document_kind, source_modified_at
           FROM writing_flow.pair WHERE pair_id = $1 FOR UPDATE`, [pairId]);
       if (pairResult.rowCount !== 1) throw new ApiError(404, 'PAIR_NOT_FOUND', 'Không tìm thấy bài chấm.');
@@ -168,6 +169,8 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
         source: (() => {
           const [taskType, topic, image, essay] = decode(pair.source_ciphertext, key);
           return { taskType, topic, image, essay,
+            appId: pair.source_app_id,
+            tableId: pair.source_table_id,
             recordId: pair.source_record_id,
             homeworkFileId: pair.homework_file_id,
             sourceLinkIndex: pair.source_link_index,

@@ -17,6 +17,7 @@ test('bàn giao bước chấm giữ đúng file, link và ô homework', async (
         rowCount: 1, rows: [{
           pair_id: pairId, submission_revision: revision, status: 'received',
           source_ciphertext: seal(JSON.stringify(source), key),
+          source_app_id: 'app-demo', source_table_id: 'table-demo',
           source_record_id: 'record-demo', homework_file_id: 'doc-demo',
           source_link_index: 2, essay_slot: 4, class_code: 'IC2200',
           document_kind: 'google_docs', source_modified_at: '2026-09-17T08:00:00Z',
@@ -50,6 +51,7 @@ test('bàn giao bước chấm giữ đúng file, link và ô homework', async (
   assert.deepEqual(result.source, {
     taskType: 'task_1', topic: 'Đề giả',
     image: 'https://example.test/chart', essay: 'Bài giả',
+    appId: 'app-demo', tableId: 'table-demo',
     recordId: 'record-demo', homeworkFileId: 'doc-demo',
     sourceLinkIndex: 2, essaySlot: 4, classCode: 'IC2200',
     documentKind: 'google_docs',

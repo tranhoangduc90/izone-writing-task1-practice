@@ -64,6 +64,8 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
       }
       const resultJson = JSON.stringify({
         operationKey: input.operationKey,
+        appId: input.appId,
+        tableId: input.tableId,
         recordId: input.recordId,
         docId: input.docId,
         linkIndex: input.linkIndex,
@@ -80,13 +82,15 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
     return withTransaction(pool, async client => {
       const receipts = [];
       for (const pair of prepared) {
-        const scope = [input.recordId, input.docId, input.linkIndex, pair.essaySlot];
+        const scope = [input.appId, input.tableId, input.recordId,
+          input.docId, input.linkIndex, pair.essaySlot];
         await client.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', [JSON.stringify(scope)]);
         const current = await client.query(`
           SELECT pair_id, submission_revision, source_modified_at, status
             FROM writing_flow.pair
-           WHERE source_record_id = $1 AND homework_file_id = $2
-             AND source_link_index = $3 AND essay_slot = $4
+           WHERE source_app_id = $1 AND source_table_id = $2
+             AND source_record_id = $3 AND homework_file_id = $4
+             AND source_link_index = $5 AND essay_slot = $6
            ORDER BY source_modified_at DESC, created_at DESC
            LIMIT 1`, scope);
         const newest = current.rows[0];
@@ -111,15 +115,17 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
         }
         await client.query(`
           UPDATE writing_flow.pair SET status = 'superseded', updated_at = now()
-           WHERE source_record_id = $1 AND homework_file_id = $2
-             AND source_link_index = $3 AND essay_slot = $4
+           WHERE source_app_id = $1 AND source_table_id = $2
+             AND source_record_id = $3 AND homework_file_id = $4
+             AND source_link_index = $5 AND essay_slot = $6
              AND status <> 'superseded'`, scope);
         const inserted = await client.query(`
           INSERT INTO writing_flow.pair
-            (source_record_id, homework_file_id, source_link_index, essay_slot,
+            (source_app_id, source_table_id, source_record_id,
+             homework_file_id, source_link_index, essay_slot,
              submission_revision, source_modified_at, content_sha256, class_code,
              task_type, document_kind, source_ciphertext, encryption_version)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,1)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1)
           RETURNING pair_id`, [
           ...scope, pair.revision, sourceModifiedAt, pair.revision, input.classCode,
           pair.taskType, input.documentKind, pair.sourceCiphertext,
@@ -154,10 +160,12 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
         if (!['received', 'existing'].includes(receipt.status)) continue;
         await client.query(`UPDATE writing_flow.source_issue
           SET status='resolved',resolved_at=now(),last_seen_at=now()
-          WHERE source_record_id=$1 AND homework_file_id=$2
-            AND source_link_index=$3 AND (essay_slot=$4 OR essay_slot IS NULL)
+          WHERE source_app_id=$1 AND source_table_id=$2
+            AND source_record_id=$3 AND homework_file_id=$4
+            AND source_link_index=$5 AND (essay_slot=$6 OR essay_slot IS NULL)
             AND status='open'`,
-        [input.recordId, input.docId, input.linkIndex, receipt.essaySlot]);
+        [input.appId, input.tableId, input.recordId,
+          input.docId, input.linkIndex, receipt.essaySlot]);
       }
       return { detectedCount: input.expectedCount, registeredCount: receipts.length, receipts };
     });

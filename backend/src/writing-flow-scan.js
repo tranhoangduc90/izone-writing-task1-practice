@@ -39,7 +39,7 @@ export function createWritingFlowScan({ pool }) {
           if (row.manifest_sha256 !== manifestSha256) {
             throw new ApiError(409, 'SCAN_REQUEST_CONFLICT', 'Mã lượt quét cũ có danh sách khác.');
           }
-          return { runId: row.run_id, status: row.status,
+          return { runId: row.run_id, status: row.status, appId, tableId, requestKey,
             previousCursor: cursor.rows[0].scanned_through_at,
             items: manifest.map(({ itemKey: key, recordId, linkIndex }) => ({ itemKey: key, recordId, linkIndex })) };
         }
@@ -66,7 +66,8 @@ export function createWritingFlowScan({ pool }) {
             VALUES ($1,$2,$3,$4,$5,$6)`,
           [runId, item.itemKey, item.recordId, item.docId, item.linkIndex, item.classCode ?? null]);
         }
-        return { runId, status: 'open', previousCursor: cursor.rows[0].scanned_through_at,
+        return { runId, status: 'open', appId, tableId, requestKey,
+          previousCursor: cursor.rows[0].scanned_through_at,
           items: manifest.map(({ itemKey: key, recordId, linkIndex }) => ({ itemKey: key, recordId, linkIndex })) };
       });
     },
@@ -210,6 +211,52 @@ export function createWritingFlowScan({ pool }) {
         FROM writing_flow.scan_cursor WHERE source_app_id=$1 AND source_table_id=$2`,
       [appId, tableId]);
       return { appId, tableId, scannedThroughAt: result.rows[0]?.scanned_through_at ?? null };
+    },
+
+    // Nhận vào: số link tối đa để gửi trong một nhịp.
+    // Việc chính: cấp lại link chưa có biên nhận, mỗi lần cách nhau ít nhất 30 giây.
+    // Trả ra: định danh nguồn để workflow đọc lại bản hiện tại; không chứa bài học viên.
+    // Khi workflow sau không chạy: link vẫn pending và được cấp lại.
+    async due({ limit = 100 } = {}) {
+      return withTransaction(pool, async client => {
+        const result = await client.query(`WITH ready AS (
+          SELECT i.run_id,i.item_key FROM writing_flow.scan_item i
+          JOIN writing_flow.scan_run r ON r.run_id=i.run_id
+          WHERE i.status='pending' AND r.status='open' AND i.next_send_at<=now()
+          ORDER BY i.next_send_at,i.run_id,i.item_key
+          LIMIT $1 FOR UPDATE OF i SKIP LOCKED
+        )
+        UPDATE writing_flow.scan_item i
+        SET send_count=i.send_count+1,last_sent_at=now(),
+            next_send_at=now()+interval '30 seconds'
+        FROM ready,writing_flow.scan_run r
+        WHERE i.run_id=ready.run_id AND i.item_key=ready.item_key
+          AND r.run_id=i.run_id
+        RETURNING i.run_id,i.item_key,i.source_record_id,i.homework_file_id,
+          i.source_link_index,i.class_code,i.send_count,
+          r.source_app_id,r.source_table_id`, [limit]);
+        return result.rows.map(row => ({
+          runId: row.run_id, itemKey: row.item_key,
+          appId: row.source_app_id, tableId: row.source_table_id,
+          recordId: row.source_record_id, docId: row.homework_file_id,
+          linkIndex: row.source_link_index, classCode: row.class_code,
+          sendCount: row.send_count,
+        }));
+      });
+    },
+
+    // Nhận vào: các lượt đã đủ biên nhận nhưng chưa kịp chốt mốc.
+    // Việc chính: chốt từng bảng bằng cùng phép kiểm của finish.
+    // Trả ra: mã lượt đã chốt; lỗi một bảng không đổi mốc bảng khác.
+    async finishReady({ limit = 100 } = {}) {
+      const runs = await pool.query(`SELECT r.run_id FROM writing_flow.scan_run r
+        WHERE r.status='open' AND NOT EXISTS (
+          SELECT 1 FROM writing_flow.scan_item i
+          WHERE i.run_id=r.run_id AND i.status='pending')
+        ORDER BY r.started_at,r.run_id LIMIT $1`, [limit]);
+      const completed = [];
+      for (const row of runs.rows) completed.push(await this.finish({ runId: row.run_id }));
+      return completed;
     },
   };
 }

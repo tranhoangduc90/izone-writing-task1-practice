@@ -47,6 +47,8 @@ function makeApp(role, overrides = {}, stageOverrides = {}, aiOverrides = {}) {
       begin: async input => ({ runId: reviewId, count: input.items.length }),
       acknowledge: async input => ({ itemKey: input.itemKey, status: input.status }),
       finish: async () => ({ runId: reviewId, status: 'complete' }),
+      due: async () => [],
+      finishReady: async () => [],
     },
     adminAuth: (req, res, next) => {
       if (!role) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED' });

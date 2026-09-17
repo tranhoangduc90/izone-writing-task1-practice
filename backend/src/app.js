@@ -85,7 +85,7 @@ const writingScanItem=z.object({
  classCode:z.string().trim().min(1).max(80).nullable().optional()
 });
 const writingScanBegin=z.object({
- requestKey:uuid,appId:z.string().trim().min(1).max(120),
+ requestKey:z.string().trim().min(1).max(160),appId:z.string().trim().min(1).max(120),
  tableId:z.string().trim().min(1).max(120),
  scannedThroughAt:z.string().trim().min(1).max(80),
  pageCount:z.number().int().min(1).max(10000),reachedEnd:z.literal(true),
@@ -222,6 +222,14 @@ export function createApp({config,pool,service,lessonService=service,provisional
  }));
  app.post('/api/v1/internal/writing-flow/scans/finish',internal,writingScanReady,asyncRoute(async(q,r)=>{
    r.json({ok:true,scan:await writingFlowScan.finish(parse(z.object({runId:uuid}),q.body))});
+ }));
+ app.post('/api/v1/internal/writing-flow/scans/due',internal,writingScanReady,asyncRoute(async(q,r)=>{
+   const {limit}=parse(z.object({limit:z.number().int().min(1).max(200).default(100)}),q.body);
+   r.json({ok:true,items:await writingFlowScan.due({limit})});
+ }));
+ app.post('/api/v1/internal/writing-flow/scans/finish-ready',internal,writingScanReady,asyncRoute(async(q,r)=>{
+   const {limit}=parse(z.object({limit:z.number().int().min(1).max(200).default(100)}),q.body);
+   r.json({ok:true,scans:await writingFlowScan.finishReady({limit})});
  }));
  app.post('/api/v1/internal/writing-flow/stages/claim',internal,writingStageReady,asyncRoute(async(q,r)=>{
    r.json({ok:true,claim:await writingFlowStage.claim(parse(writingClaim,q.body))});

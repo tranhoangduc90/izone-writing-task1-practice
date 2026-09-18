@@ -66,3 +66,23 @@ test('lỗi nguồn của hai ô cùng file có khóa riêng', async () => {
   assert.equal(writes[0].values[6], 1);
   assert.equal(writes[1].values[6], 2);
 });
+
+test('nhật ký một bài chỉ đọc metadata và sắp theo thời gian', async () => {
+  const sqlSeen = [];
+  const pairId = '33333333-3333-4333-8333-333333333333';
+  const pool = { query: async sql => {
+    sqlSeen.push(sql);
+    if (sql.includes('FROM writing_flow.pair WHERE')) return {
+      rowCount: 1, rows: [{ pair_id: pairId, status: 'running' }] };
+    if (sql.includes('FROM writing_flow.stage_result WHERE')) return {
+      rows: [{ stage_key: 'main', status: 'running', updated_at: '2026-09-18T10:02:00Z' }] };
+    if (sql.includes('FROM writing_flow.stage_attempt WHERE')) return {
+      rows: [{ stage_key: 'main', attempt_no: 1, status: 'failed',
+        started_at: '2026-09-18T10:01:00Z', finished_at: '2026-09-18T10:03:00Z' }] };
+    return { rows: [] };
+  } };
+  const history = await createWritingFlowService({ pool }).pairHistory({ pairId });
+  assert.deepEqual(history.events.map(row => row.kind), ['stage', 'attempt']);
+  assert.equal(sqlSeen.length, 6);
+  assert.equal(sqlSeen.every(sql => !/ciphertext|prompt|source_text|essay_text/i.test(sql)), true);
+});

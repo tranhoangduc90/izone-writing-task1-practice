@@ -35,6 +35,42 @@ function makeText(tag, value, className = '') {
   return node;
 }
 
+function describeHistoryEvent(event) {
+  const step = stageNames[event.stage_key] || event.stage_key || '';
+  const status = event.status || 'chưa rõ';
+  if (event.kind === 'stage') return `${step}: ${status}${event.error_code ? ` · lỗi ${event.error_code}` : ''}`;
+  if (event.kind === 'attempt') return `${step}: lần thử ${event.attempt_no}, ${status}${event.error_code ? ` · lỗi ${event.error_code}` : ''}`;
+  if (event.kind === 'ai_call') return `${step}: gọi AI nhóm ${Number(event.batch_index) + 1}, ${status}${event.provider ? ` · ${event.provider}` : ''}${event.error_code ? ` · lỗi ${event.error_code}` : ''}`;
+  if (event.kind === 'handoff') return `Chuyển từ ${stageNames[event.from_stage] || event.from_stage} sang ${stageNames[event.to_stage] || event.to_stage}: ${status}, đã gửi ${event.send_count} lần`;
+  return `${step}: danh sách Cần kiểm tra, ${status}${event.error_code ? ` · lỗi ${event.error_code}` : ''}`;
+}
+
+function historyDetails(pair) {
+  const details = document.createElement('details');
+  details.append(makeText('summary', 'Xem nhật ký từng bước'));
+  const content = makeText('div', '', 'flow-history');
+  details.append(content);
+  details.addEventListener('toggle', async () => {
+    if (!details.open || details.dataset.loaded) return;
+    content.textContent = 'Đang tải nhật ký…';
+    try {
+      const history = (await state.api.writingPairHistory(pair.pair_id)).data.history;
+      content.replaceChildren();
+      if (!history.events.length) content.append(makeText('p', 'Bài chưa bắt đầu xử lý.', 'muted'));
+      for (const event of history.events) {
+        const time = event.at ? new Date(event.at).toLocaleString('vi-VN') : 'Chưa rõ giờ';
+        const execution = event.n8n_execution_id ? ` · mã lượt n8n ${event.n8n_execution_id}` : '';
+        const line = makeText('p', `${time} · ${describeHistoryEvent(event)}${execution}`, 'flow-meta');
+        content.append(line);
+      }
+      details.dataset.loaded = 'true';
+    } catch (error) {
+      content.textContent = `Chưa đọc được nhật ký: ${error.message}`;
+    }
+  });
+  return details;
+}
+
 function renderSummary(summary, selectedClass) {
   const root = $('flow-summary');
   root.replaceChildren();
@@ -82,7 +118,8 @@ function renderPairs(pairs) {
           const task = pair.task_type === 'task_1' ? 'Task 1'
             : pair.task_type === 'task_2' ? 'Task 2' : 'Chưa rõ Task';
           body.append(makeText('strong', `Bài số ${pair.essay_slot} · ${task}`),
-            makeText('p', `${statusNames[pair.status] || pair.status}${stage}`, 'flow-meta'));
+            makeText('p', `${statusNames[pair.status] || pair.status}${stage}`, 'flow-meta'),
+            historyDetails(pair));
           row.append(body); fileSection.append(row);
         }
         homeworkSection.append(fileSection);

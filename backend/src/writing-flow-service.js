@@ -74,6 +74,45 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
       return result.rows;
     },
 
+    // Nhận vào: mã của đúng một cặp đề–bài do quản trị viên chọn trên trang.
+    // Việc chính: ghép các mốc giai đoạn, lần thử, AI, bàn giao và kiểm tra thành lịch sử theo giờ.
+    // Trả ra: mã kỹ thuật, trạng thái và lỗi; không truy vấn bài viết, prompt hoặc kết quả đã mã hóa.
+    // Khi không thấy bài: trả 404 để trang không nhầm lịch sử của một bài khác.
+    async pairHistory({ pairId }) {
+      const found = await pool.query(`SELECT pair_id,class_code,task_type,essay_slot,status
+        FROM writing_flow.pair WHERE pair_id=$1`, [pairId]);
+      if (!found.rowCount) throw new ApiError(404, 'WRITING_PAIR_NOT_FOUND', 'Không tìm thấy bài này.');
+      const [stages, attempts, aiCalls, handoffs, reviews] = await Promise.all([
+        pool.query(`SELECT stage_key,status,cycle_no,attempt_count,error_code,
+            n8n_execution_id,started_at,completed_at,updated_at
+          FROM writing_flow.stage_result WHERE pair_id=$1`, [pairId]),
+        pool.query(`SELECT stage_key,cycle_no,attempt_no,status,error_code,
+            n8n_execution_id,attempt_id,started_at,finished_at
+          FROM writing_flow.stage_attempt WHERE pair_id=$1
+          ORDER BY started_at,attempt_id LIMIT 100`, [pairId]),
+        pool.query(`SELECT stage_key,batch_index,status,provider,route,error_code,
+            call_id,gateway_operation_id,created_at,finished_at
+          FROM writing_flow.ai_call WHERE pair_id=$1
+          ORDER BY created_at,call_id LIMIT 500`, [pairId]),
+        pool.query(`SELECT from_stage,to_stage,status,send_count,error_code,
+            handoff_id,created_at,last_sent_at,acknowledged_at
+          FROM writing_flow.handoff WHERE pair_id=$1
+          ORDER BY created_at,handoff_id LIMIT 100`, [pairId]),
+        pool.query(`SELECT stage_key,cycle_no,status,error_code,review_id,
+            opened_at,retry_requested_at,retry_accepted_at,resolved_at
+          FROM writing_flow.manual_review WHERE pair_id=$1
+          ORDER BY opened_at,review_id LIMIT 100`, [pairId]),
+      ]);
+      const events = [
+        ...stages.rows.map(row => ({ kind: 'stage', at: row.updated_at, ...row })),
+        ...attempts.rows.map(row => ({ kind: 'attempt', at: row.finished_at || row.started_at, ...row })),
+        ...aiCalls.rows.map(row => ({ kind: 'ai_call', at: row.finished_at || row.created_at, ...row })),
+        ...handoffs.rows.map(row => ({ kind: 'handoff', at: row.acknowledged_at || row.last_sent_at || row.created_at, ...row })),
+        ...reviews.rows.map(row => ({ kind: 'review', at: row.resolved_at || row.retry_accepted_at || row.retry_requested_at || row.opened_at, ...row })),
+      ].sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+      return { pair: found.rows[0], events };
+    },
+
     async listReviews({ limit = 100, offset = 0 } = {}) {
       const result = await pool.query(`
         SELECT r.review_id, r.pair_id, r.stage_key, r.cycle_no, r.status,

@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import { z } from 'zod';
 import { ApiError } from './service.js';
 import { createTeacherClassAccessService, reviewerIsAdmin } from './teacher-class-access.js';
+import { writingFlowRequestLog } from './writing-flow-observability.js';
 
 const uuid=z.string().uuid(), section=z.enum(['overview','outline','draft']);
 const lessonSection=z.string().regex(/^[a-z0-9][a-z0-9_]{1,79}$/);
@@ -186,7 +187,7 @@ export function writingWriteRateKey(req) {
 export function writingWriteRateLimit(req) {
   return writingRateIdentity(req) ? 240 : 2_000;
 }
-function cors(config){return(req,res,next)=>{const origin=req.get('origin');if(origin&&!config.allowedOrigins.has(origin))return res.status(403).json({ok:false,error:'ORIGIN_NOT_ALLOWED'});if(origin){res.set('Access-Control-Allow-Origin',origin);res.set('Vary','Origin');}res.set('Access-Control-Allow-Methods','GET, POST, PUT, OPTIONS');res.set('Access-Control-Allow-Headers','Authorization, Content-Type, If-None-Match, If-Match');res.set('Access-Control-Expose-Headers','ETag, Retry-After');res.set('Cache-Control','no-store');return req.method==='OPTIONS'?res.status(204).end():next();};}
+function cors(config){return(req,res,next)=>{const origin=req.get('origin');if(origin&&!config.allowedOrigins.has(origin))return res.status(403).json({ok:false,error:'ORIGIN_NOT_ALLOWED'});if(origin){res.set('Access-Control-Allow-Origin',origin);res.set('Vary','Origin');}res.set('Access-Control-Allow-Methods','GET, POST, PUT, OPTIONS');res.set('Access-Control-Allow-Headers','Authorization, Content-Type, If-None-Match, If-Match');res.set('Access-Control-Expose-Headers','ETag, Retry-After, X-Writing-Request-Id');res.set('Cache-Control','no-store');return req.method==='OPTIONS'?res.status(204).end():next();};}
 function csvCell(value){const text=String(value??'');return /[",\r\n]/.test(text)?`"${text.replaceAll('"','""')}"`:text;}
 
 export function createApp({config,pool,service,lessonService=service,provisionalService=null,lmsResultService=null,teacherCommentService=null,teacherClassAccess=null,writingFlowService=null,writingFlowStage=null,writingFlowHandoff=null,writingFlowAiCall=null,writingFlowScan=null,adminAuth=(_q,r)=>r.status(503).json({ok:false,error:'ADMIN_AUTH_NOT_CONFIGURED'})}){
@@ -202,6 +203,8 @@ export function createApp({config,pool,service,lessonService=service,provisional
  const dashboardScope=q=>({reviewerEmail:q.reviewer.email,canAccessAllClasses:reviewerIsAdmin(q.reviewer)});
  // Một lớp có thể dùng chung một địa chỉ mạng. Ngưỡng đọc này vẫn chịu được 40 học viên polling 2 giây/lần.
  app.use(rateLimit({windowMs:60_000,limit:2400,standardHeaders:'draft-8',legacyHeaders:false,message:{ok:false,error:'RATE_LIMITED'}}));
+ app.use('/api/v1/internal/writing-flow',writingFlowRequestLog());
+ app.use('/api/v1/admin/writing-flow',writingFlowRequestLog());
  app.use('/api/v1/internal/writing-flow',express.json({limit:'512kb',strict:true}));
  app.use(express.json({limit:'96kb',strict:true}));
  app.get('/health',(_q,r)=>r.json({ok:true}));app.get('/ready',asyncRoute(async(_q,r)=>{await pool.query('SELECT 1');r.json({ok:true});}));
@@ -342,6 +345,10 @@ export function createApp({config,pool,service,lessonService=service,provisional
    const classCode=q.query.classCode?parse(z.string().trim().min(1).max(80),q.query.classCode):null;
    r.json({ok:true,pairs:await writingFlowService.listPairs({classCode,limit,offset})});
  }));
+ app.get('/api/v1/admin/writing-flow/pairs/:pairId/history',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
+   const pairId=parse(uuid,q.params.pairId);
+   r.json({ok:true,history:await writingFlowService.pairHistory({pairId})});
+ }));
  app.get('/api/v1/admin/writing-flow/reviews',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
    const limit=parse(z.coerce.number().int().min(1).max(200),q.query.limit??100);
    const offset=parse(z.coerce.number().int().min(0).max(100000),q.query.offset??0);
@@ -361,5 +368,5 @@ export function createApp({config,pool,service,lessonService=service,provisional
  }));
  app.post('/api/v1/admin/attempts/:attemptRef/retry',writes,adminAuth,teacherManage,asyncRoute(async(q,r)=>r.status(202).json({ok:true,attempt:await lessonService.retryFailedAttempt({attemptRef:parse(uuid,q.params.attemptRef),actorRef:q.reviewer.email})})));
  app.post('/api/v1/admin/lesson-sessions/:sessionRef/sections/:section/reopen',adminAuth,teacherManage,asyncRoute(async(q,r)=>r.json({ok:true,session:await lessonService.reopenSection({sessionRef:parse(uuid,q.params.sessionRef),section:parse(lessonSection,q.params.section),actorRef:q.reviewer.email,...parse(reopen,q.body)})})));
- app.use((_q,r)=>r.status(404).json({ok:false,error:'NOT_FOUND'}));app.use((error,_q,r,_n)=>{if(error instanceof ApiError)return r.status(error.status).json({ok:false,error:error.code,message:error.message,...(error.current?{current:error.current}:{})});const requestId=crypto.randomUUID();console.error(`Writing Task 1 API error request_id=${requestId} type=${error?.name||'Error'} code=${error?.code||'none'}`);return r.status(500).json({ok:false,error:'INTERNAL_ERROR',requestId});});return app;
+ app.use((_q,r)=>r.status(404).json({ok:false,error:'NOT_FOUND'}));app.use((error,_q,r,_n)=>{r.locals.writingErrorCode=error instanceof ApiError?error.code:'INTERNAL_ERROR';if(error instanceof ApiError)return r.status(error.status).json({ok:false,error:error.code,message:error.message,...(error.current?{current:error.current}:{})});const requestId=crypto.randomUUID();console.error(`Writing Task 1 API error request_id=${requestId} type=${error?.name||'Error'} code=${error?.code||'none'}`);return r.status(500).json({ok:false,error:'INTERNAL_ERROR',requestId});});return app;
 }

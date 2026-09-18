@@ -15,6 +15,7 @@ const config = {
 function makeApp(role, overrides = {}, stageOverrides = {}, aiOverrides = {}, scanOverrides = {}) {
   const service = {
     listPairs: async () => [{ pair_id: reviewId, status: 'needs_review' }],
+    pairHistory: async () => ({ pair: { pair_id: reviewId }, events: [] }),
     listReviews: async () => [{ review_id: reviewId, status: 'open' }],
     listSourceIssues: async () => [{ issue_key: 'a'.repeat(64), reason_code: 'FETCH_FAILED' }],
     recordSourceIssue: async input => ({ issue_key: 'a'.repeat(64), reason_code: input.reasonCode }),
@@ -66,6 +67,16 @@ function makeApp(role, overrides = {}, stageOverrides = {}, aiOverrides = {}, sc
     },
   });
 }
+
+test('nhật ký một bài chỉ mở cho quản trị viên', async () => {
+  const url = `/api/v1/admin/writing-flow/pairs/${reviewId}/history`;
+  assert.equal((await request(makeApp(null)).get(url)).status, 401);
+  assert.equal((await request(makeApp('teacher')).get(url)).status, 403);
+  const allowed = await request(makeApp('admin')).get(url);
+  assert.equal(allowed.status, 200);
+  assert.equal(allowed.body.history.pair.pair_id, reviewId);
+  assert.match(allowed.headers['x-writing-request-id'], /^[0-9a-f-]{36}$/);
+});
 
 test('kế hoạch từng ô phải lưu qua token nội bộ trước khi phát không chờ', async () => {
   const url = '/api/v1/internal/writing-flow/scans/prepare';

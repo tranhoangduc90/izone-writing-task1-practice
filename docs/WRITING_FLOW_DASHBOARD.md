@@ -16,6 +16,8 @@ Thứ tự: kiểm trước khi chấm → chấm chính → phản biện → p
 
 API `handoffs/due` cấp các bàn giao chưa được bước sau xác nhận để n8n gọi lại cùng mã, không chờ workflow sau hoàn tất. API `handoffs/recover` tìm bước đã thực sự bắt đầu nhưng quá hạn: hai lượt đầu tạo bàn giao thử lại, lượt thứ ba đưa vào **Cần kiểm tra**. Cả hai route chỉ nhận token nội bộ. Workflow n8n gửi lại đã được tạo nhưng đang tắt, chưa nối API và chưa thử execution thật.
 
+Khi chốt cả hồ sơ, API so file, vị trí link, ô và phiên bản hiện tại với lần hoàn tất trước. Nếu không đổi, n8n giữ “Thời điểm xong” cũ; nếu có phiên bản mới đã được giao đủ, n8n ghi thời điểm mới. Phần so phiên bản và quyết định mốc đã qua kiểm thử giả, chưa thử đường Lark/API thật. Nếu hồ sơ mới chưa giao đủ mà Lark còn mốc cũ, đường xóa mốc cũ vẫn chưa hoàn tất; chưa bật workflow chốt.
+
 ## Người vận hành thấy gì
 
 Sau khi phát hành, mở `writing-flow.html` và đăng nhập bằng tài khoản Google có quyền quản trị. Trang sẽ hiện số bài ở từng trạng thái và nhóm các bài gần đây theo **lớp → hồ sơ homework → link file → bài số/Task**. Có nút mở file homework để đối chiếu; mã hồ sơ hiện ngay dưới tên nhóm. Nếu thiếu mã nguồn, bài vẫn hiện riêng để tránh gộp nhầm. Danh sách **Cần kiểm tra** giữ bước lỗi và nút chạy lại. Trang không hiện nội dung bài hoặc kết quả chấm chi tiết. Hiện tại đây mới là giao diện trên nhánh thử, chưa có URL production để mở.

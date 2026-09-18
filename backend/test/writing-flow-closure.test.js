@@ -10,21 +10,32 @@ function fixture({ runStatus = 'complete', itemStatus = 'accepted',
   deliveryStatuses = ['succeeded', 'succeeded'], expectedPairCount = 2,
   receiptPairIds = ['pair-1', 'pair-2'], wrongRecord = false,
   wrongFile = false, wrongLink = false,
-  duplicateSlot = false } = {}) {
+  duplicateSlot = false, previousRevisions = null } = {}) {
   const pool = { async query(sql) {
     if (sql.includes('FROM writing_flow.scan_run r')) {
       return { rowCount: runStatus === 'missing' ? 0 : 1,
         rows: [{ run_id: 'run-1', status: runStatus,
           scanned_through_at: '2026-09-17T08:00:00Z' }] };
     }
+    if (sql.includes('FROM writing_flow.source_issue')) {
+      return { rowCount: 1, rows: [{ issue_count: issueCount }] };
+    }
+    if (sql.includes('FROM writing_flow.record_closure c')) {
+      return { rowCount: previousRevisions ? 1 : 0,
+        rows: previousRevisions ? [{ run_id: 'run-old' }] : [] };
+    }
+    if (sql.includes('FROM writing_flow.scan_item i')) {
+      return { rowCount: previousRevisions?.length || 0,
+        rows: (previousRevisions || []).map((revision, index) => ({
+          source_link_index: 1, homework_file_id: 'doc-1',
+          essay_slot: index + 1, submission_revision: revision,
+        })) };
+    }
     if (sql.includes('FROM writing_flow.scan_item')) {
       return { rowCount: 1, rows: [{ source_link_index: 1,
         homework_file_id: 'doc-1', status: itemStatus,
         expected_pair_count: expectedPairCount,
         receipt_pair_ids: receiptPairIds }] };
-    }
-    if (sql.includes('FROM writing_flow.source_issue')) {
-      return { rowCount: 1, rows: [{ issue_count: issueCount }] };
     }
     if (sql.includes('FROM writing_flow.pair p')) {
       const rows = pairStatuses.map((status, index) => ({
@@ -50,11 +61,19 @@ test('chỉ chốt hồ sơ khi hai ô bài đã giao và đã đọc lại link
   const result = await fixture();
   assert.equal(result.eligible, true);
   assert.equal(result.expectedPairCount, 2);
+  assert.equal(result.needsNewTimestamp, true);
   assert.deepEqual(result.links, [{ linkIndex: 1, docId: 'doc-1',
     expectedPairs: [
       { essaySlot: 1, revision: 'revision-1' },
       { essaySlot: 2, revision: 'revision-2' },
     ] }]);
+});
+
+test('mốc cũ chỉ được giữ nếu đúng cả hai phiên bản bài đã chốt trước đó', async () => {
+  assert.equal((await fixture({ previousRevisions: [
+    'revision-1', 'revision-2' ] })).needsNewTimestamp, false);
+  assert.equal((await fixture({ previousRevisions: [
+    'revision-1', 'revision-moi' ] })).needsNewTimestamp, true);
 });
 
 test('giữ hồ sơ mở khi lượt quét chưa xong hoặc còn lỗi nguồn', async () => {

@@ -153,9 +153,44 @@ export function createWritingFlowScan({ pool }) {
       }
       if (!expected) return { eligible: false, reason: 'NO_WRITING_PAIR',
         runId: run.run_id, links };
+      // Nhận vào: hồ sơ này đã từng được chốt ở lượt quét trước hay chưa.
+      // Việc chính: so đúng file, vị trí, ô và phiên bản với lần hoàn tất trước.
+      // Trả ra: cờ cần ghi mốc mới khi học viên đã sửa bài hoặc đổi link.
+      // Khi thiếu lịch sử cũ: chọn ghi mốc mới, không dùng một ngày cũ chưa xác minh.
+      const previous = await pool.query(`SELECT c.run_id
+        FROM writing_flow.record_closure c
+        JOIN writing_flow.scan_run r ON r.run_id=c.run_id
+        WHERE r.source_app_id=$1 AND r.source_table_id=$2
+          AND c.source_record_id=$3 AND c.closed_at IS NOT NULL
+          AND c.run_id<>$4
+        ORDER BY c.closed_at DESC,c.run_id DESC LIMIT 1`,
+      [appId, tableId, recordId, run.run_id]);
+      let needsNewTimestamp = true;
+      if (previous.rowCount) {
+        const priorRows = await pool.query(`SELECT i.source_link_index,
+            i.homework_file_id,p.essay_slot,p.submission_revision
+          FROM writing_flow.scan_item i
+          LEFT JOIN LATERAL unnest(i.receipt_pair_ids) AS selected(pair_id) ON TRUE
+          LEFT JOIN writing_flow.pair p ON p.pair_id=selected.pair_id
+          WHERE i.run_id=$1 AND i.source_record_id=$2
+          ORDER BY i.source_link_index,p.essay_slot`,
+        [previous.rows[0].run_id, recordId]);
+        const priorLinks = [];
+        for (const row of priorRows.rows) {
+          let prior = priorLinks.find(link => link.linkIndex === row.source_link_index);
+          if (!prior) {
+            prior = { linkIndex: row.source_link_index,
+              docId: row.homework_file_id, expectedPairs: [] };
+            priorLinks.push(prior);
+          }
+          if (row.essay_slot !== null) prior.expectedPairs.push({
+            essaySlot: row.essay_slot, revision: row.submission_revision });
+        }
+        needsNewTimestamp = JSON.stringify(priorLinks) !== JSON.stringify(links);
+      }
       return { eligible: true, reason: 'ALL_PAIRS_DELIVERED',
         runId: run.run_id, scannedThroughAt: run.scanned_through_at,
-        expectedPairCount: expected, links };
+        expectedPairCount: expected, links, needsNewTimestamp };
     },
     async begin({ requestKey, appId, tableId, scannedThroughAt, pageCount, reachedEnd, items }) {
       if (!reachedEnd) throw new ApiError(409, 'SCAN_NOT_COMPLETE', 'Chưa đọc hết các trang hồ sơ.');

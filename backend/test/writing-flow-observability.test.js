@@ -46,6 +46,16 @@ test('không lấy chuỗi tự do trong request làm định danh đưa vào lo
   assert.equal(row.errorCode, undefined);
 });
 
+test('lỗi ở node khởi động giữ mã sự kiện khi n8n chưa có execution gốc', () => {
+  const lines = [];
+  const middleware = writingFlowRequestLog({ write: line => lines.push(line) });
+  const res = Object.assign(new EventEmitter(), { statusCode: 202, locals: {}, set() {} });
+  middleware({ method: 'POST', path: '/api/v1/internal/writing-flow/workflow-failures',
+    body: { executionId: 'trigger-1654609328787' } }, res, () => {});
+  res.emit('finish');
+  assert.equal(JSON.parse(lines[0]).executionId, 'trigger-1654609328787');
+});
+
 test('lỗi ghi log không chặn phản hồi API', () => {
   const middleware = writingFlowRequestLog({ write: () => { throw Error('log offline'); } });
   const res = Object.assign(new EventEmitter(), { statusCode: 200, locals: {}, set() {} });

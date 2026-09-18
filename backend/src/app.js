@@ -160,7 +160,7 @@ const writingAiFinish=z.object({...writingAiBase,operationKey:z.string().trim().
 const writingWorkflowFailure=z.object({
  workflowId:z.string().regex(/^[A-Za-z0-9_-]{1,80}$/),
  workflowName:z.string().trim().min(1).max(160),
- executionId:z.string().regex(/^[0-9]{1,20}$/),
+ executionId:z.string().regex(/^(?:[0-9]{1,20}|trigger-[0-9]{1,20})$/),
  lastNode:z.string().trim().min(1).max(160),
  errorKind:z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,99}$/)
 });

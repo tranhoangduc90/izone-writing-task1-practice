@@ -94,6 +94,12 @@ test('lỗi workflow chỉ nhận metadata qua token và chỉ quản trị viê
     .set('Authorization', `Bearer ${config.internalApiToken}`).send(body);
   assert.equal(recorded.status, 202);
   assert.equal(recorded.body.failure.executionId, '123');
+  const triggerFailure = await request(makeApp(null)).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`)
+    .send({ ...body, executionId: 'trigger-1654609328787',
+      lastNode: 'Khởi động', errorKind: 'WorkflowActivationError' });
+  assert.equal(triggerFailure.status, 202);
+  assert.equal(triggerFailure.body.failure.executionId, 'trigger-1654609328787');
   const readUrl = '/api/v1/admin/writing-flow/workflow-failures';
   assert.equal((await request(makeApp('teacher')).get(readUrl)).status, 403);
   assert.equal((await request(makeApp('admin')).get(readUrl)).body.failures.length, 1);

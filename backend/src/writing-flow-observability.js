@@ -9,7 +9,8 @@ export function writingFlowRequestLog({ write = line => console.info(line), now 
   const sha256 = /^[0-9a-f]{64}$/i;
   const code = /^[A-Z][A-Z0-9_]{0,99}$/;
   const patterns = { pairId: uuid, revision: sha256, stageKey: /^[a-z_]{2,30}$/,
-    attemptId: uuid, handoffId: uuid, executionId: /^[0-9]{1,20}$/,
+    attemptId: uuid, handoffId: uuid,
+    executionId: /^(?:[0-9]{1,20}|trigger-[0-9]{1,20})$/,
     runId: uuid, itemKey: sha256, reviewId: uuid, requestKey: uuid,
     errorCode: code };
   return (req, res, next) => {

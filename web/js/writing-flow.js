@@ -215,11 +215,15 @@ function renderWorkflowFailures(failures) {
     const row = document.createElement('article'); row.className = 'flow-row';
     const time = new Date(failure.last_seen_at).toLocaleString('vi-VN');
     const body = document.createElement('div');
+    const hasExecution = /^[0-9]{1,20}$/.test(failure.execution_id);
     body.append(makeText('strong', `${failure.workflow_name} · ${failure.last_node}`),
-      makeText('p', `${time} · ${failure.error_kind} · mã lượt n8n ${failure.execution_id}`
+      makeText('p', `${time} · ${failure.error_kind} · ${hasExecution
+        ? `mã lượt n8n ${failure.execution_id}`
+        : `lỗi khởi động ${failure.execution_id}`}`
         + (Number(failure.seen_count) > 1 ? ` · gửi lại ${failure.seen_count} lần` : ''), 'flow-meta'));
-    const link = makeText('a', 'Mở lượt chạy trên n8n');
-    link.href = `https://ducizone.ddns.net/workflow/${encodeURIComponent(failure.workflow_id)}/executions/${encodeURIComponent(failure.execution_id)}`;
+    const link = makeText('a', hasExecution ? 'Mở lượt chạy trên n8n' : 'Mở workflow trên n8n');
+    link.href = `https://ducizone.ddns.net/workflow/${encodeURIComponent(failure.workflow_id)}`
+      + (hasExecution ? `/executions/${encodeURIComponent(failure.execution_id)}` : '');
     link.target = '_blank'; link.rel = 'noopener noreferrer';
     body.append(link);
     row.append(body);

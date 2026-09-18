@@ -157,6 +157,13 @@ const writingAiFinish=z.object({...writingAiBase,operationKey:z.string().trim().
  outcome:z.enum(['succeeded','failed','unknown']),gatewayOperationId:uuid.nullable().optional(),
  provider:z.string().trim().max(100).nullable().optional(),route:z.string().trim().max(100).nullable().optional(),
  result:z.record(z.string(),z.unknown()).nullable().optional(),errorCode:z.string().trim().max(100).nullable().optional()});
+const writingWorkflowFailure=z.object({
+ workflowId:z.string().regex(/^[A-Za-z0-9_-]{1,80}$/),
+ workflowName:z.string().trim().min(1).max(160),
+ executionId:z.string().regex(/^[0-9]{1,20}$/),
+ lastNode:z.string().trim().min(1).max(160),
+ errorKind:z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,99}$/)
+});
 const parse=(schema,value,code='INVALID_REQUEST')=>{const r=schema.safeParse(value);if(!r.success)throw new ApiError(400,code,'Dữ liệu gửi lên không hợp lệ.');return r.data;};
 const asyncRoute=fn=>(req,res,next)=>Promise.resolve(fn(req,res,next)).catch(next);
 function sameSecret(actual,expected){const a=Buffer.from(String(actual||'')),b=Buffer.from(String(expected||''));return a.length>0&&a.length===b.length&&crypto.timingSafeEqual(a,b);}
@@ -251,6 +258,10 @@ export function createApp({config,pool,service,lessonService=service,provisional
  app.post('/api/v1/internal/writing-flow/source-issues',internal,writingFlowReady,asyncRoute(async(q,r)=>{
    r.status(202).json({ok:true,issue:await writingFlowService.recordSourceIssue(
      parse(writingSourceIssue,q.body))});
+ }));
+ app.post('/api/v1/internal/writing-flow/workflow-failures',internal,writingFlowReady,asyncRoute(async(q,r)=>{
+   r.status(202).json({ok:true,failure:await writingFlowService.recordWorkflowFailure(
+     parse(writingWorkflowFailure,q.body))});
  }));
  app.post('/api/v1/internal/writing-flow/scans/cursor',internal,writingScanReady,asyncRoute(async(q,r)=>{
    r.json({ok:true,cursor:await writingFlowScan.cursor(parse(writingScanCursor,q.body))});
@@ -358,6 +369,11 @@ export function createApp({config,pool,service,lessonService=service,provisional
    const limit=parse(z.coerce.number().int().min(1).max(200),q.query.limit??100);
    const offset=parse(z.coerce.number().int().min(0).max(100000),q.query.offset??0);
    r.json({ok:true,issues:await writingFlowService.listSourceIssues({limit,offset})});
+ }));
+ app.get('/api/v1/admin/writing-flow/workflow-failures',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
+   const limit=parse(z.coerce.number().int().min(1).max(200),q.query.limit??100);
+   const offset=parse(z.coerce.number().int().min(0).max(100000),q.query.offset??0);
+   r.json({ok:true,failures:await writingFlowService.listWorkflowFailures({limit,offset})});
  }));
  // Bấm chạy lại chỉ ghi yêu cầu bền; workflow retry phải nhận và xác nhận sau đó.
  app.post('/api/v1/admin/writing-flow/reviews/:reviewId/retry',writes,adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{

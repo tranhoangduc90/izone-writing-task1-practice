@@ -86,3 +86,19 @@ test('nhật ký một bài chỉ đọc metadata và sắp theo thời gian', a
   assert.equal(sqlSeen.length, 6);
   assert.equal(sqlSeen.every(sql => !/ciphertext|prompt|source_text|essay_text/i.test(sql)), true);
 });
+
+test('lỗi workflow được lưu theo một execution và không nhận stack', async () => {
+  const seen = [];
+  const pool = { query: async (sql, values) => {
+    seen.push({ sql, values });
+    return { rows: [{ failure_id: 'id', execution_id: values[2], seen_count: 1 }] };
+  } };
+  const receipt = await createWritingFlowService({ pool }).recordWorkflowFailure({
+    workflowId: 'workflow-demo', workflowName: 'Chấm chính một bài',
+    executionId: '123', lastNode: 'Gọi AI', errorKind: 'NodeOperationError',
+    stack: 'KHÔNG LƯU NỘI DUNG RIÊNG',
+  });
+  assert.equal(receipt.execution_id, '123');
+  assert.equal(seen[0].sql.includes('ON CONFLICT (workflow_id,execution_id)'), true);
+  assert.equal(seen[0].values.includes('KHÔNG LƯU NỘI DUNG RIÊNG'), false);
+});

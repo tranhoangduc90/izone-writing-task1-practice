@@ -8,10 +8,16 @@ import { groupWritingPairs } from './writing-flow-groups.js';
 // Trả ra: màn hình cập nhật từ database; không hiển thị bài làm hay điểm chi tiết.
 // Khi lỗi: giữ dữ liệu cũ trên màn hình và báo rõ; không coi cú bấm là đã chấm xong.
 const $ = id => document.getElementById(id);
-const state = { token: '', api: null, timer: null, pendingRequestIds: new Map(), pairLimit: 100 };
+const state = { token: '', api: null, timer: null, pendingRequestIds: new Map(),
+  pairLimit: 100, failureLimit: 100 };
 const stageNames = {
   intake: 'Tiếp nhận', precheck: 'Kiểm trước khi chấm', main: 'Chấm chính',
   critic: 'Phản biện', arbiter: 'Phân xử', render: 'Xuất kết quả', deliver: 'Ghi link vào homework',
+};
+const stageWorkflowIds = {
+  precheck: 'P2p5N7iZzwHFDufk', main: 'X0qzwWc5CgBzgOWT',
+  critic: '4o6jEwyQM4U29XU6', arbiter: 'yFdVOEBVhLitToQD',
+  render: 'o8uncH0TWsJybeS2', deliver: 'KqWtSbjkHDMSAgbN',
 };
 const statusNames = {
   received: 'Chờ chấm', running: 'Đang xử lý', needs_review: 'Cần kiểm tra',
@@ -61,6 +67,13 @@ function historyDetails(pair) {
         const time = event.at ? new Date(event.at).toLocaleString('vi-VN') : 'Chưa rõ giờ';
         const execution = event.n8n_execution_id ? ` · mã lượt n8n ${event.n8n_execution_id}` : '';
         const line = makeText('p', `${time} · ${describeHistoryEvent(event)}${execution}`, 'flow-meta');
+        const workflowId = stageWorkflowIds[event.stage_key];
+        if (workflowId && event.n8n_execution_id) {
+          const link = makeText('a', 'Mở lượt chạy');
+          link.href = `https://ducizone.ddns.net/workflow/${workflowId}/executions/${encodeURIComponent(event.n8n_execution_id)}`;
+          link.target = '_blank'; link.rel = 'noopener noreferrer';
+          line.append(' · ', link);
+        }
         content.append(line);
       }
       details.dataset.loaded = 'true';
@@ -195,6 +208,25 @@ function renderSourceIssues(issues) {
   }
 }
 
+function renderWorkflowFailures(failures) {
+  const root = $('flow-technical-errors'); root.replaceChildren();
+  if (!failures.length) return root.append(makeText('p', 'Chưa có lỗi kỹ thuật được ghi nhận.', 'muted'));
+  for (const failure of failures) {
+    const row = document.createElement('article'); row.className = 'flow-row';
+    const time = new Date(failure.last_seen_at).toLocaleString('vi-VN');
+    const body = document.createElement('div');
+    body.append(makeText('strong', `${failure.workflow_name} · ${failure.last_node}`),
+      makeText('p', `${time} · ${failure.error_kind} · mã lượt n8n ${failure.execution_id}`
+        + (Number(failure.seen_count) > 1 ? ` · gửi lại ${failure.seen_count} lần` : ''), 'flow-meta'));
+    const link = makeText('a', 'Mở lượt chạy trên n8n');
+    link.href = `https://ducizone.ddns.net/workflow/${encodeURIComponent(failure.workflow_id)}/executions/${encodeURIComponent(failure.execution_id)}`;
+    link.target = '_blank'; link.rel = 'noopener noreferrer';
+    body.append(link);
+    row.append(body);
+    root.append(row);
+  }
+}
+
 function populateClasses(rows) {
   const select = $('flow-class');
   const selected = select.value;
@@ -236,14 +268,27 @@ async function loadPairs(classCode, count) {
   return pairs;
 }
 
+async function loadWorkflowFailures(count) {
+  const failures = [];
+  while (failures.length < count) {
+    const size = Math.min(200, count - failures.length);
+    const page = (await state.api.writingWorkflowFailures(failures.length, size)).data.failures || [];
+    failures.push(...page);
+    if (page.length < size) break;
+  }
+  return failures;
+}
+
 async function refresh() {
   clearTimeout(state.timer);
   if (!state.token || !state.api) return;
   try {
     const selectedBeforeLoad = $('flow-class').value;
-    const [allPairs, summaryResult, allReviews, sourceIssues] = await Promise.all([
+    const [allPairs, summaryResult, allReviews, sourceIssues, failureResult] = await Promise.all([
       loadPairs(selectedBeforeLoad, state.pairLimit), state.api.writingSummary(),
       loadAllReviews(), loadAllSourceIssues(),
+      loadWorkflowFailures(state.failureLimit)
+        .then(rows => ({ rows })).catch(error => ({ error })),
     ]);
     const summary = summaryResult.data.summary || [];
     populateClasses([...summary, ...allReviews, ...sourceIssues]);
@@ -252,6 +297,14 @@ async function refresh() {
     renderPairs(allPairs);
     renderReviews(allReviews.filter(review => !selectedClass || review.class_code === selectedClass));
     renderSourceIssues(sourceIssues.filter(issue => !selectedClass || issue.class_code === selectedClass));
+    if (failureResult.error) {
+      $('flow-technical-errors').replaceChildren(makeText('p',
+        'Chưa tải được lỗi kỹ thuật; các trạng thái bài ở trên vẫn là dữ liệu mới.', 'muted'));
+      $('flow-technical-more').hidden = true;
+    } else {
+      renderWorkflowFailures(failureResult.rows);
+      $('flow-technical-more').hidden = failureResult.rows.length < state.failureLimit;
+    }
     const totalPairs = summary
       .filter(row => !selectedClass || row.class_code === selectedClass)
       .reduce((total, row) => total + Number(row.pair_count || 0), 0);
@@ -306,6 +359,7 @@ async function init() {
     state.api = createTeacherApi(config.apiBase || '', () => state.token);
     $('flow-class').addEventListener('change', () => { state.pairLimit = 100; void refresh(); });
     $('flow-more').addEventListener('click', () => { state.pairLimit += 100; void refresh(); });
+    $('flow-technical-more').addEventListener('click', () => { state.failureLimit += 100; void refresh(); });
     await waitForGoogle(config.googleClientId);
   } catch (error) { showError('flow-login-error', error.message); }
 }

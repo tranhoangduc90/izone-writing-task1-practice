@@ -16,6 +16,9 @@ function makeApp(role, overrides = {}, stageOverrides = {}, aiOverrides = {}, sc
   const service = {
     listPairs: async () => [{ pair_id: reviewId, status: 'needs_review' }],
     pairHistory: async () => ({ pair: { pair_id: reviewId }, events: [] }),
+    recordWorkflowFailure: async input => ({ workflowId: input.workflowId,
+      executionId: input.executionId, seenCount: 1 }),
+    listWorkflowFailures: async () => [{ workflow_id: 'workflow-demo', execution_id: '123' }],
     listReviews: async () => [{ review_id: reviewId, status: 'open' }],
     listSourceIssues: async () => [{ issue_key: 'a'.repeat(64), reason_code: 'FETCH_FAILED' }],
     recordSourceIssue: async input => ({ issue_key: 'a'.repeat(64), reason_code: input.reasonCode }),
@@ -76,6 +79,24 @@ test('nhật ký một bài chỉ mở cho quản trị viên', async () => {
   assert.equal(allowed.status, 200);
   assert.equal(allowed.body.history.pair.pair_id, reviewId);
   assert.match(allowed.headers['x-writing-request-id'], /^[0-9a-f-]{36}$/);
+});
+
+test('lỗi workflow chỉ nhận metadata qua token và chỉ quản trị viên đọc được', async () => {
+  const url = '/api/v1/internal/writing-flow/workflow-failures';
+  const body = { workflowId: 'workflow-demo', workflowName: 'Chấm chính một bài',
+    executionId: '123', lastNode: 'Gọi AI', errorKind: 'NodeOperationError' };
+  assert.equal((await request(makeApp(null)).post(url).send(body)).status, 401);
+  const invalid = await request(makeApp(null)).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`)
+    .send({ ...body, errorKind: 'Nội dung bài: riêng tư' });
+  assert.equal(invalid.status, 400);
+  const recorded = await request(makeApp(null)).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`).send(body);
+  assert.equal(recorded.status, 202);
+  assert.equal(recorded.body.failure.executionId, '123');
+  const readUrl = '/api/v1/admin/writing-flow/workflow-failures';
+  assert.equal((await request(makeApp('teacher')).get(readUrl)).status, 403);
+  assert.equal((await request(makeApp('admin')).get(readUrl)).body.failures.length, 1);
 });
 
 test('kế hoạch từng ô phải lưu qua token nội bộ trước khi phát không chờ', async () => {

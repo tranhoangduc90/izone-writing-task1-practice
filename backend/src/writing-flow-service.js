@@ -10,6 +10,31 @@ import { createWritingFlowIntake } from './writing-flow-intake.js';
 export function createWritingFlowService({ pool, encryptionKey = null }) {
   return {
     intakePairs: createWritingFlowIntake({ pool, encryptionKey }),
+    // Nhận vào: định danh execution lỗi từ Error Trigger của n8n.
+    // Việc chính: giữ một dòng cho một execution, kể cả lỗi trước khi tạo mã bài.
+    // Trả ra: biên nhận và số lần cùng lỗi được gửi; không lưu stack hoặc nội dung bài.
+    // Khi API tạm mất: n8n vẫn giữ execution lỗi để đối chiếu sau.
+    async recordWorkflowFailure({ workflowId, workflowName, executionId, lastNode, errorKind }) {
+      const result = await pool.query(`INSERT INTO writing_flow.workflow_failure
+        (workflow_id,workflow_name,execution_id,last_node,error_kind)
+        VALUES ($1,$2,$3,$4,$5)
+        ON CONFLICT (workflow_id,execution_id) DO UPDATE
+          SET workflow_name=EXCLUDED.workflow_name,
+              last_node=EXCLUDED.last_node,error_kind=EXCLUDED.error_kind,
+              seen_count=writing_flow.workflow_failure.seen_count+1,last_seen_at=now()
+        RETURNING failure_id,workflow_id,execution_id,seen_count`,
+      [workflowId, workflowName, executionId, lastNode, errorKind]);
+      return result.rows[0];
+    },
+
+    async listWorkflowFailures({ limit = 100, offset = 0 } = {}) {
+      const result = await pool.query(`SELECT failure_id,workflow_id,workflow_name,execution_id,
+          last_node,error_kind,seen_count,first_seen_at,last_seen_at
+        FROM writing_flow.workflow_failure
+        ORDER BY last_seen_at DESC,failure_id
+        LIMIT $1 OFFSET $2`, [limit, offset]);
+      return result.rows;
+    },
     async recordSourceIssue({ appId, tableId, recordId, docId = null, linkIndex = null,
       essaySlot = null, classCode = null, reasonCode }) {
       // Chỉ lưu định danh kỹ thuật và mã lỗi; không lưu link gốc hoặc bài học viên.

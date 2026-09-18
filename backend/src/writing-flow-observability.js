@@ -17,6 +17,7 @@ export function writingFlowRequestLog({ write = line => console.info(line), now 
     const startedAt = now();
     const requestId = crypto.randomUUID();
     res.set('X-Writing-Request-Id', requestId);
+    res.locals.writingRequestId = requestId;
     let logged = false;
     const logOnce = outcome => {
       if (logged) return;
@@ -26,7 +27,7 @@ export function writingFlowRequestLog({ write = line => console.info(line), now 
         event: 'writing_flow_api_request',
         requestId,
         method: req.method,
-        route: req.route?.path ?? req.path,
+        route: req.route?.path ?? req.baseUrl ?? 'writing-flow',
         outcome,
         status: outcome === 'completed' ? res.statusCode : null,
         durationMs: Math.max(0, now() - startedAt),

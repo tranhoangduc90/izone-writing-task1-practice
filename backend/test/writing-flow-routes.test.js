@@ -81,6 +81,21 @@ test('nhật ký một bài chỉ mở cho quản trị viên', async () => {
   assert.match(allowed.headers['x-writing-request-id'], /^[0-9a-f-]{36}$/);
 });
 
+test('lỗi 500 của Writing trả cùng mã truy vết với header', async () => {
+  const app = makeApp('admin', { listPairs: async () => { throw new Error('synthetic'); } });
+  const response = await request(app).get('/api/v1/admin/writing-flow/pairs');
+  assert.equal(response.status, 500);
+  assert.match(response.headers['x-writing-request-id'], /^[0-9a-f-]{36}$/);
+  assert.equal(response.body.requestId, response.headers['x-writing-request-id']);
+});
+
+test('yêu cầu Writing bị CORS chặn vẫn có mã truy vết', async () => {
+  const response = await request(makeApp('admin')).get('/api/v1/admin/writing-flow/pairs')
+    .set('Origin', 'https://blocked.example.invalid');
+  assert.equal(response.status, 403);
+  assert.match(response.headers['x-writing-request-id'], /^[0-9a-f-]{36}$/);
+});
+
 test('lỗi workflow chỉ nhận metadata qua token và chỉ quản trị viên đọc được', async () => {
   const url = '/api/v1/internal/writing-flow/workflow-failures';
   const body = { workflowId: 'workflow-demo', workflowName: 'Chấm chính một bài',

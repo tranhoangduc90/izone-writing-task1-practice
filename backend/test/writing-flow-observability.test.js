@@ -20,6 +20,7 @@ test('nhật ký ghi mã bài và lỗi nhưng không ghi bài viết, prompt ho
   res.emit('finish');
   assert.equal(nextCalled, true);
   assert.match(res.headers['X-Writing-Request-Id'], /^[0-9a-f-]{36}$/);
+  assert.equal(res.locals.writingRequestId, res.headers['X-Writing-Request-Id']);
   assert.equal(lines.length, 1);
   const row = JSON.parse(lines[0]);
   assert.equal(row.pairId, '11111111-1111-4111-8111-111111111111');
@@ -37,7 +38,8 @@ test('không lấy chuỗi tự do trong request làm định danh đưa vào lo
   const lines = [];
   const middleware = writingFlowRequestLog({ write: line => lines.push(line) });
   const res = Object.assign(new EventEmitter(), { statusCode: 400, locals: {}, set() {} });
-  middleware({ method: 'POST', path: '/api/v1/internal/writing-flow/stages/fail',
+  middleware({ method: 'POST', path: '/api/v1/internal/writing-flow/stages/fail/Tên học viên',
+    baseUrl: '/api/v1/internal/writing-flow',
     body: { pairId: 'Tên học viên', executionId: 'bài viết riêng tư',
       errorCode: 'lỗi: có nội dung bài' } }, res, () => {});
   res.emit('finish');
@@ -45,6 +47,7 @@ test('không lấy chuỗi tự do trong request làm định danh đưa vào lo
   assert.equal(row.pairId, undefined);
   assert.equal(row.executionId, undefined);
   assert.equal(row.errorCode, undefined);
+  assert.equal(row.route, '/api/v1/internal/writing-flow');
 });
 
 test('lỗi ở node khởi động giữ mã sự kiện khi n8n chưa có execution gốc', () => {

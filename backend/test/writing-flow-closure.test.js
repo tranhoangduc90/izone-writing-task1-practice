@@ -8,7 +8,9 @@ import { createWritingFlowScan } from '../src/writing-flow-scan.js';
 function fixture({ runStatus = 'complete', itemStatus = 'accepted',
   issueCount = 0, pairStatuses = ['delivered', 'delivered'],
   deliveryStatuses = ['succeeded', 'succeeded'], expectedPairCount = 2,
-  receiptPairIds = ['pair-1', 'pair-2'] } = {}) {
+  receiptPairIds = ['pair-1', 'pair-2'], wrongRecord = false,
+  wrongFile = false, wrongLink = false,
+  duplicateSlot = false } = {}) {
   const pool = { async query(sql) {
     if (sql.includes('FROM writing_flow.scan_run r')) {
       return { rowCount: runStatus === 'missing' ? 0 : 1,
@@ -27,6 +29,11 @@ function fixture({ runStatus = 'complete', itemStatus = 'accepted',
     if (sql.includes('FROM writing_flow.pair p')) {
       const rows = pairStatuses.map((status, index) => ({
         pair_id: receiptPairIds[index], status,
+        source_app_id: 'app-demo', source_table_id: 'table-demo',
+        source_record_id: wrongRecord && index === 1 ? 'other-record' : 'record-demo',
+        homework_file_id: wrongFile && index === 1 ? 'doc-2' : 'doc-1',
+        source_link_index: wrongLink && index === 1 ? 2 : 1,
+        essay_slot: duplicateSlot ? 1 : index + 1,
         delivery_status: deliveryStatuses[index],
       }));
       return { rowCount: rows.length, rows };
@@ -54,7 +61,7 @@ test('giữ hồ sơ mở khi lượt quét chưa xong hoặc còn lỗi nguồn
 
 test('giữ hồ sơ mở khi thiếu một ô hoặc link chưa đọc lại', async () => {
   assert.equal((await fixture({ pairStatuses: ['delivered'] })).reason,
-    'PAIR_NOT_DELIVERED');
+    'SCAN_RECEIPT_MISMATCH');
   assert.equal((await fixture({ pairStatuses: ['delivered', 'running'] })).reason,
     'PAIR_NOT_DELIVERED');
   assert.equal((await fixture({ deliveryStatuses: ['succeeded', 'running'] })).reason,
@@ -62,5 +69,13 @@ test('giữ hồ sơ mở khi thiếu một ô hoặc link chưa đọc lại', 
   assert.equal((await fixture({ itemStatus: 'empty', expectedPairCount: 0 })).reason,
     'NO_WRITING_PAIR');
   assert.equal((await fixture({ receiptPairIds: ['pair-1'] })).reason,
+    'SCAN_RECEIPT_MISMATCH');
+  assert.equal((await fixture({ wrongRecord: true })).reason,
+    'SCAN_RECEIPT_MISMATCH');
+  assert.equal((await fixture({ wrongFile: true })).reason,
+    'SCAN_RECEIPT_MISMATCH');
+  assert.equal((await fixture({ wrongLink: true })).reason,
+    'SCAN_RECEIPT_MISMATCH');
+  assert.equal((await fixture({ duplicateSlot: true })).reason,
     'SCAN_RECEIPT_MISMATCH');
 });

@@ -60,15 +60,27 @@ export function createWritingFlowScan({ pool }) {
             runId: run.run_id, links };
         }
         const pairs = await pool.query(`SELECT p.pair_id,p.status,
+            p.source_app_id,p.source_table_id,p.source_record_id,
+            p.homework_file_id,p.source_link_index,p.essay_slot,
             s.status AS delivery_status
           FROM writing_flow.pair p
           LEFT JOIN writing_flow.stage_result s
             ON s.pair_id=p.pair_id AND s.stage_key='deliver'
           WHERE p.pair_id=ANY($1::uuid[])`, [pairIds]);
         expected += Number(item.expected_pair_count);
-        if (pairs.rowCount !== item.expected_pair_count
-          || pairs.rows.some(pair => pair.status !== 'delivered'
-            || pair.delivery_status !== 'succeeded')) {
+        const wrongSource = pairs.rows.some(pair =>
+          pair.source_app_id !== appId || pair.source_table_id !== tableId
+          || pair.source_record_id !== recordId
+          || pair.homework_file_id !== item.homework_file_id
+          || pair.source_link_index !== item.source_link_index);
+        const slots = pairs.rows.map(pair => pair.essay_slot);
+        if (pairs.rowCount !== item.expected_pair_count || wrongSource
+          || new Set(slots).size !== slots.length) {
+          return { eligible: false, reason: 'SCAN_RECEIPT_MISMATCH',
+            runId: run.run_id, links };
+        }
+        if (pairs.rows.some(pair => pair.status !== 'delivered'
+          || pair.delivery_status !== 'succeeded')) {
           return { eligible: false, reason: 'PAIR_NOT_DELIVERED',
             runId: run.run_id, links };
         }

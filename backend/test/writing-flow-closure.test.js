@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createWritingFlowScan } from '../src/writing-flow-scan.js';
+import { createWritingFlowScan, verifyClosureContent } from '../src/writing-flow-scan.js';
 
 // Nhận vào: trạng thái giả của lượt quét, lỗi nguồn và hai ô bài.
 // Việc chính: trả đúng các hàng mà phép kiểm chốt hồ sơ đọc từ database.
@@ -83,4 +83,32 @@ test('giữ hồ sơ mở khi thiếu một ô hoặc link chưa đọc lại', 
     'SCAN_RECEIPT_MISMATCH');
   assert.equal((await fixture({ duplicateSlot: true })).reason,
     'SCAN_RECEIPT_MISMATCH');
+});
+
+test('API chỉ nhận bằng chứng đọc lại đủ file và đúng dấu vân tay', () => {
+  const revision = 'a'.repeat(64);
+  const expected = { eligible: true, expectedPairCount: 1,
+    links: [{ linkIndex: 1, docId: 'doc-one', expectedPairs: [
+      { essaySlot: 1, revision },
+    ] }] };
+  const observed = [{ linkIndex: 1, docId: 'doc-one', status: 'accepted',
+    observedAtMs: Date.now(), receiptRequest: { expectedPairs: [
+      { essaySlot: 1, revision },
+    ] } }];
+  assert.deepEqual(verifyClosureContent(expected, observed),
+    { verifiedLinkCount: 1, verifiedPairCount: 1 });
+  assert.throws(() => verifyClosureContent(expected, []),
+    error => error.code === 'CLOSURE_CONTENT_PROOF_MISSING');
+  assert.throws(() => verifyClosureContent(expected, [{ ...observed[0],
+    observedAtMs: Date.now() - 6 * 60_000 }]),
+  error => error.code === 'CLOSURE_CONTENT_PROOF_STALE');
+  assert.throws(() => verifyClosureContent(expected, [{ ...observed[0],
+    receiptRequest: { expectedPairs: [{ essaySlot: 1, revision: 'b'.repeat(64) }] } }]),
+  error => error.code === 'CLOSURE_ESSAY_CHANGED');
+  assert.throws(() => verifyClosureContent(expected, [{ ...observed[0],
+    status: 'empty' }]),
+  error => error.code === 'CLOSURE_CONTENT_PROOF_MISMATCH');
+  assert.throws(() => verifyClosureContent(expected, [{ ...observed[0],
+    receiptRequest: { expectedPairs: [] } }]),
+  error => error.code === 'CLOSURE_CONTENT_PROOF_MISMATCH');
 });

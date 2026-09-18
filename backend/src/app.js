@@ -106,7 +106,17 @@ const writingScanClosure=writingScanCursor.extend({
  recordId:z.string().trim().min(1).max(120)
 });
 const writingScanClosureComplete=writingScanClosure.extend({
- runId:uuid,finishedAtMs:z.number().int().positive().safe()
+ runId:uuid,finishedAtMs:z.number().int().positive().safe(),
+ observations:z.array(z.object({
+  linkIndex:z.number().int().min(1).max(100),
+  docId:z.string().trim().min(1).max(160),
+  status:z.enum(['accepted','empty']),
+  observedAtMs:z.number().int().positive().safe(),
+  receiptRequest:z.object({expectedPairs:z.array(z.object({
+   essaySlot:z.number().int().min(1).max(4),
+   revision:z.string().regex(/^[0-9a-f]{64}$/)
+  })).max(4)}).optional()
+ })).max(100)
 });
 const writingScanReceipts=z.object({
  appId:z.string().trim().min(1).max(120),tableId:z.string().trim().min(1).max(120),

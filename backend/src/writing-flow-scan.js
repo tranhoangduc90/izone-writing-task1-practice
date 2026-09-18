@@ -5,6 +5,67 @@ import { ApiError } from './service.js';
 const digest = value => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const itemKey = item => digest([item.recordId, item.docId ?? '', item.linkIndex]);
 
+// Nhận vào: phiên bản từng ô đã lưu và kết quả workflow vừa đọc lại từng file.
+// Việc chính: từ chối chốt nếu thiếu file, sai ô hoặc nội dung bài đã đổi.
+// Trả ra: số file và bài được xác minh; không đọc hoặc trả nội dung học viên.
+// Khi lỗi: ném mã lỗi để hồ sơ tiếp tục ở trạng thái chờ.
+export function verifyClosureContent(closure, observations, nowMs = Date.now()) {
+  if (closure?.eligible !== true || !Array.isArray(closure.links)
+    || !Array.isArray(observations)
+    || closure.links.length !== observations.length) {
+    throw new ApiError(409, 'CLOSURE_CONTENT_PROOF_MISSING',
+      'Chưa đọc lại đủ file homework.');
+  }
+  const currentByLink = new Map();
+  for (const observed of observations) {
+    if (!Number.isSafeInteger(observed.linkIndex) || observed.linkIndex <= 0
+      || currentByLink.has(observed.linkIndex)
+      || !Number.isSafeInteger(observed.observedAtMs)
+      || observed.observedAtMs < nowMs - 5 * 60_000
+      || observed.observedAtMs > nowMs + 60_000) {
+      throw new ApiError(409, 'CLOSURE_CONTENT_PROOF_STALE',
+        'Bản đọc file thiếu định danh hoặc đã quá hạn.');
+    }
+    currentByLink.set(observed.linkIndex, observed);
+  }
+  let pairCount = 0;
+  for (const expected of closure.links) {
+    const current = currentByLink.get(expected.linkIndex);
+    if (!current || current.docId !== expected.docId
+      || !Array.isArray(expected.expectedPairs)
+      || !['accepted', 'empty'].includes(current.status)) {
+      throw new ApiError(409, 'CLOSURE_CONTENT_PROOF_MISMATCH',
+        'File homework hoặc trạng thái đọc không khớp.');
+    }
+    if (current.status === 'empty'
+      && current.receiptRequest?.expectedPairs?.length) {
+      throw new ApiError(409, 'CLOSURE_CONTENT_PROOF_MISMATCH',
+        'File được báo trống nhưng vẫn có bài.');
+    }
+    const actualPairs = current.status === 'empty' ? []
+      : current.receiptRequest?.expectedPairs;
+    if (!Array.isArray(actualPairs)
+      || current.status === 'accepted' && actualPairs.length === 0) {
+      throw new ApiError(409, 'CLOSURE_CONTENT_PROOF_MISMATCH',
+        'Chưa có danh sách bài vừa đọc.');
+    }
+    const wanted = [...expected.expectedPairs].sort((a, b) => a.essaySlot - b.essaySlot);
+    const actual = [...actualPairs].sort((a, b) => a.essaySlot - b.essaySlot);
+    if (wanted.length !== actual.length
+      || wanted.some((pair, index) => pair.essaySlot !== actual[index]?.essaySlot
+        || pair.revision !== actual[index]?.revision)) {
+      throw new ApiError(409, 'CLOSURE_ESSAY_CHANGED',
+        'Đề hoặc bài làm đã đổi sau lần tiếp nhận.');
+    }
+    pairCount += wanted.length;
+  }
+  if (pairCount !== closure.expectedPairCount) {
+    throw new ApiError(409, 'CLOSURE_CONTENT_PROOF_MISMATCH',
+      'Số bài vừa đọc không khớp biên nhận.');
+  }
+  return { verifiedLinkCount: closure.links.length, verifiedPairCount: pairCount };
+}
+
 // Nhận vào: danh sách toàn bộ link tìm được khi đã đọc hết các trang của một bảng Lark.
 // Việc chính: ghi danh sách trước khi chấm; một lượt dở giữ nguyên mốc và được quét lại.
 // Trả ra: mã lượt quét cùng khóa từng link, không trả nội dung bài học viên.
@@ -480,7 +541,8 @@ export function createWritingFlowScan({ pool }) {
     // Nhận vào: thời điểm Lark vừa đọc lại và đúng mã lượt quét.
     // Việc chính: chốt sổ chỉ khi các cặp của lượt ấy vẫn được giao đầy đủ.
     // Khi có bản sửa mới: giữ mục chờ để kiểm lại, không công nhận timestamp cũ.
-    async completeClosure({ runId, appId, tableId, recordId, finishedAtMs }) {
+    async completeClosure({ runId, appId, tableId, recordId, finishedAtMs,
+      observations }) {
       if (!Number.isSafeInteger(finishedAtMs) || finishedAtMs <= 0
         || finishedAtMs > Date.now() + 60_000) {
         throw new ApiError(400, 'CLOSURE_TIMESTAMP_INVALID',
@@ -491,6 +553,7 @@ export function createWritingFlowScan({ pool }) {
         throw new ApiError(409, 'CLOSURE_ELIGIBILITY_CHANGED',
           'Hồ sơ đã thay đổi hoặc còn bài chưa giao link.');
       }
+      verifyClosureContent(eligible, observations);
       return withTransaction(pool, async client => {
         const found = await client.query(`SELECT status,lark_finished_at_ms
           FROM writing_flow.record_closure

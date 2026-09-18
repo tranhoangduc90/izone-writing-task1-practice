@@ -157,8 +157,13 @@ test('hàng chốt hồ sơ và biên nhận chốt chỉ dùng token nội bộ
   assert.equal(due.body.records[0].recordId, 'record-demo');
   const completeUrl = '/api/v1/internal/writing-flow/scans/closure-complete';
   const body = { runId: reviewId, appId: 'app-demo', tableId: 'table-demo',
-    recordId: 'record-demo', finishedAtMs: 1780000000000 };
+    recordId: 'record-demo', finishedAtMs: 1780000000000,
+    observations: [{ linkIndex: 1, docId: 'doc-demo', status: 'empty',
+      observedAtMs: Date.now() }] };
   assert.equal((await request(makeApp(null)).post(completeUrl).send(body)).status, 401);
+  assert.equal((await request(makeApp(null)).post(completeUrl)
+    .set('Authorization', `Bearer ${config.internalApiToken}`)
+    .send({ ...body, observations: undefined })).status, 400);
   const complete = await request(makeApp(null)).post(completeUrl)
     .set('Authorization', `Bearer ${config.internalApiToken}`).send(body);
   assert.equal(complete.status, 200);

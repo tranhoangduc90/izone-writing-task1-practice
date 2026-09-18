@@ -54,6 +54,7 @@ const writingPairIntake=z.object({
    3:z.string().max(20000),4:z.string().max(20000)
  })}),
  sourceModifiedAt:z.string().trim().min(1).max(80),
+ larkModifiedMs:z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
  documentKind:z.enum(['google_docs','docx']),
  verifiedMime:z.string().trim().min(1).max(160),
  expectedCount:z.number().int().min(1).max(4),

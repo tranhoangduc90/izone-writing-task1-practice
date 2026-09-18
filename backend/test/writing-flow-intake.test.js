@@ -13,7 +13,8 @@ function fakePool() {
           && row.source_table_id === values[1] && row.source_record_id === values[2]
           && row.homework_file_id === values[3]
           && row.source_link_index === values[4] && row.essay_slot === values[5]);
-        matching.sort((a, b) => new Date(b.source_modified_at) - new Date(a.source_modified_at));
+        matching.sort((a, b) => new Date(b.source_modified_at) - new Date(a.source_modified_at)
+          || b.lark_modified_ms - a.lark_modified_ms);
         return { rowCount: matching.length ? 1 : 0, rows: matching.slice(0, 1) };
       }
       if (sql.includes('UPDATE writing_flow.pair SET status')) {
@@ -23,16 +24,19 @@ function fakePool() {
             && row.source_link_index === values[4] && row.essay_slot === values[5]) row.status = 'superseded';
         }
       }
-      if (sql.includes('SET source_modified_at = $2')) {
+      if (sql.includes('SET source_modified_at = GREATEST')) {
         const row = pairs.find(item => item.pair_id === values[0]);
-        row.source_modified_at = values[1];
+        row.source_modified_at = new Date(Math.max(
+          new Date(row.source_modified_at).getTime(), new Date(values[1]).getTime()));
+        row.lark_modified_ms = Math.max(row.lark_modified_ms ?? 0, values[2]);
       }
       if (sql.includes('INSERT INTO writing_flow.pair')) {
         const pair_id = `pair-${pairs.length + 1}`;
         pairs.push({ pair_id, source_app_id: values[0], source_table_id: values[1],
           source_record_id: values[2], homework_file_id: values[3],
           source_link_index: values[4], essay_slot: values[5], submission_revision: values[6],
-          source_modified_at: values[7], content_sha256: values[8], status: 'received' });
+          source_modified_at: values[7], lark_modified_ms: values[8],
+          content_sha256: values[9], status: 'received' });
         return { rows: [{ pair_id }], rowCount: 1 };
       }
       if (sql.includes('INSERT INTO writing_flow.handoff')) {
@@ -51,6 +55,7 @@ function input() {
     operationKey: 'scan-demo', appId: 'app-demo', tableId: 'table-demo',
     recordId: 'record-demo', docId: 'doc-demo',
     linkIndex: 2, classCode: 'IC2200', sourceModifiedAt: '2026-09-17T08:00:00.000Z',
+    larkModifiedMs: 1789632000000,
     larkMeta: { classCode: 'IC2200', imageUrls: {
       1: 'https://example.test/chart-one', 2: '', 3: '', 4: 'https://example.test/chart-four',
     } },
@@ -98,12 +103,36 @@ test('đổi riêng cờ TR/CC tạo phiên bản mới dù file chưa đổi', 
   await intake(input());
   const changed = input();
   changed.pairs.forEach(pair => { pair.trCcCheck = false; });
+  changed.larkModifiedMs += 1000;
   const result = await intake(changed);
   assert.deepEqual(result.receipts.map(row => row.status), ['received', 'received', 'received']);
-  assert.equal(pairs.filter(row => row.status === 'superseded').length, 3);
+  const lateOldRead = await intake(input());
+  assert.deepEqual(lateOldRead.receipts.map(row => row.status),
+    ['stale_read', 'stale_read', 'stale_read']);
+  const changedBack = input();
+  changedBack.larkModifiedMs += 2000;
+  const back = await intake(changedBack);
+  assert.deepEqual(back.receipts.map(row => row.status), ['received', 'received', 'received']);
+  assert.equal(pairs.length, 9);
+  assert.notEqual(back.receipts[0].pairId, result.receipts[0].pairId);
+  assert.equal(pairs.filter(row => row.status === 'superseded').length, 6);
   const conflicting = input();
+  conflicting.larkModifiedMs += 3000;
   conflicting.pairs[0].essay = 'Nội dung đã đổi nhưng timestamp Drive không đổi';
   await assert.rejects(intake(conflicting), error => error.code === 'SOURCE_VERSION_CONFLICT');
+});
+
+test('cờ khác nhưng cùng mốc sửa Lark bị chặn thay vì ghi đè', async () => {
+  const { pool, pairs } = fakePool();
+  const intake = createWritingFlowIntake({ pool, encryptionKey: '11'.repeat(32) });
+  await intake(input());
+  const ambiguous = input();
+  ambiguous.pairs.forEach(pair => { pair.trCcCheck = false; });
+  await assert.rejects(intake(ambiguous),
+    error => error.code === 'SOURCE_POLICY_VERSION_CONFLICT');
+  await assert.rejects(intake({ ...ambiguous, larkModifiedMs: undefined }),
+    error => error.code === 'LARK_MODIFIED_TIME_INVALID');
+  assert.equal(pairs.length, 3);
 });
 
 test('MIME sai hoặc thiếu khóa mã hóa dừng trước khi mở transaction', async () => {

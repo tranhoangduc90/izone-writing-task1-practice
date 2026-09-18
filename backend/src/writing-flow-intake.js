@@ -36,6 +36,13 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
       throw new ApiError(400, 'SOURCE_MODIFIED_TIME_INVALID', 'Thiếu thời điểm sửa file đã xác minh.');
     }
     const sourceModifiedAt = new Date(modifiedMs).toISOString();
+    // Lark cấp giờ sửa của hồ sơ; Drive chỉ cấp giờ sửa file. Cần cả hai
+    // để lượt đọc cờ TR/CC cũ không thay lượt mới khi file không đổi.
+    const larkModifiedMs = input.larkModifiedMs;
+    if (!Number.isSafeInteger(larkModifiedMs) || larkModifiedMs <= 0) {
+      throw new ApiError(400, 'LARK_MODIFIED_TIME_INVALID',
+        'Thiếu thời điểm sửa hồ sơ Lark đã xác minh.');
+    }
     if (input.expectedCount !== input.pairs.length || input.pairs.length === 0) {
       throw new ApiError(400, 'INTAKE_COUNT_MISMATCH', 'Số bài gửi vào không khớp số bài phát hiện.');
     }
@@ -92,29 +99,51 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
           input.docId, input.linkIndex, pair.essaySlot];
         await client.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', [JSON.stringify(scope)]);
         const current = await client.query(`
-          SELECT pair_id, submission_revision, content_sha256, source_modified_at, status
+          SELECT pair_id, submission_revision, content_sha256, source_modified_at,
+                 lark_modified_ms, status
             FROM writing_flow.pair
            WHERE source_app_id = $1 AND source_table_id = $2
              AND source_record_id = $3 AND homework_file_id = $4
              AND source_link_index = $5 AND essay_slot = $6
-           ORDER BY source_modified_at DESC, created_at DESC
+           ORDER BY source_modified_at DESC, lark_modified_ms DESC NULLS LAST, created_at DESC
            LIMIT 1`, scope);
         const newest = current.rows[0];
         if (newest && new Date(newest.source_modified_at).getTime() > modifiedMs) {
           receipts.push({ essaySlot: pair.essaySlot, pairId: newest.pair_id, status: 'stale_read' });
           continue;
         }
-        if (newest && new Date(newest.source_modified_at).getTime() === modifiedMs
-          && newest.submission_revision !== pair.revision
-          && newest.content_sha256 !== pair.contentSha256) {
-          throw new ApiError(409, 'SOURCE_VERSION_CONFLICT', 'Hai nội dung khác nhau có cùng phiên bản file.');
+        const sameFileTime = newest
+          && new Date(newest.source_modified_at).getTime() === modifiedMs;
+        if (sameFileTime && newest.content_sha256 !== pair.contentSha256) {
+          throw new ApiError(409, 'SOURCE_VERSION_CONFLICT',
+            'Hai nội dung khác nhau có cùng phiên bản file.');
+        }
+        if (sameFileTime && newest.submission_revision !== pair.revision) {
+          const previousLarkMs = newest.lark_modified_ms == null
+            ? null : Number(newest.lark_modified_ms);
+          if (previousLarkMs == null || !Number.isSafeInteger(previousLarkMs)) {
+            throw new ApiError(409, 'SOURCE_POLICY_VERSION_UNKNOWN',
+              'Chưa xác minh được thứ tự thay đổi cờ của hồ sơ Lark.');
+          }
+          if (previousLarkMs > larkModifiedMs) {
+            receipts.push({ essaySlot: pair.essaySlot, pairId: newest.pair_id,
+              status: 'stale_read' });
+            continue;
+          }
+          if (previousLarkMs === larkModifiedMs) {
+            throw new ApiError(409, 'SOURCE_POLICY_VERSION_CONFLICT',
+              'Hai giá trị cờ khác nhau có cùng thời điểm sửa hồ sơ Lark.');
+          }
         }
         if (newest?.submission_revision === pair.revision) {
-          if (new Date(newest.source_modified_at).getTime() < modifiedMs) {
+          if (new Date(newest.source_modified_at).getTime() < modifiedMs
+            || Number(newest.lark_modified_ms ?? 0) < larkModifiedMs) {
             await client.query(`
               UPDATE writing_flow.pair
-                 SET source_modified_at = $2, updated_at = now()
-               WHERE pair_id = $1`, [newest.pair_id, sourceModifiedAt]);
+                 SET source_modified_at = GREATEST(source_modified_at, $2),
+                     lark_modified_ms = GREATEST(COALESCE(lark_modified_ms, 0), $3),
+                     updated_at = now()
+               WHERE pair_id = $1`, [newest.pair_id, sourceModifiedAt, larkModifiedMs]);
           }
           receipts.push({ essaySlot: pair.essaySlot, pairId: newest.pair_id,
             status: newest.status === 'superseded' ? 'stale_read' : 'existing' });
@@ -130,11 +159,13 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
           INSERT INTO writing_flow.pair
             (source_app_id, source_table_id, source_record_id,
              homework_file_id, source_link_index, essay_slot,
-             submission_revision, source_modified_at, content_sha256, class_code,
-             task_type, document_kind, source_ciphertext, encryption_version)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1)
+             submission_revision, source_modified_at, lark_modified_ms,
+             content_sha256, class_code, task_type, document_kind,
+             source_ciphertext, encryption_version)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,1)
           RETURNING pair_id`, [
-          ...scope, pair.revision, sourceModifiedAt, pair.contentSha256, input.classCode,
+          ...scope, pair.revision, sourceModifiedAt, larkModifiedMs,
+          pair.contentSha256, input.classCode,
           pair.taskType, input.documentKind, pair.sourceCiphertext,
         ]);
         const pairId = inserted.rows[0].pair_id;

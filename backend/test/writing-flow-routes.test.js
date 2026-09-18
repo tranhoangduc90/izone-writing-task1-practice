@@ -291,6 +291,7 @@ test('tiếp nhận từng cặp bắt buộc token nội bộ và identity củ
     operationKey: 'scan-demo', appId: 'app-demo', tableId: 'table-demo',
     recordId: 'record-demo', docId: 'doc-demo',
     linkIndex: 2, classCode: 'IC2200', sourceModifiedAt: '2026-09-17T08:00:00.000Z',
+    larkModifiedMs: 1789632000000,
     larkMeta: { classCode: 'IC2200', imageUrls: {
       1: '', 2: '', 3: '', 4: 'https://example.test/chart-four',
     } },

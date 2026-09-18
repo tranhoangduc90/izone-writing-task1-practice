@@ -324,12 +324,14 @@ export function createWritingFlowScan({ pool }) {
           await client.query(`UPDATE writing_flow.scan_run
             SET status='complete',completed_at=now() WHERE run_id=$1`, [runId]);
         }
-        // Từng hồ sơ có bài hoặc lỗi nguồn được kiểm chốt riêng, không chờ luồng chấm.
+        // Chỉ hồ sơ không còn lỗi nguồn mới cần kiểm chốt; hồ sơ lỗi chờ lượt quét mới.
         await client.query(`INSERT INTO writing_flow.record_closure
           (run_id,source_record_id)
-          SELECT DISTINCT run_id,source_record_id
+          SELECT run_id,source_record_id
           FROM writing_flow.scan_item WHERE run_id=$1
-            AND status IN ('accepted','partial','issue')
+          GROUP BY run_id,source_record_id
+          HAVING bool_and(status IN ('accepted','empty'))
+            AND bool_or(status='accepted')
           ON CONFLICT DO NOTHING`, [runId]);
         const cursor = await client.query(`SELECT scanned_through_at
           FROM writing_flow.scan_cursor WHERE source_app_id=$1 AND source_table_id=$2`,

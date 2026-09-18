@@ -37,3 +37,4 @@ Các link không đọc được hoặc khác Google Docs/DOCX xuất hiện ri�
 2. Tài khoản API chỉ được cấp quyền cần thiết trên schema mới; workflow nhận yêu cầu retry đã được thử cả nhánh lỗi.
 3. Kiểm bằng tài khoản quản trị và giảng viên thường, kiểm dữ liệu thật ở phạm vi tối thiểu; đối chiếu một dòng trạng thái với database.
 4. Đối chiếu source backend đang chạy trước khi phát hành: nhãn image và source runtime từng khác nhau ngày 14/09/2026. Không lấy nhánh này làm bằng chứng production đã đổi.
+5. Sửa và thử bước chốt hồ sơ: hiện API chỉ kiểm bài đã giao link và link Lark còn đúng. Nếu nội dung file đổi sau lần đọc gần nhất mà link giữ nguyên, hồ sơ vẫn có thể bị ghi “Thời điểm xong”. Lượt quét mới cũng chỉ đổi biên nhận trong database, chưa xóa mốc cũ trong Lark. Cần đối chiếu lại phiên bản nội dung ngay trước khi chốt và xác định cách xử lý mốc cũ; thử cả hai tình huống rồi mới bật luồng.

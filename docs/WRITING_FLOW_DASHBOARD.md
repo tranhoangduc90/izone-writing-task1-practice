@@ -18,7 +18,7 @@ API `handoffs/due` cấp các bàn giao chưa được bước sau xác nhận �
 
 ## Người vận hành thấy gì
 
-Mở `writing-flow.html`, đăng nhập bằng tài khoản Google có quyền quản trị. Trang hiện số bài ở từng trạng thái theo lớp, các bài gần đây và danh sách **Cần kiểm tra**. Mỗi dòng ghi rõ hồ sơ nguồn, file homework, link thứ mấy và bài số mấy. Trang không hiện nội dung bài hoặc kết quả chấm chi tiết.
+Sau khi phát hành, mở `writing-flow.html` và đăng nhập bằng tài khoản Google có quyền quản trị. Trang sẽ hiện số bài ở từng trạng thái và nhóm các bài gần đây theo **lớp → hồ sơ homework → link file → bài số/Task**. Có nút mở file homework để đối chiếu; mã hồ sơ hiện ngay dưới tên nhóm. Nếu thiếu mã nguồn, bài vẫn hiện riêng để tránh gộp nhầm. Danh sách **Cần kiểm tra** giữ bước lỗi và nút chạy lại. Trang không hiện nội dung bài hoặc kết quả chấm chi tiết. Hiện tại đây mới là giao diện trên nhánh thử, chưa có URL production để mở.
 
 Sau ba lượt chấm hoặc ghi kết quả chưa xong, một bài xuất hiện trong **Cần kiểm tra** với bước lỗi và lý do gần nhất. Sau khi kiểm, quản trị viên chọn **Chạy lại từ bước này**. API ghi yêu cầu vào `writing_flow.manual_review` và `writing_flow.handoff` trong cùng transaction. Trang đọc lại trạng thái `Đã yêu cầu chạy lại`; trạng thái này chưa có nghĩa bài đã được chấm hoặc link đã được ghi. Workflow retry phải nhận yêu cầu, xác nhận và chỉ chạy lại đúng bước lỗi.
 

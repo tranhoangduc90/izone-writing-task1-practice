@@ -1,6 +1,7 @@
 import { createTeacherApi } from './api.js';
 import { createRequestId } from './core.js';
 import { teacherAuthFailure } from './teacher-auth-ui.js';
+import { groupWritingPairs } from './writing-flow-groups.js';
 
 // Nhận vào: trạng thái từng cặp từ API quản trị đã kiểm quyền.
 // Việc chính: hiện bước đang chạy và danh sách cần kiểm tra, chỉ gửi yêu cầu retry sau khi người vận hành xác nhận.
@@ -53,13 +54,42 @@ function renderPairs(pairs) {
   const root = $('flow-pairs');
   root.replaceChildren();
   if (!pairs.length) return root.append(makeText('p', 'Chưa có bài nào trong phạm vi đã chọn.', 'muted'));
-  for (const pair of pairs) {
-    const row = document.createElement('article'); row.className = 'flow-row';
-    const body = document.createElement('div');
-    const stage = pair.stage_key ? ` · ${stageNames[pair.stage_key] || pair.stage_key}` : '';
-    body.append(makeText('strong', `${statusNames[pair.status] || pair.status}${stage}`),
-      makeText('p', metadata(pair), 'flow-meta'));
-    row.append(body); root.append(row);
+  for (const classGroup of groupWritingPairs(pairs)) {
+    const classSection = document.createElement('section');
+    classSection.className = 'flow-class-group';
+    classSection.append(makeText('h3', `Lớp ${classGroup.classCode}`));
+    for (const [homeworkIndex, homework] of classGroup.homeworks.entries()) {
+      const homeworkSection = document.createElement('section');
+      homeworkSection.className = 'flow-homework-group';
+      homeworkSection.append(makeText('h4', `Homework ${homeworkIndex + 1} · ${homework.files.length} file`),
+        makeText('p', `Mã hồ sơ: ${homework.recordId}`, 'flow-meta'));
+      for (const file of homework.files) {
+        const fileSection = document.createElement('div');
+        fileSection.className = 'flow-file-group';
+        const title = makeText('strong', `Link ${file.linkIndex ?? 'chưa rõ'} · ${file.pairs.length} bài`);
+        fileSection.append(title);
+        if (file.docId) {
+          const link = makeText('a', 'Mở file homework');
+          link.href = `https://drive.google.com/open?id=${encodeURIComponent(file.docId)}`;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          fileSection.append(link);
+        }
+        for (const pair of file.pairs) {
+          const row = document.createElement('article'); row.className = 'flow-row';
+          const body = document.createElement('div');
+          const stage = pair.stage_key ? ` · ${stageNames[pair.stage_key] || pair.stage_key}` : '';
+          const task = pair.task_type === 'task_1' ? 'Task 1'
+            : pair.task_type === 'task_2' ? 'Task 2' : 'Chưa rõ Task';
+          body.append(makeText('strong', `Bài số ${pair.essay_slot} · ${task}`),
+            makeText('p', `${statusNames[pair.status] || pair.status}${stage}`, 'flow-meta'));
+          row.append(body); fileSection.append(row);
+        }
+        homeworkSection.append(fileSection);
+      }
+      classSection.append(homeworkSection);
+    }
+    root.append(classSection);
   }
 }
 

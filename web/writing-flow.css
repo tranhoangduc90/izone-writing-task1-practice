@@ -8,4 +8,10 @@
 .flow-row p { margin: 0.2rem 0; }
 .flow-meta { color: #4b5870; font-size: 0.9rem; }
 .flow-row button { flex: none; }
+.flow-class-group, .flow-homework-group, .flow-file-group { display: grid; gap: 0.55rem; }
+.flow-class-group { border-top: 2px solid #dce2eb; padding-top: 0.8rem; }
+.flow-class-group h3, .flow-homework-group h4 { margin: 0; }
+.flow-homework-group { margin-left: 0.5rem; padding: 0.85rem; border: 1px solid #dce2eb; border-radius: 0.8rem; }
+.flow-file-group { margin-left: 0.5rem; padding: 0.7rem; background: #f7f9fc; border-radius: 0.6rem; }
+.flow-file-group > a { width: fit-content; }
 @media (max-width: 620px) { .flow-row { display: block; } .flow-row button { margin-top: 0.6rem; } }

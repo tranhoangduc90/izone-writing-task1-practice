@@ -27,6 +27,7 @@ test('nhật ký ghi mã bài và lỗi nhưng không ghi bài viết, prompt ho
   assert.equal(row.executionId, '12345');
   assert.equal(row.errorCode, 'ATTEMPT_CONFLICT');
   assert.equal(row.status, 409);
+  assert.equal(row.outcome, 'completed');
   assert.equal(lines[0].includes('NỘI DUNG RIÊNG'), false);
   assert.equal(lines[0].includes('PROMPT BÍ MẬT'), false);
   assert.equal(lines[0].includes('TOKEN BÍ MẬT'), false);
@@ -61,4 +62,22 @@ test('lỗi ghi log không chặn phản hồi API', () => {
   const res = Object.assign(new EventEmitter(), { statusCode: 200, locals: {}, set() {} });
   middleware({ method: 'GET', path: '/api/v1/admin/writing-flow/summary' }, res, () => {});
   assert.doesNotThrow(() => res.emit('finish'));
+});
+
+test('kết nối ngắt giữa chừng vẫn để lại một dòng log, không giả là HTTP thành công', () => {
+  const lines = [];
+  const middleware = writingFlowRequestLog({ write: line => lines.push(line), now: () => 1500 });
+  const res = Object.assign(new EventEmitter(), { statusCode: 200, locals: {}, set() {} });
+  middleware({ method: 'POST', path: '/api/v1/internal/writing-flow/stages/complete',
+    body: { pairId: '11111111-1111-4111-8111-111111111111',
+      essay: 'NỘI DUNG RIÊNG', token: 'TOKEN BÍ MẬT' } }, res, () => {});
+  res.emit('close');
+  res.emit('finish');
+  assert.equal(lines.length, 1);
+  const row = JSON.parse(lines[0]);
+  assert.equal(row.outcome, 'connection_closed');
+  assert.equal(row.status, null);
+  assert.equal(row.pairId, '11111111-1111-4111-8111-111111111111');
+  assert.equal(lines[0].includes('NỘI DUNG RIÊNG'), false);
+  assert.equal(lines[0].includes('TOKEN BÍ MẬT'), false);
 });

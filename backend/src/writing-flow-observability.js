@@ -17,14 +17,18 @@ export function writingFlowRequestLog({ write = line => console.info(line), now 
     const startedAt = now();
     const requestId = crypto.randomUUID();
     res.set('X-Writing-Request-Id', requestId);
-    res.on('finish', () => {
+    let logged = false;
+    const logOnce = outcome => {
+      if (logged) return;
+      logged = true;
       const body = req.body && typeof req.body === 'object' ? req.body : {};
       const fields = {
         event: 'writing_flow_api_request',
         requestId,
         method: req.method,
         route: req.route?.path ?? req.path,
-        status: res.statusCode,
+        outcome,
+        status: outcome === 'completed' ? res.statusCode : null,
         durationMs: Math.max(0, now() - startedAt),
       };
       for (const key of Object.keys(patterns)) {
@@ -35,7 +39,9 @@ export function writingFlowRequestLog({ write = line => console.info(line), now 
         fields.errorCode = res.locals.writingErrorCode;
       }
       try { write(JSON.stringify(fields)); } catch { /* Nhật ký không được chặn bài. */ }
-    });
+    };
+    res.on('finish', () => logOnce('completed'));
+    res.on('close', () => logOnce('connection_closed'));
     next();
   };
 }

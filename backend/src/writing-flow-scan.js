@@ -182,10 +182,8 @@ export function createWritingFlowScan({ pool }) {
           || receiptRequest.linkIndex !== item.source_link_index) {
           throw new ApiError(409, 'SCAN_PLAN_SCOPE_MISMATCH', 'Kế hoạch ô không thuộc link này.');
         }
-        if (item.receipt_plan_sha256 && item.receipt_plan_sha256 !== planSha256) {
-          throw new ApiError(409, 'SCAN_PLAN_CONFLICT', 'Link đã có kế hoạch ô khác.');
-        }
-        if (!item.receipt_plan_sha256) {
+        // Bài có thể được sửa khi link còn pending: chỉ kế hoạch mới nhất được chốt.
+        if (item.receipt_plan_sha256 !== planSha256) {
           await client.query(`UPDATE writing_flow.scan_item
             SET receipt_plan=$3,receipt_plan_sha256=$4,planned_at=now()
             WHERE run_id=$1 AND item_key=$2`, [runId, key, plan, planSha256]);
@@ -200,7 +198,7 @@ export function createWritingFlowScan({ pool }) {
     // Trả ra: trạng thái bền của link; gửi trùng cùng trạng thái là an toàn.
     // Khi lỗi: link vẫn pending để lượt quét không thể chốt nhầm.
     async acknowledge({ runId, itemKey: key, status, pairIds = [],
-      issueKeys = [], detectedSlotCount = null }) {
+      issueKeys = [], detectedSlotCount = null, expectedPlanSha256 = null }) {
       return withTransaction(pool, async client => {
         const receiptSha256 = digest([status, [...pairIds].sort(),
           [...issueKeys].sort(), detectedSlotCount]);
@@ -212,6 +210,10 @@ export function createWritingFlowScan({ pool }) {
         const item = found.rows[0];
         if (item.run_status !== 'open') {
           throw new ApiError(409, 'SCAN_RUN_CLOSED', 'Lượt quét đã đóng.');
+        }
+        if (expectedPlanSha256 && item.receipt_plan_sha256 !== expectedPlanSha256) {
+          throw new ApiError(409, 'SCAN_PLAN_REPLACED',
+            'Bài đã đổi trong lúc đối chiếu; sẽ dùng kế hoạch mới.');
         }
         if (item.status !== 'pending') {
           if (item.status === status && item.receipt_sha256 === receiptSha256) {
@@ -380,7 +382,8 @@ export function createWritingFlowScan({ pool }) {
     // Trả ra: mã lượt đã chốt; lỗi một bảng không đổi mốc bảng khác.
     async finishReady({ limit = 100 } = {}) {
       // Mỗi ô đã được gửi không chờ. Chỉ biên nhận đọc lại từ database mới chốt link.
-      const planned = await pool.query(`SELECT i.run_id,i.item_key,i.receipt_plan
+      const planned = await pool.query(`SELECT i.run_id,i.item_key,
+          i.receipt_plan,i.receipt_plan_sha256
         FROM writing_flow.scan_item i JOIN writing_flow.scan_run r ON r.run_id=i.run_id
         WHERE i.status='pending' AND i.receipt_plan IS NOT NULL AND r.status='open'
         ORDER BY i.next_send_at,i.run_id,i.item_key LIMIT $1`, [limit]);
@@ -395,9 +398,15 @@ export function createWritingFlowScan({ pool }) {
           }
           throw error;
         }
-        await this.acknowledge({ runId: item.run_id, itemKey: item.item_key,
-          status: plan.status, detectedSlotCount: plan.detectedSlotCount,
-          pairIds: receipts.pairIds, issueKeys: receipts.issueKeys });
+        try {
+          await this.acknowledge({ runId: item.run_id, itemKey: item.item_key,
+            status: plan.status, detectedSlotCount: plan.detectedSlotCount,
+            expectedPlanSha256: item.receipt_plan_sha256,
+            pairIds: receipts.pairIds, issueKeys: receipts.issueKeys });
+        } catch (error) {
+          if (error.code === 'SCAN_PLAN_REPLACED') continue;
+          throw error;
+        }
       }
       const runs = await pool.query(`SELECT r.run_id FROM writing_flow.scan_run r
         WHERE r.status='open' AND NOT EXISTS (

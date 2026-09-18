@@ -260,7 +260,9 @@ export function createApp({config,pool,service,lessonService=service,provisional
  }));
  app.post('/api/v1/internal/writing-flow/scans/finish-ready',internal,writingScanReady,asyncRoute(async(q,r)=>{
    const {limit}=parse(z.object({limit:z.number().int().min(1).max(200).default(100)}),q.body);
-   r.json({ok:true,scans:await writingFlowScan.finishReady({limit})});
+   const result=await writingFlowScan.finishReady({limit});
+   const partial=result.failureCount>0;
+   r.status(partial?207:200).json({ok:!partial,outcome:partial?'partial':'success',...result});
  }));
  app.post('/api/v1/internal/writing-flow/scans/receipts',internal,writingScanReady,asyncRoute(async(q,r)=>{
    r.json({ok:true,receipts:await writingFlowScan.receipts(parse(writingScanReceipts,q.body))});

@@ -384,6 +384,8 @@ export function createWritingFlowScan({ pool }) {
     // Trả ra: mã lượt đã chốt; lỗi một bảng không đổi mốc bảng khác.
     async finishReady({ limit = 100 } = {}) {
       // Mỗi ô đã được gửi không chờ. Chỉ biên nhận đọc lại từ database mới chốt link.
+      // Một link lỗi không được giữ các link và lượt quét khác trong cùng nhịp.
+      const failures = [];
       const planned = await pool.query(`SELECT i.run_id,i.item_key,
           i.receipt_plan,i.receipt_plan_sha256
         FROM writing_flow.scan_item i JOIN writing_flow.scan_run r ON r.run_id=i.run_id
@@ -398,7 +400,9 @@ export function createWritingFlowScan({ pool }) {
           if (['SCAN_PAIR_RECEIPT_MISSING','SCAN_ISSUE_RECEIPT_MISSING'].includes(error.code)) {
             continue;
           }
-          throw error;
+          failures.push({ runId: item.run_id, itemKey: item.item_key,
+            step: 'receipt', code: error.code || 'UNEXPECTED_ERROR' });
+          continue;
         }
         try {
           await this.acknowledge({ runId: item.run_id, itemKey: item.item_key,
@@ -407,7 +411,8 @@ export function createWritingFlowScan({ pool }) {
             pairIds: receipts.pairIds, issueKeys: receipts.issueKeys });
         } catch (error) {
           if (error.code === 'SCAN_PLAN_REPLACED') continue;
-          throw error;
+          failures.push({ runId: item.run_id, itemKey: item.item_key,
+            step: 'acknowledge', code: error.code || 'UNEXPECTED_ERROR' });
         }
       }
       const runs = await pool.query(`SELECT r.run_id FROM writing_flow.scan_run r
@@ -416,8 +421,16 @@ export function createWritingFlowScan({ pool }) {
           WHERE i.run_id=r.run_id AND i.status='pending')
         ORDER BY r.started_at,r.run_id LIMIT $1`, [limit]);
       const completed = [];
-      for (const row of runs.rows) completed.push(await this.finish({ runId: row.run_id }));
-      return completed;
+      for (const row of runs.rows) {
+        try {
+          completed.push(await this.finish({ runId: row.run_id }));
+        } catch (error) {
+          failures.push({ runId: row.run_id, step: 'finish',
+            code: error.code || 'UNEXPECTED_ERROR' });
+        }
+      }
+      return { scans: completed, failureCount: failures.length,
+        failures: failures.slice(0, 10) };
     },
 
     // Nhận vào: số hồ sơ tối đa cần kiểm tra trong nhịp này.

@@ -89,8 +89,50 @@ test('kế hoạch bị thay trong lúc đối chiếu không chốt biên nhậ
     attempted += 1;
     throw Object.assign(new Error('replaced'), { code: 'SCAN_PLAN_REPLACED' });
   };
-  assert.deepEqual(await service.finishReady({ limit: 10 }), []);
+  assert.deepEqual(await service.finishReady({ limit: 10 }),
+    { scans: [], failureCount: 0, failures: [] });
   assert.equal(attempted, 1);
+});
+
+test('một link lỗi vẫn cho link và lượt quét khác chốt, rồi báo lỗi để gửi lại', async () => {
+  const firstKey = 'a'.repeat(64);
+  const secondKey = 'b'.repeat(64);
+  const plan = { status: 'accepted', detectedSlotCount: 1,
+    receiptRequest: { ...request, expectedIssues: [] } };
+  const pool = { async query(sql) {
+    if (sql.includes('i.receipt_plan IS NOT NULL')) return { rows: [
+      { run_id: 'run-bad', item_key: firstKey, receipt_plan: plan,
+        receipt_plan_sha256: 'sha-1' },
+      { run_id: 'run-good', item_key: secondKey, receipt_plan: plan,
+        receipt_plan_sha256: 'sha-2' },
+    ] };
+    if (sql.includes('NOT EXISTS')) return { rows: [
+      { run_id: 'run-bad' }, { run_id: 'run-good' },
+    ] };
+    throw new Error('UNEXPECTED_QUERY');
+  } };
+  const service = createWritingFlowScan({ pool });
+  const acknowledged = [];
+  const finished = [];
+  let receiptCalls = 0;
+  service.receipts = async () => {
+    receiptCalls += 1;
+    if (receiptCalls === 1) throw Object.assign(new Error('database down'),
+      { code: '08006' });
+    return { pairIds: ['pair-1'], issueKeys: [] };
+  };
+  service.acknowledge = async input => { acknowledged.push(input.itemKey); };
+  service.finish = async ({ runId }) => {
+    finished.push(runId);
+    if (runId === 'run-bad') throw Object.assign(new Error('busy'), { code: '55P03' });
+    return { runId, status: 'complete' };
+  };
+  const result = await service.finishReady({ limit: 10 });
+  assert.equal(result.failureCount, 2);
+  assert.deepEqual(result.failures.map(item => item.code), ['08006', '55P03']);
+  assert.deepEqual(result.scans, [{ runId: 'run-good', status: 'complete' }]);
+  assert.deepEqual(acknowledged, [secondKey]);
+  assert.deepEqual(finished, ['run-bad', 'run-good']);
 });
 
 test('database từ chối chốt nếu phiên bản kế hoạch đã đổi dưới khóa', async () => {

@@ -12,7 +12,7 @@ const config = {
   adminApiToken: 'a'.repeat(32),
 };
 
-function makeApp(role, overrides = {}, stageOverrides = {}, aiOverrides = {}) {
+function makeApp(role, overrides = {}, stageOverrides = {}, aiOverrides = {}, scanOverrides = {}) {
   const service = {
     listPairs: async () => [{ pair_id: reviewId, status: 'needs_review' }],
     listReviews: async () => [{ review_id: reviewId, status: 'open' }],
@@ -51,12 +51,13 @@ function makeApp(role, overrides = {}, stageOverrides = {}, aiOverrides = {}) {
       acknowledge: async input => ({ itemKey: input.itemKey, status: input.status }),
       finish: async () => ({ runId: reviewId, status: 'complete' }),
       due: async () => [],
-      finishReady: async () => [],
+      finishReady: async () => ({ scans: [], failureCount: 0, failures: [] }),
       receipts: async () => ({ pairIds: [reviewId], issueKeys: [] }),
       closureEligibility: async () => ({ eligible: false, reason: 'PAIR_NOT_DELIVERED' }),
       dueClosures: async () => [{ runId: reviewId, recordId: 'record-demo' }],
       completeClosure: async () => ({ status: 'done', runId: reviewId,
         recordId: 'record-demo' }),
+      ...scanOverrides,
     },
     adminAuth: (req, res, next) => {
       if (!role) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED' });
@@ -100,6 +101,23 @@ test('lượt quét cần token và danh sách đã đọc hết trang', async (
     .set('Authorization', `Bearer ${config.internalApiToken}`).send(body);
   assert.equal(accepted.status, 201);
   assert.equal(accepted.body.scan.count, 1);
+});
+
+test('chốt mốc quét trả trạng thái một phần và không che link lỗi', async () => {
+  const url = '/api/v1/internal/writing-flow/scans/finish-ready';
+  const app = makeApp(null, {}, {}, {}, { finishReady: async () => ({
+    scans: [{ runId: reviewId, status: 'complete' }], failureCount: 1,
+    failures: [{ runId: requestId, itemKey: 'a'.repeat(64),
+      step: 'receipt', code: '08006' }],
+  }) });
+  const response = await request(app).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`)
+    .send({ limit: 10 });
+  assert.equal(response.status, 207);
+  assert.equal(response.body.ok, false);
+  assert.equal(response.body.outcome, 'partial');
+  assert.equal(response.body.scans[0].runId, reviewId);
+  assert.equal(response.body.failures[0].code, '08006');
 });
 
 test('đọc lại biên nhận từng ô chỉ dùng token nội bộ', async () => {

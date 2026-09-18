@@ -44,6 +44,9 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
       throw new ApiError(400, 'INTAKE_DUPLICATE_SLOT', 'Một ô bài xuất hiện hai lần.');
     }
     const prepared = input.pairs.map(pair => {
+      if (typeof pair.trCcCheck !== 'boolean') {
+        throw new ApiError(400, 'INTAKE_TRCC_FLAG_MISSING', 'Thiếu cờ kiểm TR/CC của bài.');
+      }
       const topic = pair.topic.trim();
       const image = pair.image.trim();
       const essay = pair.essay.trim();
@@ -56,10 +59,13 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
         throw new ApiError(400, 'LARK_CHART_LINK_INVALID', 'Link ảnh biểu đồ không hợp lệ.');
       }
       if (!topic || !essay) throw new ApiError(400, 'INTAKE_PAIR_INCOMPLETE', 'Đề hoặc bài làm trống.');
-      const sourceJson = JSON.stringify([pair.taskType, topic, image, essay]);
+      // Dấu nội dung tách khỏi cờ kiểm: đổi cờ Lark tạo phiên bản xử lý mới
+      // dù file bài làm không đổi thời điểm sửa.
+      const contentSha256 = sha256(JSON.stringify([pair.taskType, topic, image, essay]));
+      const sourceJson = JSON.stringify([pair.taskType, topic, image, essay, pair.trCcCheck]);
       const revision = sha256(sourceJson);
       if ((pair.revision && revision !== pair.revision)
-        || (pair.contentSha256 && revision !== pair.contentSha256)) {
+        || (pair.contentSha256 && contentSha256 !== pair.contentSha256)) {
         throw new ApiError(409, 'INTAKE_REVISION_MISMATCH', 'Phiên bản bài không khớp nội dung.');
       }
       const resultJson = JSON.stringify({
@@ -72,7 +78,7 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
         essaySlot: pair.essaySlot,
         revision,
       });
-      return { ...pair, topic, image, essay, revision,
+      return { ...pair, topic, image, essay, revision, contentSha256,
         sourceCiphertext: seal(sourceJson, key),
         resultCiphertext: seal(resultJson, key),
         resultSha256: sha256(resultJson),
@@ -86,7 +92,7 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
           input.docId, input.linkIndex, pair.essaySlot];
         await client.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', [JSON.stringify(scope)]);
         const current = await client.query(`
-          SELECT pair_id, submission_revision, source_modified_at, status
+          SELECT pair_id, submission_revision, content_sha256, source_modified_at, status
             FROM writing_flow.pair
            WHERE source_app_id = $1 AND source_table_id = $2
              AND source_record_id = $3 AND homework_file_id = $4
@@ -99,7 +105,8 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
           continue;
         }
         if (newest && new Date(newest.source_modified_at).getTime() === modifiedMs
-          && newest.submission_revision !== pair.revision) {
+          && newest.submission_revision !== pair.revision
+          && newest.content_sha256 !== pair.contentSha256) {
           throw new ApiError(409, 'SOURCE_VERSION_CONFLICT', 'Hai nội dung khác nhau có cùng phiên bản file.');
         }
         if (newest?.submission_revision === pair.revision) {
@@ -127,7 +134,7 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
              task_type, document_kind, source_ciphertext, encryption_version)
           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,1)
           RETURNING pair_id`, [
-          ...scope, pair.revision, sourceModifiedAt, pair.revision, input.classCode,
+          ...scope, pair.revision, sourceModifiedAt, pair.contentSha256, input.classCode,
           pair.taskType, input.documentKind, pair.sourceCiphertext,
         ]);
         const pairId = inserted.rows[0].pair_id;

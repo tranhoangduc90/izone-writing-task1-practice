@@ -61,7 +61,7 @@ const writingPairIntake=z.object({
    essaySlot:z.number().int().min(1).max(4),
    taskType:z.enum(['task_1','task_2']),
    topic:z.string().max(20000), image:z.string().max(20000),
-   essay:z.string().max(40000),
+   essay:z.string().max(40000), trCcCheck:z.boolean(),
    revision:z.string().regex(/^[0-9a-f]{64}$/).optional(),
    contentSha256:z.string().regex(/^[0-9a-f]{64}$/).optional()
  })).min(1).max(4)

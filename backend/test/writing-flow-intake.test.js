@@ -8,7 +8,7 @@ function fakePool() {
   const client = {
     async query(sql, values = []) {
       writes.push({ sql, values });
-      if (sql.includes('SELECT pair_id, submission_revision, source_modified_at')) {
+      if (sql.includes('SELECT pair_id, submission_revision, content_sha256, source_modified_at')) {
         const matching = pairs.filter(row => row.source_app_id === values[0]
           && row.source_table_id === values[1] && row.source_record_id === values[2]
           && row.homework_file_id === values[3]
@@ -32,7 +32,7 @@ function fakePool() {
         pairs.push({ pair_id, source_app_id: values[0], source_table_id: values[1],
           source_record_id: values[2], homework_file_id: values[3],
           source_link_index: values[4], essay_slot: values[5], submission_revision: values[6],
-          source_modified_at: values[7], status: 'received' });
+          source_modified_at: values[7], content_sha256: values[8], status: 'received' });
         return { rows: [{ pair_id }], rowCount: 1 };
       }
       if (sql.includes('INSERT INTO writing_flow.handoff')) {
@@ -59,7 +59,7 @@ function input() {
       essaySlot, taskType: essaySlot === 2 ? 'task_2' : 'task_1',
       topic: `Đề giả ${essaySlot}`,
       image: essaySlot === 2 ? '' : `https://example.test/chart-${essaySlot === 1 ? 'one' : 'four'}`,
-      essay: `Bài giả ${essaySlot}`,
+      essay: `Bài giả ${essaySlot}`, trCcCheck: true,
     })),
   };
 }
@@ -90,6 +90,20 @@ test('ba ô 1, 2, 4 tạo ba bàn giao; quét lại và sửa một ô không ch
   assert.equal(stale.receipts[2].status, 'stale_read');
   assert.equal(writes.filter(row => row.sql.includes('INSERT INTO writing_flow.handoff')).length, 4);
   assert.equal(writes.some(row => row.values.some(value => typeof value === 'string' && value.includes('Bài giả'))), false);
+});
+
+test('đổi riêng cờ TR/CC tạo phiên bản mới dù file chưa đổi', async () => {
+  const { pool, pairs } = fakePool();
+  const intake = createWritingFlowIntake({ pool, encryptionKey: '11'.repeat(32) });
+  await intake(input());
+  const changed = input();
+  changed.pairs.forEach(pair => { pair.trCcCheck = false; });
+  const result = await intake(changed);
+  assert.deepEqual(result.receipts.map(row => row.status), ['received', 'received', 'received']);
+  assert.equal(pairs.filter(row => row.status === 'superseded').length, 3);
+  const conflicting = input();
+  conflicting.pairs[0].essay = 'Nội dung đã đổi nhưng timestamp Drive không đổi';
+  await assert.rejects(intake(conflicting), error => error.code === 'SOURCE_VERSION_CONFLICT');
 });
 
 test('MIME sai hoặc thiếu khóa mã hóa dừng trước khi mở transaction', async () => {

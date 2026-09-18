@@ -6,7 +6,7 @@ import { seal, sha256 } from '../src/writing-flow-crypto.js';
 test('bàn giao bước chấm giữ đúng file, link và ô homework', async () => {
   const encryptionKey = '11'.repeat(32);
   const key = Buffer.from(encryptionKey, 'hex');
-  const source = ['task_1', 'Đề giả', 'https://example.test/chart', 'Bài giả'];
+  const source = ['task_1', 'Đề giả', 'https://example.test/chart', 'Bài giả', true];
   const revision = sha256(JSON.stringify(source));
   const pairId = '11111111-1111-4111-8111-111111111111';
   const handoffId = '22222222-2222-4222-8222-222222222222';
@@ -50,7 +50,7 @@ test('bàn giao bước chấm giữ đúng file, link và ô homework', async (
   assert.equal(result.status, 'started');
   assert.deepEqual(result.source, {
     taskType: 'task_1', topic: 'Đề giả',
-    image: 'https://example.test/chart', essay: 'Bài giả',
+    image: 'https://example.test/chart', essay: 'Bài giả', trCcCheck: true,
     appId: 'app-demo', tableId: 'table-demo',
     recordId: 'record-demo', homeworkFileId: 'doc-demo',
     sourceLinkIndex: 2, essaySlot: 4, classCode: 'IC2200',

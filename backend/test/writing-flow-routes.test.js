@@ -296,7 +296,8 @@ test('tiếp nhận từng cặp bắt buộc token nội bộ và identity củ
     } },
     documentKind: 'google_docs', verifiedMime: 'application/vnd.google-apps.document',
     expectedCount: 1, pairs: [{ essaySlot: 4, taskType: 'task_1',
-      topic: 'Đề giả', image: 'https://example.test/chart-four', essay: 'Bài giả' }],
+      topic: 'Đề giả', image: 'https://example.test/chart-four',
+      essay: 'Bài giả', trCcCheck: true }],
   };
   const accepted = await request(makeApp(null)).post(url)
     .set('Authorization', `Bearer ${config.internalApiToken}`).send(body);

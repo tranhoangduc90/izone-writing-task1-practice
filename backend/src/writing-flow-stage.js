@@ -183,8 +183,8 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
         attemptId: attemptResult.rows[0].attempt_id, attemptNo,
         requestKey, cycleNo: stage.cycle_no,
         source: (() => {
-          const [taskType, topic, image, essay] = decode(pair.source_ciphertext, key);
-          return { taskType, topic, image, essay,
+          const [taskType, topic, image, essay, trCcCheck] = decode(pair.source_ciphertext, key);
+          return { taskType, topic, image, essay, trCcCheck,
             appId: pair.source_app_id,
             tableId: pair.source_table_id,
             recordId: pair.source_record_id,

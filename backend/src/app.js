@@ -386,5 +386,25 @@ export function createApp({config,pool,service,lessonService=service,provisional
  }));
  app.post('/api/v1/admin/attempts/:attemptRef/retry',writes,adminAuth,teacherManage,asyncRoute(async(q,r)=>r.status(202).json({ok:true,attempt:await lessonService.retryFailedAttempt({attemptRef:parse(uuid,q.params.attemptRef),actorRef:q.reviewer.email})})));
  app.post('/api/v1/admin/lesson-sessions/:sessionRef/sections/:section/reopen',adminAuth,teacherManage,asyncRoute(async(q,r)=>r.json({ok:true,session:await lessonService.reopenSection({sessionRef:parse(uuid,q.params.sessionRef),section:parse(lessonSection,q.params.section),actorRef:q.reviewer.email,...parse(reopen,q.body)})})));
- app.use((_q,r)=>r.status(404).json({ok:false,error:'NOT_FOUND'}));app.use((error,_q,r,_n)=>{r.locals.writingErrorCode=error instanceof ApiError?error.code:'INTERNAL_ERROR';if(error instanceof ApiError)return r.status(error.status).json({ok:false,error:error.code,message:error.message,...(error.current?{current:error.current}:{})});const requestId=r.locals.writingRequestId||crypto.randomUUID();console.error(`Writing Task 1 API error request_id=${requestId} type=${error?.name||'Error'} code=${error?.code||'none'}`);return r.status(500).json({ok:false,error:'INTERNAL_ERROR',requestId});});return app;
+ app.use((_q,r)=>r.status(404).json({ok:false,error:'NOT_FOUND'}));
+ app.use((error,q,r,_n)=>{
+   const writingRoute=q.path.startsWith('/api/v1/internal/writing-flow')
+     || q.path.startsWith('/api/v1/admin/writing-flow');
+   const parseFailure=writingRoute && error?.type==='entity.parse.failed';
+   const oversizedBody=writingRoute && error?.type==='entity.too.large';
+   // Nhận vào: lỗi đọc JSON hoặc lỗi nghiệp vụ trước khi API gửi phản hồi.
+   // Việc chính: phân loại lỗi đầu vào, giữ đúng mã truy vết của yêu cầu Writing.
+   // Kết quả: 400/413 cho dữ liệu sai; lỗi máy chủ thật mới trả 500.
+   // Khi lỗi: log vẫn giữ mã và loại lỗi, không ghi nội dung bài gửi tới API.
+   r.locals.writingErrorCode=parseFailure?'INVALID_JSON':oversizedBody?'BODY_TOO_LARGE'
+     :error instanceof ApiError?error.code:'INTERNAL_ERROR';
+   if(parseFailure||oversizedBody)return r.status(parseFailure?400:413).json({ok:false,
+     error:r.locals.writingErrorCode,requestId:r.locals.writingRequestId});
+   if(error instanceof ApiError)return r.status(error.status).json({ok:false,error:error.code,
+     message:error.message,...(error.current?{current:error.current}:{})});
+   const requestId=r.locals.writingRequestId||crypto.randomUUID();
+   console.error(`Writing Task 1 API error request_id=${requestId} type=${error?.name||'Error'} code=${error?.code||'none'}`);
+   return r.status(500).json({ok:false,error:'INTERNAL_ERROR',requestId});
+ });
+ return app;
 }

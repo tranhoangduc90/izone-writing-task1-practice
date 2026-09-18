@@ -96,6 +96,26 @@ test('yêu cầu Writing bị CORS chặn vẫn có mã truy vết', async () =>
   assert.match(response.headers['x-writing-request-id'], /^[0-9a-f-]{36}$/);
 });
 
+test('JSON sai ở API Writing là lỗi đầu vào, giữ đúng mã truy vết', async () => {
+  const response = await request(makeApp('admin')).post('/api/v1/internal/writing-flow/intake')
+    .set('Authorization', `Bearer ${config.internalApiToken}`)
+    .set('Content-Type', 'application/json').send('{"essay":');
+  assert.equal(response.status, 400);
+  assert.equal(response.body.error, 'INVALID_JSON');
+  assert.equal(response.body.requestId, response.headers['x-writing-request-id']);
+  assert.equal(JSON.stringify(response.body).includes('essay'), false);
+});
+
+test('body Writing quá lớn trả 413 mà không ghi nội dung vào phản hồi', async () => {
+  const response = await request(makeApp('admin')).post('/api/v1/internal/writing-flow/intake')
+    .set('Authorization', `Bearer ${config.internalApiToken}`)
+    .send({ essay: 'x'.repeat(525_000) });
+  assert.equal(response.status, 413);
+  assert.equal(response.body.error, 'BODY_TOO_LARGE');
+  assert.equal(response.body.requestId, response.headers['x-writing-request-id']);
+  assert.equal(JSON.stringify(response.body).includes('xxxx'), false);
+});
+
 test('lỗi workflow chỉ nhận metadata qua token và chỉ quản trị viên đọc được', async () => {
   const url = '/api/v1/internal/writing-flow/workflow-failures';
   const body = { workflowId: 'workflow-demo', workflowName: 'Chấm chính một bài',

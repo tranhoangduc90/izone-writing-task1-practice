@@ -34,6 +34,7 @@ function fixture({ runStatus = 'complete', itemStatus = 'accepted',
         homework_file_id: wrongFile && index === 1 ? 'doc-2' : 'doc-1',
         source_link_index: wrongLink && index === 1 ? 2 : 1,
         essay_slot: duplicateSlot ? 1 : index + 1,
+        submission_revision: `revision-${index + 1}`,
         delivery_status: deliveryStatuses[index],
       }));
       return { rowCount: rows.length, rows };
@@ -49,7 +50,11 @@ test('chỉ chốt hồ sơ khi hai ô bài đã giao và đã đọc lại link
   const result = await fixture();
   assert.equal(result.eligible, true);
   assert.equal(result.expectedPairCount, 2);
-  assert.deepEqual(result.links, [{ linkIndex: 1, docId: 'doc-1' }]);
+  assert.deepEqual(result.links, [{ linkIndex: 1, docId: 'doc-1',
+    expectedPairs: [
+      { essaySlot: 1, revision: 'revision-1' },
+      { essaySlot: 2, revision: 'revision-2' },
+    ] }]);
 });
 
 test('giữ hồ sơ mở khi lượt quét chưa xong hoặc còn lỗi nguồn', async () => {

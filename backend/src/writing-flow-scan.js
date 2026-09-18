@@ -35,6 +35,7 @@ export function createWritingFlowScan({ pool }) {
         ORDER BY source_link_index`, [run.run_id, recordId]);
       const links = items.rows.map(item => ({
         linkIndex: item.source_link_index, docId: item.homework_file_id,
+        expectedPairs: [],
       }));
       if (items.rows.some(item => !['accepted', 'empty'].includes(item.status))) {
         return { eligible: false, reason: 'SCAN_ITEM_UNRESOLVED',
@@ -50,7 +51,7 @@ export function createWritingFlowScan({ pool }) {
           runId: run.run_id, links };
       }
       let expected = 0;
-      for (const item of items.rows) {
+      for (const [index, item] of items.rows.entries()) {
         if (item.status === 'empty') continue;
         const pairIds = item.receipt_pair_ids;
         if (!Array.isArray(pairIds)
@@ -62,6 +63,7 @@ export function createWritingFlowScan({ pool }) {
         const pairs = await pool.query(`SELECT p.pair_id,p.status,
             p.source_app_id,p.source_table_id,p.source_record_id,
             p.homework_file_id,p.source_link_index,p.essay_slot,
+            p.submission_revision,
             s.status AS delivery_status
           FROM writing_flow.pair p
           LEFT JOIN writing_flow.stage_result s
@@ -84,6 +86,9 @@ export function createWritingFlowScan({ pool }) {
           return { eligible: false, reason: 'PAIR_NOT_DELIVERED',
             runId: run.run_id, links };
         }
+        links[index].expectedPairs = pairs.rows.map(pair => ({
+          essaySlot: pair.essay_slot, revision: pair.submission_revision,
+        })).sort((left, right) => left.essaySlot - right.essaySlot);
       }
       if (!expected) return { eligible: false, reason: 'NO_WRITING_PAIR',
         runId: run.run_id, links };

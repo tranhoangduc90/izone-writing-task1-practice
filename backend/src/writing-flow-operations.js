@@ -218,13 +218,21 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
 
     async claimDueSources({ sourceTypes = ['manual', 'google_classroom'], limit = 50 } = {}) {
       return withTransaction(pool, async client => {
-        const due = await client.query(`SELECT source_id
-          FROM writing_flow.source_record
-          WHERE source_type = ANY($1::text[])
-            AND dispatch_status IN ('pending','sent')
-            AND coalesce(next_dispatch_at,now()) <= now()
-          ORDER BY next_dispatch_at NULLS FIRST,created_at,source_id
-          FOR UPDATE SKIP LOCKED LIMIT $2`, [sourceTypes, limit]);
+        const due = await client.query(`SELECT s.source_id
+          FROM writing_flow.source_record s
+          WHERE s.source_type = ANY($1::text[])
+            AND s.dispatch_status IN ('pending','sent')
+            AND coalesce(s.next_dispatch_at,now()) <= now()
+            AND NOT EXISTS (
+              SELECT 1 FROM writing_flow.scan_item i
+              JOIN writing_flow.scan_run r ON r.run_id=i.run_id
+              WHERE r.status='open'
+                AND r.source_app_id=s.source_app_id AND r.source_table_id=s.source_table_id
+                AND i.source_record_id=s.source_record_id
+                AND i.homework_file_id IS NOT DISTINCT FROM s.homework_file_id
+                AND i.source_link_index=s.source_link_index)
+          ORDER BY s.next_dispatch_at NULLS FIRST,s.created_at,s.source_id
+          FOR UPDATE OF s SKIP LOCKED LIMIT $2`, [sourceTypes, limit]);
         if (!due.rowCount) return [];
         const ids = due.rows.map(row => row.source_id);
         const result = await client.query(`UPDATE writing_flow.source_record

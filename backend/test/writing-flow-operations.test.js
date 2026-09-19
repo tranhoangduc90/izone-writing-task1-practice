@@ -79,7 +79,7 @@ test('hàng nguồn nhận 50 file mặc định, khóa SKIP LOCKED và không c
   const observed = [];
   const pool = poolWith(async (sql, params) => {
     observed.push({ sql, params });
-    if (sql.includes('SELECT source_id')) return { rowCount: ids.length,
+    if (sql.includes('SELECT s.source_id')) return { rowCount: ids.length,
       rows: ids.map(source_id => ({ source_id })) };
     if (sql.includes('UPDATE writing_flow.source_record')) return { rowCount: ids.length,
       rows: ids.map(source_id => ({ source_id, dispatch_count: 1 })) };
@@ -88,7 +88,8 @@ test('hàng nguồn nhận 50 file mặc định, khóa SKIP LOCKED và không c
   const rows = await createWritingFlowOperations({ pool }).claimDueSources();
   assert.equal(rows.length, 20);
   assert.equal(observed[0].params[1], 50);
-  assert.match(observed[0].sql, /FOR UPDATE SKIP LOCKED LIMIT \$2/u);
+  assert.match(observed[0].sql, /FOR UPDATE OF s SKIP LOCKED LIMIT \$2/u);
+  assert.match(observed[0].sql, /NOT EXISTS[\s\S]*scan_item[\s\S]*scan_run/u);
   assert.deepEqual(observed[1].params[0], ids);
 });
 

@@ -59,3 +59,59 @@ test('bàn giao bước chấm giữ đúng file, link và ô homework', async (
   });
   assert.deepEqual(result.previous.intake, { operationKey: 'scan-demo' });
 });
+
+test('bước giao link nhận phiên bản trang mới chỉ khi đã đánh dấu xuất lại', async () => {
+  const encryptionKey = '11'.repeat(32);
+  const key = Buffer.from(encryptionKey, 'hex');
+  const source = ['task_2', 'Đề giả', '', 'Bài giả', false];
+  const revision = sha256(JSON.stringify(source));
+  const pairId = '41111111-1111-4111-8111-111111111111';
+  const handoffId = '42222222-2222-4222-8222-222222222222';
+  const oldHash = 'a'.repeat(64);
+  const newHash = 'b'.repeat(64);
+  const updates = [];
+  const client = {
+    async query(sql, params = []) {
+      if (sql.includes('SELECT pair_id, submission_revision')) return {
+        rowCount: 1, rows: [{
+          pair_id: pairId, submission_revision: revision, status: 'running',
+          source_ciphertext: seal(JSON.stringify(source), key),
+          source_app_id: 'app-demo', source_table_id: 'table-demo',
+          source_record_id: 'record-demo', homework_file_id: 'doc-demo',
+          source_link_index: 1, essay_slot: 1, class_code: 'IC2200',
+          document_kind: 'google_docs', source_modified_at: '2026-09-19T08:00:00Z',
+        }],
+      };
+      if (sql.includes('SELECT handoff_id, from_stage')) return {
+        rowCount: 1, rows: [{ handoff_id: handoffId, from_stage: 'render',
+          to_stage: 'deliver', source_result_sha256: newHash, status: 'pending' }],
+      };
+      if (sql.includes('SELECT pair_id, stage_key, status')) return {
+        rowCount: 1, rows: [{ pair_id: pairId, stage_key: 'deliver',
+          status: 'pending', cycle_no: 2, attempt_count: 0,
+          input_sha256: oldHash, error_code: 'REPUBLISH_REQUESTED' }],
+      };
+      if (sql.includes('SET input_sha256=$3')) {
+        updates.push(params);
+        return { rowCount: 1, rows: [] };
+      }
+      if (sql.includes('INSERT INTO writing_flow.stage_attempt')) return {
+        rowCount: 1, rows: [{ attempt_id: '43333333-3333-4333-8333-333333333333' }],
+      };
+      if (sql.includes('SELECT stage_key,result_ciphertext')) return {
+        rowCount: 1, rows: [{ stage_key: 'render',
+          result_ciphertext: seal(JSON.stringify({ resultUrl: 'https://example.test/view?v=2' }), key) }],
+      };
+      return { rowCount: 1, rows: [] };
+    },
+    release() {},
+  };
+  const stage = createWritingFlowStage({
+    pool: { connect: async () => client }, encryptionKey,
+  });
+  const result = await stage.claim({ pairId, revision, stageKey: 'deliver',
+    handoffId, executionId: 'execution-republish' });
+  assert.equal(result.status, 'started');
+  assert.equal(updates.length, 1);
+  assert.deepEqual(updates[0], [pairId, 'deliver', newHash]);
+});

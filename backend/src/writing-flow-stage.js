@@ -77,7 +77,7 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
       }
       const stageResult = await client.query(`
         SELECT pair_id, stage_key, status, cycle_no, attempt_count,
-               input_sha256, lease_expires_at
+               input_sha256, error_code, lease_expires_at
           FROM writing_flow.stage_result
          WHERE pair_id=$1 AND stage_key=$2 FOR UPDATE`, [pairId, stageKey]);
       if (stageResult.rowCount !== 1) {
@@ -114,6 +114,22 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
         stage = { ...stage, status: 'pending', cycle_no: stage.cycle_no + 1, attempt_count: 0 };
         await client.query(`UPDATE writing_flow.pair SET status='running',updated_at=now()
           WHERE pair_id=$1`, [pairId]);
+      }
+      // Khi quản trị viên yêu cầu xuất lại một bài đã giao, bước tạo trang sinh
+      // mã kết quả mới. Chỉ bước giao link đã được đặt rõ REPUBLISH_REQUESTED,
+      // chưa có lượt thử trong chu kỳ mới, mới được nhận mã này.
+      const acceptsRepublishedRender = stageKey === 'deliver'
+        && handoff.from_stage === 'render'
+        && stage.status === 'pending'
+        && Number(stage.attempt_count) === 0
+        && stage.error_code === 'REPUBLISH_REQUESTED';
+      if (acceptsRepublishedRender
+        && stage.input_sha256 !== handoff.source_result_sha256) {
+        await client.query(`UPDATE writing_flow.stage_result
+          SET input_sha256=$3,updated_at=now()
+          WHERE pair_id=$1 AND stage_key=$2`,
+        [pairId, stageKey, handoff.source_result_sha256]);
+        stage = { ...stage, input_sha256: handoff.source_result_sha256 };
       } else if (handoff.from_stage !== 'retry'
         && stage.input_sha256 !== handoff.source_result_sha256) {
         throw new ApiError(409, 'STAGE_INPUT_CHANGED', 'Đầu vào bước chấm không khớp bản đã lưu.');

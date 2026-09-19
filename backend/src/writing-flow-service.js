@@ -27,6 +27,9 @@ const teacherAssignmentsCte = `teacher_assignments AS (
    WHERE class_code IS NOT NULL AND teacher_name IS NOT NULL
    GROUP BY class_code
 )`;
+const emptyTeacherAssignmentsCte = `teacher_assignments AS (
+  SELECT NULL::text AS class_code,ARRAY[]::text[] AS teacher_names WHERE false
+)`;
 
 // Nhận vào: tên lớp từ nguồn mapping hoặc mã lớp trong bảng homework.
 // Việc chính: nhận cả IC2269 và dạng CS.070626, rồi đưa về một cách viết ổn định.
@@ -93,6 +96,17 @@ export function mergeClassCoverage(expectedRows = [], seenRows = []) {
 // Trả ra: trạng thái, mã cặp và bước; không đọc bài làm hay kết quả đã mã hóa.
 // Khi lỗi: transaction hoàn tác; màn hình nhận mã lỗi và giữ mục Cần kiểm tra.
 export function createWritingFlowService({ pool, encryptionKey = null }) {
+  let teacherAssignmentsSource;
+  async function teacherAssignmentsForDatabase() {
+    if (!teacherAssignmentsSource) {
+      teacherAssignmentsSource = pool.query(`SELECT coalesce(has_table_privilege(
+          current_user,to_regclass('mapping.lark_export_teacher_assignments'),'SELECT'),false)
+          AS can_read`)
+        .then(result => result.rows[0]?.can_read
+          ? teacherAssignmentsCte : emptyTeacherAssignmentsCte);
+    }
+    return teacherAssignmentsSource;
+  }
   return {
     intakePairs: createWritingFlowIntake({ pool, encryptionKey }),
     // Nhận vào: định danh execution lỗi từ Error Trigger của n8n.
@@ -154,8 +168,9 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
       return result.rows;
     },
     async summary() {
+      const assignments = await teacherAssignmentsForDatabase();
       const result = await pool.query(`
-        WITH ${teacherAssignmentsCte}
+        WITH ${assignments}
         SELECT p.class_code,p.status,count(*)::integer AS pair_count,
                coalesce(t.teacher_names,ARRAY[]::text[]) AS teacher_names
           FROM writing_flow.pair AS p
@@ -190,8 +205,9 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
     },
 
     async listPairs({ classCode = null, teacherName = null, limit = 100, offset = 0 } = {}) {
+      const assignments = await teacherAssignmentsForDatabase();
       const result = await pool.query(`
-        WITH ${teacherAssignmentsCte}
+        WITH ${assignments}
         SELECT p.pair_id, p.class_code, p.source_app_id, p.source_table_id,
                p.source_record_id, p.homework_file_id,
                p.source_link_index, p.essay_slot, p.task_type, p.status,
@@ -255,8 +271,9 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
     },
 
     async listReviews({ limit = 100, offset = 0 } = {}) {
+      const assignments = await teacherAssignmentsForDatabase();
       const result = await pool.query(`
-        WITH ${teacherAssignmentsCte}
+        WITH ${assignments}
         SELECT r.review_id, r.pair_id, r.stage_key, r.cycle_no, r.status,
                r.error_code, r.opened_at, r.checked_at, r.retry_requested_at,
                s.attempt_count, p.class_code, p.source_app_id,

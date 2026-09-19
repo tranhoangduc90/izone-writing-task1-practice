@@ -142,3 +142,20 @@ test('dịch vụ chỉ đọc view lớp vận hành và lượt quét bảng W
   assert.deepEqual(calls[1].values, [['tblEBaI33abutdsq']]);
   assert.equal(calls.every(call => !/student|essay|ciphertext|token/iu.test(call.sql)), true);
 });
+
+test('thống kê giảng viên chỉ đọc bản sao phân công và lọc ngay trong database', async () => {
+  const calls = [];
+  const pool = { query: async (sql, values = []) => {
+    calls.push({ sql, values });
+    return { rows: [] };
+  } };
+  const service = createWritingFlowService({ pool });
+  await service.summary();
+  await service.listPairs({ classCode: 'IC2200', teacherName: 'Giảng viên thử',
+    limit: 50, offset: 10 });
+  assert.equal(calls.length, 2);
+  assert.equal(calls.every(call => call.sql.includes('mapping.lark_export_teacher_assignments')), true);
+  assert.equal(calls.every(call => /Trạng thái tài khoản'='active/u.test(call.sql)), true);
+  assert.equal(calls.every(call => !/\b(?:INSERT|UPDATE|DELETE)\b/iu.test(call.sql)), true);
+  assert.deepEqual(calls[1].values, ['IC2200', 'Giảng viên thử', 50, 10]);
+});

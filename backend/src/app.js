@@ -360,7 +360,9 @@ export function createApp({config,pool,service,lessonService=service,provisional
    const limit=parse(z.coerce.number().int().min(1).max(200),q.query.limit??100);
    const offset=parse(z.coerce.number().int().min(0).max(100000),q.query.offset??0);
    const classCode=q.query.classCode?parse(z.string().trim().min(1).max(80),q.query.classCode):null;
-   r.json({ok:true,pairs:await writingFlowService.listPairs({classCode,limit,offset})});
+   const teacherName=q.query.teacherName
+     ?parse(z.string().trim().min(1).max(120),q.query.teacherName):null;
+   r.json({ok:true,pairs:await writingFlowService.listPairs({classCode,teacherName,limit,offset})});
  }));
  app.get('/api/v1/admin/writing-flow/pairs/:pairId/history',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
    const pairId=parse(uuid,q.params.pairId);

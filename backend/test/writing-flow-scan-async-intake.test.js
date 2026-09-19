@@ -10,6 +10,36 @@ const request = {
   expectedIssues: [{ essaySlot: 2, reasonCode: 'SOURCE_MISSING' }],
 };
 
+test('đọc lại lỗi nguồn tạo đúng một lượt quét idempotent và giữ nguyên mốc', async () => {
+  const issueKey = 'd'.repeat(64);
+  const requestId = '22222222-2222-4222-8222-222222222222';
+  const pool = { async query(sql, args) {
+    if (sql.includes('FROM writing_flow.source_issue')) {
+      assert.deepEqual(args, [issueKey]);
+      return { rowCount: 1, rows: [{
+        source_app_id: 'app-demo', source_table_id: 'table-demo',
+        source_record_id: 'record-demo', homework_file_id: 'doc-demo',
+        source_link_index: 2, class_code: 'IC2200',
+      }] };
+    }
+    throw new Error(`UNEXPECTED_QUERY:${sql}`);
+  } };
+  const service = createWritingFlowScan({ pool });
+  service.cursor = async () => ({ scannedThroughAt: '2026-09-19T12:00:00.000Z' });
+  let received;
+  service.begin = async input => { received = input; return { status: 'open', items: input.items }; };
+  const result = await service.retrySourceIssue({ issueKey, requestId });
+  assert.equal(result.status, 'open');
+  assert.deepEqual(received, {
+    requestKey: `source-issue-retry:${requestId}`,
+    appId: 'app-demo', tableId: 'table-demo',
+    scannedThroughAt: '2026-09-19T12:00:00.000Z',
+    pageCount: 1, reachedEnd: true,
+    items: [{ recordId: 'record-demo', docId: 'doc-demo',
+      linkIndex: 2, classCode: 'IC2200' }],
+  });
+});
+
 test('ghi kế hoạch hai ô trước khi phát, gửi lại cùng kế hoạch không tạo bản khác', async () => {
   let saved = null;
   const client = { async query(sql, args) {

@@ -378,6 +378,13 @@ export function createApp({config,pool,service,lessonService=service,provisional
    const offset=parse(z.coerce.number().int().min(0).max(100000),q.query.offset??0);
    r.json({ok:true,issues:await writingFlowService.listSourceIssues({limit,offset})});
  }));
+ app.post('/api/v1/admin/writing-flow/source-issues/:issueKey/retry',writes,adminAuth,
+   writingFlowAdmin,writingScanReady,asyncRoute(async(q,r)=>{
+     const issueKey=parse(z.string().regex(/^[0-9a-f]{64}$/),q.params.issueKey);
+     const {requestId}=parse(z.object({requestId:uuid}),q.body);
+     const scan=await writingFlowScan.retrySourceIssue({issueKey,requestId});
+     r.status(202).json({ok:true,scan});
+   }));
  app.get('/api/v1/admin/writing-flow/workflow-failures',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
    const limit=parse(z.coerce.number().int().min(1).max(200),q.query.limit??100);
    const offset=parse(z.coerce.number().int().min(0).max(100000),q.query.offset??0);

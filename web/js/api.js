@@ -106,6 +106,7 @@ export function createTeacherApi(base = "", getToken = () => "") {
     writingPairs: (classCode = "", offset = 0, limit = 200) => { const url = new URL(endpoint(root, "admin/writing-flow/pairs")); if (classCode) url.searchParams.set("classCode", classCode); url.searchParams.set("offset", offset); url.searchParams.set("limit", limit); return fetchJson(url, { headers: authorized() }); },
     writingPairHistory: pairId => fetchJson(endpoint(root, `admin/writing-flow/pairs/${encodeURIComponent(pairId)}/history`), { headers: authorized() }),
     writingSummary: () => fetchJson(endpoint(root, "admin/writing-flow/summary"), { headers: authorized() }),
+    writingClassCoverage: () => fetchJson(endpoint(root, "admin/writing-flow/class-coverage"), { headers: authorized() }),
     writingReviews: (offset = 0, limit = 200) => { const url = new URL(endpoint(root, "admin/writing-flow/reviews")); url.searchParams.set("offset", offset); url.searchParams.set("limit", limit); return fetchJson(url, { headers: authorized() }); },
     writingSourceIssues: (offset = 0, limit = 200) => { const url = new URL(endpoint(root, "admin/writing-flow/source-issues")); url.searchParams.set("offset", offset); url.searchParams.set("limit", limit); return fetchJson(url, { headers: authorized() }); },
     writingWorkflowFailures: (offset = 0, limit = 200) => { const url = new URL(endpoint(root, "admin/writing-flow/workflow-failures")); url.searchParams.set("offset", offset); url.searchParams.set("limit", limit); return fetchJson(url, { headers: authorized() }); },

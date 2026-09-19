@@ -350,9 +350,12 @@ export function createApp({config,pool,service,lessonService=service,provisional
  app.post('/api/v1/admin/teacher-comments/:threadRef/replies',writes,adminAuth,asyncRoute(async(q,r)=>{const ref=parse(uuid,q.params.threadRef);await classAccess.assertCommentThread(q.reviewer,ref);r.status(201).json({ok:true,thread:await commentsReady().reply({threadRef:ref,actorRole:'teacher',actorRef:q.reviewer.email,...parse(teacherCommentReply,q.body)})});}));
  app.post('/api/v1/admin/teacher-comments/:threadRef/status',writes,adminAuth,asyncRoute(async(q,r)=>{const ref=parse(uuid,q.params.threadRef);await classAccess.assertCommentThread(q.reviewer,ref);r.json({ok:true,thread:await commentsReady().setStatus({threadRef:ref,actorRef:q.reviewer.email,...parse(teacherCommentStatus,q.body)})});}));
  // Quản trị viên xem trạng thái từng cặp; API không trả bài làm hoặc kết quả chi tiết.
- app.get('/api/v1/admin/writing-flow/summary',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(_q,r)=>{
-   r.json({ok:true,summary:await writingFlowService.summary()});
- }));
+  app.get('/api/v1/admin/writing-flow/summary',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(_q,r)=>{
+    r.json({ok:true,summary:await writingFlowService.summary()});
+  }));
+  app.get('/api/v1/admin/writing-flow/class-coverage',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(_q,r)=>{
+    r.json({ok:true,classes:await writingFlowService.listClassCoverage()});
+  }));
  app.get('/api/v1/admin/writing-flow/pairs',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
    const limit=parse(z.coerce.number().int().min(1).max(200),q.query.limit??100);
    const offset=parse(z.coerce.number().int().min(0).max(100000),q.query.offset??0);

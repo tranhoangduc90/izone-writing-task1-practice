@@ -3,6 +3,68 @@ import { withTransaction } from './db.js';
 import { ApiError } from './service.js';
 import { createWritingFlowIntake } from './writing-flow-intake.js';
 
+const WRITING_SOURCE_TABLE_IDS = ['tblEBaI33abutdsq'];
+
+// Nhận vào: tên lớp từ nguồn mapping hoặc mã lớp trong bảng homework.
+// Việc chính: nhận cả IC2269 và dạng CS.070626, rồi đưa về một cách viết ổn định.
+// Trả ra: mã lớp để đối chiếu; chuỗi rỗng nếu tên không có mã lớp nhận biết được.
+// Khi tên khác quy tắc: dashboard hiện “Không đọc được mã lớp” để người vận hành kiểm tra.
+export function classCodeFromName(value) {
+  const match = String(value || '').toUpperCase()
+    .match(/\b(IC\s*\.?\s*\d{4,6}|CS\s*\.?\s*\d{6})\b/u);
+  if (!match) return '';
+  const compact = match[1].replace(/\s+/gu, '');
+  if (compact.startsWith('IC')) return `IC${compact.replace(/\D/gu, '')}`;
+  return `CS.${compact.replace(/\D/gu, '')}`;
+}
+
+// Nhận vào: lớp đang vận hành từ mapping và mã lớp thấy trong lượt quét Writing gần nhất.
+// Việc chính: ghép theo mã lớp, giữ cả lớp thiếu trong nguồn và lớp lạ có trong nguồn.
+// Trả ra: các trạng thái ngắn để dashboard giải thích được việc đồng bộ lớp.
+// Khi thiếu mã: giữ riêng dòng đó, không tự đoán hoặc coi là đã được quét.
+export function mergeClassCoverage(expectedRows = [], seenRows = []) {
+  const rows = new Map();
+  const missingCode = [];
+  for (const source of expectedRows) {
+    const classCode = classCodeFromName(source.class_name);
+    if (!classCode) {
+      missingCode.push({ class_code: null, class_name: source.class_name || 'Chưa rõ tên lớp',
+        status: 'class_code_missing', expected: true, seen: false,
+        source_updated_at: source.source_updated_at || null, last_scanned_at: null });
+      continue;
+    }
+    const current = rows.get(classCode) || { class_code: classCode, class_name: source.class_name,
+      expected: true, seen: false, erp_source_found: true, classroom_source_found: true,
+      source_updated_at: source.source_updated_at || null, last_scanned_at: null };
+    current.expected = true;
+    current.class_name ||= source.class_name;
+    current.erp_source_found = current.erp_source_found && source.erp_source_found !== false;
+    current.classroom_source_found = current.classroom_source_found
+      && source.classroom_source_found !== false;
+    rows.set(classCode, current);
+  }
+  for (const source of seenRows) {
+    const classCode = classCodeFromName(source.class_code);
+    if (!classCode) continue;
+    const current = rows.get(classCode) || { class_code: classCode, class_name: classCode,
+      expected: false, seen: false, erp_source_found: null, classroom_source_found: null,
+      source_updated_at: null, last_scanned_at: null };
+    current.seen = true;
+    current.last_scanned_at = source.last_scanned_at || null;
+    rows.set(classCode, current);
+  }
+  const priority = { missing_source: 0, mapping_issue: 1, class_code_missing: 2,
+    unexpected_source: 3, excluded: 4, covered: 5 };
+  const covered = [...rows.values()].map(row => ({ ...row,
+    status: row.class_code === 'IC2288' ? 'excluded'
+      : row.expected && (!row.erp_source_found || !row.classroom_source_found) ? 'mapping_issue'
+        : row.expected && !row.seen ? 'missing_source'
+          : !row.expected && row.seen ? 'unexpected_source' : 'covered' }));
+  return [...covered, ...missingCode].sort((a, b) =>
+    (priority[a.status] - priority[b.status])
+      || String(a.class_code || a.class_name).localeCompare(String(b.class_code || b.class_name), 'vi'));
+}
+
 // Nhận vào: pool PostgreSQL và yêu cầu của quản trị viên đã xác thực.
 // Việc chính: chỉ đọc trạng thái từng cặp hoặc ghi yêu cầu chạy lại vào hàng bàn giao bền.
 // Trả ra: trạng thái, mã cặp và bước; không đọc bài làm hay kết quả đã mã hóa.
@@ -75,6 +137,30 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
          GROUP BY class_code, status
          ORDER BY class_code, status`);
       return result.rows;
+    },
+
+    async listClassCoverage() {
+      const [expected, seen] = await Promise.all([
+        pool.query(`SELECT source_key,source_updated_at,
+            payload->>'Tên lớp ERP' AS class_name,
+            coalesce((payload->>'Nguồn ERP còn hoạt động')::boolean,false) AS erp_source_found,
+            coalesce((payload->>'Nguồn Classroom còn hoạt động')::boolean,false) AS classroom_source_found
+          FROM mapping.lark_export_classes
+          ORDER BY source_key`),
+        pool.query(`WITH latest AS (
+            SELECT DISTINCT ON (source_app_id,source_table_id)
+                   run_id,source_app_id,source_table_id,started_at
+              FROM writing_flow.scan_run
+             WHERE status <> 'abandoned' AND source_table_id = ANY($1::text[])
+             ORDER BY source_app_id,source_table_id,started_at DESC,run_id DESC
+          )
+          SELECT upper(trim(i.class_code)) AS class_code,
+                 max(latest.started_at) AS last_scanned_at
+            FROM latest JOIN writing_flow.scan_item AS i USING (run_id)
+           WHERE nullif(trim(i.class_code),'') IS NOT NULL
+           GROUP BY upper(trim(i.class_code))`, [WRITING_SOURCE_TABLE_IDS]),
+      ]);
+      return mergeClassCoverage(expected.rows, seen.rows);
     },
 
     async listPairs({ classCode = null, limit = 100, offset = 0 } = {}) {

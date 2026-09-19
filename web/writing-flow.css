@@ -8,6 +8,12 @@
 .flow-row p { margin: 0.2rem 0; }
 .flow-meta { color: #4b5870; font-size: 0.9rem; }
 .flow-row button { flex: none; }
+.flow-coverage-row[data-status="missing_source"],
+.flow-coverage-row[data-status="mapping_issue"],
+.flow-coverage-row[data-status="class_code_missing"] { border-left: 0.35rem solid #b42318; }
+.flow-coverage-row[data-status="unexpected_source"] { border-left: 0.35rem solid #b54708; }
+.flow-coverage-row[data-status="covered"] { border-left: 0.35rem solid #067647; }
+.flow-coverage-row[data-status="excluded"] { border-left: 0.35rem solid #667085; }
 .flow-class-group, .flow-homework-group, .flow-file-group { display: grid; gap: 0.55rem; }
 .flow-class-group { border-top: 2px solid #dce2eb; padding-top: 0.8rem; }
 .flow-class-group h3, .flow-homework-group h4 { margin: 0; }

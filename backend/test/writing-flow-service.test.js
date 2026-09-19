@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createWritingFlowService } from '../src/writing-flow-service.js';
+import { classCodeFromName, createWritingFlowService,
+  mergeClassCoverage } from '../src/writing-flow-service.js';
 
 const reviewId = '11111111-1111-4111-8111-111111111111';
 const requestId = '22222222-2222-4222-8222-222222222222';
@@ -101,4 +102,43 @@ test('lỗi workflow được lưu theo một execution và không nhận stack'
   assert.equal(receipt.execution_id, '123');
   assert.equal(seen[0].sql.includes('ON CONFLICT (workflow_id,execution_id)'), true);
   assert.equal(seen[0].values.includes('KHÔNG LƯU NỘI DUNG RIÊNG'), false);
+});
+
+test('đối chiếu lớp giữ đủ lớp thiếu, lớp lạ, lớp bị loại và tên không có mã', () => {
+  assert.equal(classCodeFromName('IELTS 56 - IC 2269'), 'IC2269');
+  assert.equal(classCodeFromName('CS 070626'), 'CS.070626');
+  const rows = mergeClassCoverage([
+    { class_name: 'IELTS IC2269', erp_source_found: true, classroom_source_found: true },
+    { class_name: 'IELTS IC2270', erp_source_found: true, classroom_source_found: true },
+    { class_name: 'IELTS IC2288', erp_source_found: true, classroom_source_found: true },
+    { class_name: 'Lớp chưa đặt mã', erp_source_found: true, classroom_source_found: true },
+  ], [
+    { class_code: 'IC2269', last_scanned_at: '2026-09-19T08:00:00Z' },
+    { class_code: 'IC2288', last_scanned_at: '2026-09-19T08:00:00Z' },
+    { class_code: 'IC2299', last_scanned_at: '2026-09-19T08:00:00Z' },
+  ]);
+  assert.deepEqual(Object.fromEntries(rows.map(row => [row.class_code || row.class_name, row.status])), {
+    IC2270: 'missing_source',
+    'Lớp chưa đặt mã': 'class_code_missing',
+    IC2299: 'unexpected_source',
+    IC2288: 'excluded',
+    IC2269: 'covered',
+  });
+});
+
+test('dịch vụ chỉ đọc view lớp vận hành và lượt quét bảng Writing chính thức', async () => {
+  const calls = [];
+  const pool = { query: async (sql, values = []) => {
+    calls.push({ sql, values });
+    if (sql.includes('mapping.lark_export_classes')) return { rows: [{
+      source_key: 'class:1', class_name: 'IELTS IC2269',
+      erp_source_found: true, classroom_source_found: true,
+    }] };
+    return { rows: [{ class_code: 'IC2269', last_scanned_at: '2026-09-19T08:00:00Z' }] };
+  } };
+  const rows = await createWritingFlowService({ pool }).listClassCoverage();
+  assert.equal(rows[0].status, 'covered');
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[1].values, [['tblEBaI33abutdsq']]);
+  assert.equal(calls.every(call => !/student|essay|ciphertext|token/iu.test(call.sql)), true);
 });

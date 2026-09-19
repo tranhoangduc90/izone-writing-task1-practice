@@ -21,6 +21,7 @@ function makeApp(role, overrides = {}, stageOverrides = {}, aiOverrides = {}, sc
     listWorkflowFailures: async () => [{ workflow_id: 'workflow-demo', execution_id: '123' }],
     listReviews: async () => [{ review_id: reviewId, status: 'open' }],
     listSourceIssues: async () => [{ issue_key: 'a'.repeat(64), reason_code: 'FETCH_FAILED' }],
+    listClassCoverage: async () => [{ class_code: 'IC2200', status: 'covered' }],
     recordSourceIssue: async input => ({ issue_key: 'a'.repeat(64), reason_code: input.reasonCode }),
     requestRetry: async input => ({ reviewId: input.reviewId, status: 'retry_requested' }),
     intakePairs: async () => ({ detectedCount: 1, registeredCount: 1, receipts: [] }),
@@ -249,6 +250,15 @@ test('chỉ quản trị viên thấy danh sách bài cần kiểm tra', async (
   const response = await request(makeApp('admin')).get('/api/v1/admin/writing-flow/reviews');
   assert.equal(response.status, 200);
   assert.equal(response.body.reviews[0].review_id, reviewId);
+});
+
+test('chỉ quản trị viên thấy đối chiếu lớp đang vận hành với nguồn quét', async () => {
+  const url = '/api/v1/admin/writing-flow/class-coverage';
+  assert.equal((await request(makeApp(null)).get(url)).status, 401);
+  assert.equal((await request(makeApp('teacher')).get(url)).status, 403);
+  const response = await request(makeApp('admin')).get(url);
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.body.classes, [{ class_code: 'IC2200', status: 'covered' }]);
 });
 
 test('lỗi nguồn có danh sách riêng và route ghi chỉ dùng token nội bộ', async () => {

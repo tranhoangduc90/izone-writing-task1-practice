@@ -2,6 +2,7 @@ import { createTeacherApi } from './api.js';
 import { createRequestId } from './core.js';
 import { teacherAuthFailure } from './teacher-auth-ui.js';
 import { groupWritingPairs } from './writing-flow-groups.js';
+import { coverageDescription, coverageStatusLabels } from './writing-flow-coverage.js';
 
 // Nhận vào: trạng thái từng cặp từ API quản trị đã kiểm quyền.
 // Việc chính: hiện bước đang chạy và danh sách cần kiểm tra, chỉ gửi yêu cầu retry sau khi người vận hành xác nhận.
@@ -96,6 +97,23 @@ function renderSummary(summary, selectedClass) {
     const card = document.createElement('article');
     card.append(makeText('strong', counts.get(status) || 0), makeText('span', statusNames[status]));
     root.append(card);
+  }
+}
+
+function renderClassCoverage(classes, selectedClass) {
+  const root = $('flow-class-coverage');
+  root.replaceChildren();
+  const visible = classes.filter(row => !selectedClass || row.class_code === selectedClass);
+  if (!visible.length) return root.append(makeText('p',
+    'Chưa có dữ liệu đối chiếu lớp trong phạm vi đã chọn.', 'muted'));
+  for (const item of visible) {
+    const row = document.createElement('article');
+    row.className = 'flow-row flow-coverage-row';
+    row.dataset.status = item.status;
+    const body = document.createElement('div');
+    body.append(makeText('strong', `${item.class_code || item.class_name || 'Chưa rõ lớp'} · ${coverageStatusLabels[item.status] || item.status}`),
+      makeText('p', coverageDescription(item), 'flow-meta'));
+    row.append(body); root.append(row);
   }
 }
 
@@ -288,15 +306,18 @@ async function refresh() {
   if (!state.token || !state.api) return;
   try {
     const selectedBeforeLoad = $('flow-class').value;
-    const [allPairs, summaryResult, allReviews, sourceIssues, failureResult] = await Promise.all([
+    const [allPairs, summaryResult, coverageResult, allReviews, sourceIssues, failureResult] = await Promise.all([
       loadPairs(selectedBeforeLoad, state.pairLimit), state.api.writingSummary(),
+      state.api.writingClassCoverage(),
       loadAllReviews(), loadAllSourceIssues(),
       loadWorkflowFailures(state.failureLimit)
         .then(rows => ({ rows })).catch(error => ({ error })),
     ]);
     const summary = summaryResult.data.summary || [];
-    populateClasses([...summary, ...allReviews, ...sourceIssues]);
+    const classCoverage = coverageResult.data.classes || [];
+    populateClasses([...summary, ...classCoverage, ...allReviews, ...sourceIssues]);
     const selectedClass = $('flow-class').value;
+    renderClassCoverage(classCoverage, selectedClass);
     renderSummary(summary, selectedClass);
     renderPairs(allPairs);
     renderReviews(allReviews.filter(review => !selectedClass || review.class_code === selectedClass));

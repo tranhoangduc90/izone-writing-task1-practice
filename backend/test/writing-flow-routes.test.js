@@ -58,6 +58,8 @@ function makeApp(role, overrides = {}, stageOverrides = {}, aiOverrides = {}, sc
       due: async () => [],
       finishReady: async () => ({ scans: [], failureCount: 0, failures: [] }),
       receipts: async () => ({ pairIds: [reviewId], issueKeys: [] }),
+      retrySourceIssue: async input => ({ runId: reviewId, status: 'open',
+        requestId: input.requestId }),
       closureEligibility: async () => ({ eligible: false, reason: 'PAIR_NOT_DELIVERED' }),
       dueClosures: async () => [{ runId: reviewId, recordId: 'record-demo' }],
       completeClosure: async () => ({ status: 'done', runId: reviewId,
@@ -288,6 +290,28 @@ test('lỗi nguồn có danh sách riêng và route ghi chỉ dùng token nội 
       recordId: 'record-demo', docId: 'doc-demo', linkIndex: 2,
       classCode: 'IC2200', reasonCode: 'FETCH_FAILED' });
   assert.equal(recorded.status, 202);
+});
+
+test('quản trị viên có thể yêu cầu đọc lại đúng một lỗi nguồn', async () => {
+  const issueKey = 'a'.repeat(64);
+  let received;
+  const app = makeApp('admin', {}, {}, {}, {
+    retrySourceIssue: async input => {
+      received = input;
+      return { runId: reviewId, status: 'open' };
+    },
+  });
+  const url = `/api/v1/admin/writing-flow/source-issues/${issueKey}/retry`;
+  assert.equal((await request(makeApp(null)).post(url).send({ requestId })).status, 401);
+  assert.equal((await request(makeApp('teacher')).post(url).send({ requestId })).status, 403);
+  const response = await request(app).post(url).send({ requestId });
+  assert.equal(response.status, 202);
+  assert.equal(response.body.scan.status, 'open');
+  assert.deepEqual(received, { issueKey, requestId });
+  assert.equal((await request(app).post(url).send({ requestId: 'not-a-uuid' })).status, 400);
+  assert.equal((await request(app)
+    .post('/api/v1/admin/writing-flow/source-issues/not-a-key/retry')
+    .send({ requestId })).status, 400);
 });
 
 test('nút chạy lại gửi mã yêu cầu tới dịch vụ, không tuyên bố bài đã chấm xong', async () => {

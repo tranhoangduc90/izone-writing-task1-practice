@@ -460,6 +460,48 @@ export function createWritingFlowScan({ pool }) {
       return { appId, tableId, scannedThroughAt: result.rows[0]?.scanned_through_at ?? null };
     },
 
+    // Nhận vào: một lỗi nguồn đã được người vận hành kiểm tra và mã yêu cầu chống bấm trùng.
+    // Việc chính: tạo lượt đọc lại chỉ cho đúng link lỗi, dùng nguyên mốc quét hiện tại.
+    // Trả ra: lượt quét mới để workflow đọc nguồn tự xử lý; không sửa hồ sơ Lark.
+    // Khi lỗi: từ chối mục đã hết hiệu lực, thiếu link hoặc đang có lượt quét cùng bảng.
+    async retrySourceIssue({ issueKey, requestId }) {
+      const found = await pool.query(`SELECT source_app_id,source_table_id,source_record_id,
+          homework_file_id,source_link_index,class_code
+        FROM writing_flow.source_issue
+        WHERE issue_key=$1 AND status='open'`, [issueKey]);
+      if (!found.rowCount) {
+        throw new ApiError(404, 'SOURCE_ISSUE_NOT_OPEN',
+          'Lỗi nguồn không còn mở hoặc không tồn tại.');
+      }
+      const issue = found.rows[0];
+      if (!Number.isSafeInteger(issue.source_link_index) || issue.source_link_index < 1) {
+        throw new ApiError(409, 'SOURCE_ISSUE_RETRY_UNAVAILABLE',
+          'Lỗi nguồn chưa có vị trí link để đọc lại tự động.');
+      }
+      const cursor = await this.cursor({
+        appId: issue.source_app_id,
+        tableId: issue.source_table_id,
+      });
+      if (!cursor.scannedThroughAt) {
+        throw new ApiError(409, 'SCAN_CURSOR_MISSING',
+          'Bảng nguồn chưa có mốc quét để đọc lại an toàn.');
+      }
+      return this.begin({
+        requestKey: `source-issue-retry:${requestId}`,
+        appId: issue.source_app_id,
+        tableId: issue.source_table_id,
+        scannedThroughAt: new Date(cursor.scannedThroughAt).toISOString(),
+        pageCount: 1,
+        reachedEnd: true,
+        items: [{
+          recordId: issue.source_record_id,
+          docId: issue.homework_file_id,
+          linkIndex: issue.source_link_index,
+          classCode: issue.class_code,
+        }],
+      });
+    },
+
     // Nhận vào: số link tối đa để gửi trong một nhịp.
     // Việc chính: cấp lại link chưa có biên nhận, mỗi lần cách nhau ít nhất 30 giây.
     // Trả ra: định danh nguồn để workflow đọc lại bản hiện tại; không chứa bài học viên.

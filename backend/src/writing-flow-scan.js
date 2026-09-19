@@ -523,8 +523,16 @@ export function createWritingFlowScan({ pool }) {
     async due({ limit = 100 } = {}) {
       return withTransaction(pool, async client => {
         const result = await client.query(`WITH ready AS (
-          SELECT i.run_id,i.item_key FROM writing_flow.scan_item i
+          SELECT i.run_id,i.item_key,s.source_id,s.source_type,
+            s.source_updated_at,s.file_url,s.display_name,s.student_name,
+            s.teacher_names,s.classroom_url,s.source_status,s.source_created_at,s.metadata
+          FROM writing_flow.scan_item i
           JOIN writing_flow.scan_run r ON r.run_id=i.run_id
+          LEFT JOIN writing_flow.source_record s
+            ON s.source_app_id=r.source_app_id AND s.source_table_id=r.source_table_id
+            AND s.source_record_id=i.source_record_id
+            AND s.homework_file_id IS NOT DISTINCT FROM i.homework_file_id
+            AND s.source_link_index=i.source_link_index
           WHERE i.status='pending' AND r.status='open' AND i.next_send_at<=now()
           ORDER BY i.next_send_at,i.run_id,i.item_key
           LIMIT $1 FOR UPDATE OF i SKIP LOCKED
@@ -537,13 +545,27 @@ export function createWritingFlowScan({ pool }) {
           AND r.run_id=i.run_id
         RETURNING i.run_id,i.item_key,i.source_record_id,i.homework_file_id,
           i.source_link_index,i.class_code,i.send_count,
-          r.source_app_id,r.source_table_id`, [limit]);
+          r.source_app_id,r.source_table_id,ready.source_id,ready.source_type,
+          ready.source_updated_at,ready.file_url,ready.display_name,ready.student_name,
+          ready.teacher_names,ready.classroom_url,ready.source_status,
+          ready.source_created_at,ready.metadata`, [limit]);
         return result.rows.map(row => ({
           runId: row.run_id, itemKey: row.item_key,
           appId: row.source_app_id, tableId: row.source_table_id,
           recordId: row.source_record_id, docId: row.homework_file_id,
           linkIndex: row.source_link_index, classCode: row.class_code,
           sendCount: row.send_count,
+          ...(row.source_type ? {
+            sourceId: row.source_id, sourceType: row.source_type,
+            sourceUpdatedAt: row.source_updated_at, fileUrl: row.file_url,
+            sourceMeta: { displayName: row.display_name || null,
+              studentName: row.student_name || null,
+              teacherNames: row.teacher_names || [],
+              classroomUrl: row.classroom_url || null,
+              fileUrl: row.file_url || null, sourceStatus: row.source_status || null,
+              sourceCreatedAt: row.source_created_at || null,
+              ...(row.metadata && typeof row.metadata === 'object' ? row.metadata : {}) },
+          } : {}),
         }));
       });
     },

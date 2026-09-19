@@ -40,6 +40,34 @@ test('đọc lại lỗi nguồn tạo đúng một lượt quét idempotent và
   });
 });
 
+test('lượt gửi lại mang đủ metadata của nguồn Classroom để không đọc nhầm Lark', async () => {
+  const client = { async query(sql) {
+    if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return {};
+    if (sql.includes('UPDATE writing_flow.scan_item i')) {
+      assert.match(sql, /LEFT JOIN writing_flow\.source_record/u);
+      return { rows: [{ run_id: 'run-demo', item_key: key,
+        source_record_id: 'submission-demo', homework_file_id: 'doc-demo',
+        source_link_index: 1, class_code: 'IC2200', send_count: 2,
+        source_app_id: 'google_classroom', source_table_id: 'course-demo',
+        source_id: '11111111-1111-4111-8111-111111111111',
+        source_type: 'google_classroom', source_updated_at: '2026-09-20T00:00:00.000Z',
+        file_url: 'https://docs.google.com/document/d/doc-demo/edit',
+        display_name: 'Writing homework', student_name: 'Học viên',
+        teacher_names: ['Giảng viên'], classroom_url: 'https://classroom.google.com/x',
+        source_status: 'TURNED_IN', source_created_at: '2026-09-19T00:00:00.000Z',
+        metadata: { courseWorkId: 'cw-demo' } }] };
+    }
+    throw new Error(`UNEXPECTED_QUERY:${sql}`);
+  }, release() {} };
+  const service = createWritingFlowScan({ pool: { connect: async () => client } });
+  const rows = await service.due({ limit: 10 });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].sourceType, 'google_classroom');
+  assert.equal(rows[0].sourceId, '11111111-1111-4111-8111-111111111111');
+  assert.equal(rows[0].sourceMeta.displayName, 'Writing homework');
+  assert.equal(rows[0].sourceMeta.courseWorkId, 'cw-demo');
+});
+
 test('ghi kế hoạch hai ô trước khi phát, gửi lại cùng kế hoạch không tạo bản khác', async () => {
   let saved = null;
   const client = { async query(sql, args) {

@@ -142,3 +142,36 @@ test('dịch vụ chỉ đọc view lớp vận hành và lượt quét bảng W
   assert.deepEqual(calls[1].values, [['tblEBaI33abutdsq']]);
   assert.equal(calls.every(call => !/student|essay|ciphertext|token/iu.test(call.sql)), true);
 });
+
+test('thống kê giảng viên chỉ đọc bản sao phân công và lọc ngay trong database', async () => {
+  const calls = [];
+  const pool = { query: async (sql, values = []) => {
+    calls.push({ sql, values });
+    if (sql.includes('has_table_privilege')) return { rows: [{ can_read: true }] };
+    return { rows: [] };
+  } };
+  const service = createWritingFlowService({ pool });
+  await service.summary();
+  await service.listPairs({ classCode: 'IC2200', teacherName: 'Giảng viên thử',
+    limit: 50, offset: 10 });
+  assert.equal(calls.length, 3);
+  assert.equal(calls.slice(1).every(call => call.sql.includes('mapping.lark_export_teacher_assignments')), true);
+  assert.equal(calls.slice(1).every(call => /Trạng thái tài khoản'='active/u.test(call.sql)), true);
+  assert.equal(calls.every(call => !/\b(?:INSERT|UPDATE|DELETE)\b/iu.test(call.sql)), true);
+  assert.deepEqual(calls[2].values, ['IC2200', 'Giảng viên thử', 50, 10]);
+});
+
+test('database thiếu view phân công vẫn trả dashboard và không đoán tên giảng viên', async () => {
+  const calls = [];
+  const pool = { query: async (sql, values = []) => {
+    calls.push({ sql, values });
+    if (sql.includes('has_table_privilege')) return { rows: [{ can_read: false }] };
+    return { rows: [] };
+  } };
+  const service = createWritingFlowService({ pool });
+  await service.summary();
+  await service.listPairs({ teacherName: 'Không có trong staging' });
+  assert.equal(calls.length, 3);
+  assert.equal(calls.slice(1).every(call => call.sql.includes('WHERE false')), true);
+  assert.equal(calls.slice(1).every(call => !call.sql.includes('lark_export_teacher_assignments')), true);
+});

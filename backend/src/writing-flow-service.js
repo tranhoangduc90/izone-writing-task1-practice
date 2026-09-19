@@ -5,6 +5,32 @@ import { createWritingFlowIntake } from './writing-flow-intake.js';
 
 const WRITING_SOURCE_TABLE_IDS = ['tblEBaI33abutdsq'];
 
+// Nguồn vào: bản sao phân công lớp đã có sẵn trong PostgreSQL.
+// Việc chính: chuẩn hóa tên lớp thành mã lớp và gom các giảng viên đang hoạt động.
+// Kết quả: dashboard lọc được theo giảng viên mà không ghi hoặc sửa dữ liệu Lark Base.
+// Khi thiếu phân công: trả mảng rỗng để bài vẫn hiện theo lớp và trạng thái.
+const teacherAssignmentsCte = `teacher_assignments AS (
+  SELECT class_code,array_agg(DISTINCT teacher_name ORDER BY teacher_name) AS teacher_names
+    FROM (
+      SELECT CASE
+        WHEN upper(payload->>'Tên lớp') ~ 'IC[[:space:].]*[0-9]{4,6}'
+          THEN 'IC' || regexp_replace(substring(upper(payload->>'Tên lớp')
+            from 'IC[[:space:].]*[0-9]{4,6}'),'[^0-9]','','g')
+        WHEN upper(payload->>'Tên lớp') ~ 'CS[[:space:].]*[0-9]{6}'
+          THEN 'CS.' || regexp_replace(substring(upper(payload->>'Tên lớp')
+            from 'CS[[:space:].]*[0-9]{6}'),'[^0-9]','','g')
+      END AS class_code,
+      nullif(trim(payload->>'Tên hiển thị'),'') AS teacher_name
+      FROM mapping.lark_export_teacher_assignments
+      WHERE payload->>'Trạng thái tài khoản'='active'
+    ) AS normalized
+   WHERE class_code IS NOT NULL AND teacher_name IS NOT NULL
+   GROUP BY class_code
+)`;
+const emptyTeacherAssignmentsCte = `teacher_assignments AS (
+  SELECT NULL::text AS class_code,ARRAY[]::text[] AS teacher_names WHERE false
+)`;
+
 // Nhận vào: tên lớp từ nguồn mapping hoặc mã lớp trong bảng homework.
 // Việc chính: nhận cả IC2269 và dạng CS.070626, rồi đưa về một cách viết ổn định.
 // Trả ra: mã lớp để đối chiếu; chuỗi rỗng nếu tên không có mã lớp nhận biết được.
@@ -70,6 +96,17 @@ export function mergeClassCoverage(expectedRows = [], seenRows = []) {
 // Trả ra: trạng thái, mã cặp và bước; không đọc bài làm hay kết quả đã mã hóa.
 // Khi lỗi: transaction hoàn tác; màn hình nhận mã lỗi và giữ mục Cần kiểm tra.
 export function createWritingFlowService({ pool, encryptionKey = null }) {
+  let teacherAssignmentsSource;
+  async function teacherAssignmentsForDatabase() {
+    if (!teacherAssignmentsSource) {
+      teacherAssignmentsSource = pool.query(`SELECT coalesce(has_table_privilege(
+          current_user,to_regclass('mapping.lark_export_teacher_assignments'),'SELECT'),false)
+          AS can_read`)
+        .then(result => result.rows[0]?.can_read
+          ? teacherAssignmentsCte : emptyTeacherAssignmentsCte);
+    }
+    return teacherAssignmentsSource;
+  }
   return {
     intakePairs: createWritingFlowIntake({ pool, encryptionKey }),
     // Nhận vào: định danh execution lỗi từ Error Trigger của n8n.
@@ -131,11 +168,15 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
       return result.rows;
     },
     async summary() {
+      const assignments = await teacherAssignmentsForDatabase();
       const result = await pool.query(`
-        SELECT class_code, status, count(*)::integer AS pair_count
-          FROM writing_flow.pair
-         GROUP BY class_code, status
-         ORDER BY class_code, status`);
+        WITH ${assignments}
+        SELECT p.class_code,p.status,count(*)::integer AS pair_count,
+               coalesce(t.teacher_names,ARRAY[]::text[]) AS teacher_names
+          FROM writing_flow.pair AS p
+          LEFT JOIN teacher_assignments AS t USING (class_code)
+         GROUP BY p.class_code,p.status,t.teacher_names
+         ORDER BY p.class_code,p.status`);
       return result.rows;
     },
 
@@ -163,15 +204,19 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
       return mergeClassCoverage(expected.rows, seen.rows);
     },
 
-    async listPairs({ classCode = null, limit = 100, offset = 0 } = {}) {
+    async listPairs({ classCode = null, teacherName = null, limit = 100, offset = 0 } = {}) {
+      const assignments = await teacherAssignmentsForDatabase();
       const result = await pool.query(`
+        WITH ${assignments}
         SELECT p.pair_id, p.class_code, p.source_app_id, p.source_table_id,
                p.source_record_id, p.homework_file_id,
                p.source_link_index, p.essay_slot, p.task_type, p.status,
                p.created_at, p.updated_at,
+               coalesce(t.teacher_names,ARRAY[]::text[]) AS teacher_names,
                current_stage.stage_key, current_stage.stage_status,
                current_stage.attempt_count
           FROM writing_flow.pair AS p
+          LEFT JOIN teacher_assignments AS t USING (class_code)
           LEFT JOIN LATERAL (
             SELECT s.stage_key, s.status AS stage_status, s.attempt_count
               FROM writing_flow.stage_result AS s
@@ -180,8 +225,9 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
              LIMIT 1
           ) AS current_stage ON true
          WHERE ($1::text IS NULL OR p.class_code = $1)
+           AND ($2::text IS NULL OR $2 = ANY(coalesce(t.teacher_names,ARRAY[]::text[])))
          ORDER BY p.updated_at DESC, p.pair_id DESC
-         LIMIT $2 OFFSET $3`, [classCode, limit, offset]);
+         LIMIT $3 OFFSET $4`, [classCode, teacherName, limit, offset]);
       return result.rows;
     },
 
@@ -225,15 +271,19 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
     },
 
     async listReviews({ limit = 100, offset = 0 } = {}) {
+      const assignments = await teacherAssignmentsForDatabase();
       const result = await pool.query(`
+        WITH ${assignments}
         SELECT r.review_id, r.pair_id, r.stage_key, r.cycle_no, r.status,
                r.error_code, r.opened_at, r.checked_at, r.retry_requested_at,
                s.attempt_count, p.class_code, p.source_app_id,
                p.source_table_id, p.source_record_id,
                p.homework_file_id, p.source_link_index, p.essay_slot,
-               p.task_type
+               p.task_type,
+               coalesce(t.teacher_names,ARRAY[]::text[]) AS teacher_names
           FROM writing_flow.manual_review AS r
           JOIN writing_flow.pair AS p ON p.pair_id = r.pair_id
+          LEFT JOIN teacher_assignments AS t USING (class_code)
           JOIN writing_flow.stage_result AS s
             ON s.pair_id = r.pair_id AND s.stage_key = r.stage_key
          WHERE r.status <> 'resolved'

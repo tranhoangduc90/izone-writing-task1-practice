@@ -252,6 +252,20 @@ test('chỉ quản trị viên thấy danh sách bài cần kiểm tra', async (
   assert.equal(response.body.reviews[0].review_id, reviewId);
 });
 
+test('danh sách bài chuyển bộ lọc lớp và giảng viên vào truy vấn database', async () => {
+  let received;
+  const app = makeApp('admin', { listPairs: async input => {
+    received = input;
+    return [];
+  } });
+  const response = await request(app).get('/api/v1/admin/writing-flow/pairs')
+    .query({ classCode: 'IC2200', teacherName: 'Giảng viên thử', limit: 50, offset: 10 });
+  assert.equal(response.status, 200);
+  assert.deepEqual(received, {
+    classCode: 'IC2200', teacherName: 'Giảng viên thử', limit: 50, offset: 10,
+  });
+});
+
 test('chỉ quản trị viên thấy đối chiếu lớp đang vận hành với nguồn quét', async () => {
   const url = '/api/v1/admin/writing-flow/class-coverage';
   assert.equal((await request(makeApp(null)).get(url)).status, 401);

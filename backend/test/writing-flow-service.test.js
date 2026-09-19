@@ -73,7 +73,7 @@ test('nhật ký một bài chỉ đọc metadata và sắp theo thời gian', a
   const pairId = '33333333-3333-4333-8333-333333333333';
   const pool = { query: async sql => {
     sqlSeen.push(sql);
-    if (sql.includes('FROM writing_flow.pair WHERE')) return {
+    if (sql.includes('FROM writing_flow.pair AS p LEFT JOIN')) return {
       rowCount: 1, rows: [{ pair_id: pairId, status: 'running' }] };
     if (sql.includes('FROM writing_flow.stage_result WHERE')) return {
       rows: [{ stage_key: 'main', status: 'running', updated_at: '2026-09-18T10:02:00Z' }] };
@@ -84,7 +84,7 @@ test('nhật ký một bài chỉ đọc metadata và sắp theo thời gian', a
   } };
   const history = await createWritingFlowService({ pool }).pairHistory({ pairId });
   assert.deepEqual(history.events.map(row => row.kind), ['stage', 'attempt']);
-  assert.equal(sqlSeen.length, 6);
+  assert.equal(sqlSeen.length, 7);
   assert.equal(sqlSeen.every(sql => !/ciphertext|prompt|source_text|essay_text/i.test(sql)), true);
 });
 
@@ -126,11 +126,11 @@ test('đối chiếu lớp giữ đủ lớp thiếu, lớp lạ, lớp bị lo�
   });
 });
 
-test('dịch vụ chỉ đọc view lớp vận hành và lượt quét bảng Writing chính thức', async () => {
+test('dịch vụ chỉ đọc sổ lớp của hệ thống mới và mốc quét Classroom', async () => {
   const calls = [];
   const pool = { query: async (sql, values = []) => {
     calls.push({ sql, values });
-    if (sql.includes('mapping.lark_export_classes')) return { rows: [{
+    if (sql.includes("'registry:' || class_code")) return { rows: [{
       source_key: 'class:1', class_name: 'IELTS IC2269',
       erp_source_found: true, classroom_source_found: true,
     }] };
@@ -139,7 +139,8 @@ test('dịch vụ chỉ đọc view lớp vận hành và lượt quét bảng W
   const rows = await createWritingFlowService({ pool }).listClassCoverage();
   assert.equal(rows[0].status, 'covered');
   assert.equal(calls.length, 2);
-  assert.deepEqual(calls[1].values, [['tblEBaI33abutdsq']]);
+  assert.deepEqual(calls[1].values, []);
+  assert.equal(calls.every(call => call.sql.includes('writing_flow.class_registry')), true);
   assert.equal(calls.every(call => !/student|essay|ciphertext|token/iu.test(call.sql)), true);
 });
 
@@ -158,7 +159,9 @@ test('thống kê giảng viên chỉ đọc bản sao phân công và lọc nga
   assert.equal(calls.slice(1).every(call => call.sql.includes('mapping.lark_export_teacher_assignments')), true);
   assert.equal(calls.slice(1).every(call => /Trạng thái tài khoản'='active/u.test(call.sql)), true);
   assert.equal(calls.every(call => !/\b(?:INSERT|UPDATE|DELETE)\b/iu.test(call.sql)), true);
-  assert.deepEqual(calls[2].values, ['IC2200', 'Giảng viên thử', 50, 10]);
+  assert.deepEqual(calls[2].values, ['IC2200', 'Giảng viên thử',
+    ['intake', 'precheck', 'main', 'critic', 'arbiter', 'render', 'deliver'],
+    null, null, null, null, null, 50, 10]);
 });
 
 test('database thiếu view phân công vẫn trả dashboard và không đoán tên giảng viên', async () => {

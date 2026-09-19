@@ -264,7 +264,8 @@ test('danh sách bài chuyển bộ lọc lớp và giảng viên vào truy vấ
     .query({ classCode: 'IC2200', teacherName: 'Giảng viên thử', limit: 50, offset: 10 });
   assert.equal(response.status, 200);
   assert.deepEqual(received, {
-    classCode: 'IC2200', teacherName: 'Giảng viên thử', limit: 50, offset: 10,
+    classCode: 'IC2200', teacherName: 'Giảng viên thử', stageKey: null,
+    stageStatus: null, view: null, limit: 50, offset: 10, cursorAt: null, cursorId: null,
   });
 });
 

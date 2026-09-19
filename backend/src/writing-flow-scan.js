@@ -407,6 +407,20 @@ export function createWritingFlowScan({ pool }) {
           WHERE run_id=$1 AND item_key=$2`,
         [runId, key, status, detectedSlotCount, pairIds.length,
           issueKeys.length, issueKeys, receiptSha256, pairIds]);
+        // Nguồn Classroom và file thêm thủ công dùng cùng sổ quét bền. Khi link đã
+        // có biên nhận thật, đánh dấu nguồn đã xử lý để bộ phát không gửi lại vô hạn.
+        await client.query(`UPDATE writing_flow.source_record
+          SET dispatch_status=CASE WHEN $6='issue' THEN 'needs_review'
+                WHEN $6='excluded' THEN 'excluded' ELSE 'acknowledged' END,
+              acknowledged_at=CASE WHEN $6 IN ('accepted','partial','empty') THEN now()
+                ELSE acknowledged_at END,next_dispatch_at=NULL,
+              last_error_code=CASE WHEN $6='issue' THEN coalesce(last_error_code,'SOURCE_ISSUE')
+                ELSE NULL END,updated_at=now()
+          WHERE source_app_id=$1 AND source_table_id=$2 AND source_record_id=$3
+            AND homework_file_id IS NOT DISTINCT FROM $4 AND source_link_index=$5
+            AND source_type IN ('google_classroom','manual')`,
+        [item.source_app_id, item.source_table_id, item.source_record_id,
+          item.homework_file_id, item.source_link_index, status]);
         return { itemKey: key, status };
       });
     },

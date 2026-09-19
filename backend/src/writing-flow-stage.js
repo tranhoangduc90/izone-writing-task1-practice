@@ -308,7 +308,8 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
           ON CONFLICT (pair_id,stage_key) DO NOTHING`, [pairId, resultSha]);
       }
       await client.query(`UPDATE writing_flow.pair
-        SET status=$2,updated_at=now() WHERE pair_id=$1`,
+        SET status=$2,finished_at=CASE WHEN $2='delivered' THEN now() ELSE NULL END,
+            updated_at=now() WHERE pair_id=$1`,
       [pairId, stageKey === 'deliver' ? 'delivered' : 'running']);
       let handoffId = null;
       if (nextStage) {

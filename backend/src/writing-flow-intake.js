@@ -15,7 +15,10 @@ const MIME = {
 export function createWritingFlowIntake({ pool, encryptionKey }) {
   const key = keyFromHex(encryptionKey);
   return async function intakePairs(input) {
-    if (input.larkMeta.classCode !== input.classCode) {
+    const sourceType = input.sourceType || 'lark_homework';
+    const sourceMeta = input.sourceMeta || { teacherNames: [] };
+    const isLark = sourceType === 'lark_homework';
+    if (isLark && input.larkMeta?.classCode !== input.classCode) {
       throw new ApiError(400, 'LARK_CLASS_MISMATCH', 'Mã lớp không khớp hồ sơ homework.');
     }
     if (input.classCode.toUpperCase() === 'IC2288') {
@@ -38,8 +41,8 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
     const sourceModifiedAt = new Date(modifiedMs).toISOString();
     // Lark cấp giờ sửa của hồ sơ; Drive chỉ cấp giờ sửa file. Cần cả hai
     // để lượt đọc cờ TR/CC cũ không thay lượt mới khi file không đổi.
-    const larkModifiedMs = input.larkModifiedMs;
-    if (!Number.isSafeInteger(larkModifiedMs) || larkModifiedMs <= 0) {
+    const larkModifiedMs = isLark ? input.larkModifiedMs : null;
+    if (isLark && (!Number.isSafeInteger(larkModifiedMs) || larkModifiedMs <= 0)) {
       throw new ApiError(400, 'LARK_MODIFIED_TIME_INVALID',
         'Thiếu thời điểm sửa hồ sơ Lark đã xác minh.');
     }
@@ -57,9 +60,9 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
       const topic = pair.topic.trim();
       const image = pair.image.trim();
       const essay = pair.essay.trim();
-      const chartLink = input.larkMeta.imageUrls[pair.essaySlot] ?? '';
-      const expectedType = chartLink ? 'task_1' : 'task_2';
-      if (pair.taskType !== expectedType || image !== chartLink) {
+      const chartLink = isLark ? (input.larkMeta.imageUrls[pair.essaySlot] ?? '') : image;
+      const expectedType = isLark ? (chartLink ? 'task_1' : 'task_2') : pair.taskType;
+      if (pair.taskType !== expectedType || (isLark && image !== chartLink)) {
         throw new ApiError(400, 'LARK_TASK_TYPE_MISMATCH', 'Loại đề hoặc ảnh không khớp ô homework.');
       }
       if (chartLink && !/^https?:\/\/\S+$/i.test(chartLink)) {
@@ -93,6 +96,46 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
     }).sort((a, b) => a.essaySlot - b.essaySlot);
 
     return withTransaction(pool, async client => {
+      let sourceId = input.sourceId || null;
+      if (sourceId) {
+        const source = await client.query(`SELECT source_id,source_app_id,source_table_id,
+            source_record_id,homework_file_id,source_link_index
+          FROM writing_flow.source_record WHERE source_id=$1 FOR UPDATE`, [sourceId]);
+        const row = source.rows[0];
+        if (!row || row.source_app_id !== input.appId || row.source_table_id !== input.tableId
+          || row.source_record_id !== input.recordId || row.homework_file_id !== input.docId
+          || Number(row.source_link_index) !== input.linkIndex) {
+          throw new ApiError(409, 'SOURCE_IDENTITY_MISMATCH', 'Nguồn bài không khớp file đã đọc.');
+        }
+      } else {
+        const source = await client.query(`INSERT INTO writing_flow.source_record
+          (source_type,source_app_id,source_table_id,source_record_id,homework_file_id,
+           source_link_index,display_name,class_code,student_name,teacher_names,
+           classroom_url,file_url,source_status,source_created_at,source_updated_at,
+           metadata,dispatch_status,acknowledged_at)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
+                  jsonb_build_object('trCcSource',$16),'acknowledged',now())
+          ON CONFLICT (source_app_id,source_table_id,source_record_id,homework_file_id,source_link_index)
+          DO UPDATE SET display_name=coalesce(EXCLUDED.display_name,writing_flow.source_record.display_name),
+            class_code=coalesce(EXCLUDED.class_code,writing_flow.source_record.class_code),
+            student_name=coalesce(EXCLUDED.student_name,writing_flow.source_record.student_name),
+            teacher_names=CASE WHEN cardinality(EXCLUDED.teacher_names)>0
+              THEN EXCLUDED.teacher_names ELSE writing_flow.source_record.teacher_names END,
+            classroom_url=coalesce(EXCLUDED.classroom_url,writing_flow.source_record.classroom_url),
+            file_url=coalesce(EXCLUDED.file_url,writing_flow.source_record.file_url),
+            source_status=coalesce(EXCLUDED.source_status,writing_flow.source_record.source_status),
+            source_updated_at=GREATEST(writing_flow.source_record.source_updated_at,EXCLUDED.source_updated_at),
+            dispatch_status='acknowledged',acknowledged_at=now(),last_error_code=NULL,updated_at=now()
+          RETURNING source_id`, [
+          sourceType, input.appId, input.tableId, input.recordId, input.docId,
+          input.linkIndex, sourceMeta.displayName || null, input.classCode,
+          sourceMeta.studentName || null, sourceMeta.teacherNames || [],
+          sourceMeta.classroomUrl || null, sourceMeta.fileUrl || null,
+          sourceMeta.sourceStatus || null, sourceMeta.sourceCreatedAt || null,
+          sourceModifiedAt, isLark ? 'lark' : sourceType,
+        ]);
+        sourceId = source.rows[0].source_id;
+      }
       const receipts = [];
       for (const pair of prepared) {
         const scope = [input.appId, input.tableId, input.recordId,
@@ -118,7 +161,11 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
           throw new ApiError(409, 'SOURCE_VERSION_CONFLICT',
             'Hai nội dung khác nhau có cùng phiên bản file.');
         }
-        if (sameFileTime && newest.submission_revision !== pair.revision) {
+        if (sameFileTime && newest.submission_revision !== pair.revision && !isLark) {
+          throw new ApiError(409, 'SOURCE_VERSION_CONFLICT',
+            'Nguồn bài đổi nội dung nhưng chưa có phiên bản file mới.');
+        }
+        if (sameFileTime && newest.submission_revision !== pair.revision && isLark) {
           const previousLarkMs = newest.lark_modified_ms == null
             ? null : Number(newest.lark_modified_ms);
           if (previousLarkMs == null || !Number.isSafeInteger(previousLarkMs)) {
@@ -137,11 +184,12 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
         }
         if (newest?.submission_revision === pair.revision) {
           if (new Date(newest.source_modified_at).getTime() < modifiedMs
-            || Number(newest.lark_modified_ms ?? 0) < larkModifiedMs) {
+            || (isLark && Number(newest.lark_modified_ms ?? 0) < larkModifiedMs)) {
             await client.query(`
               UPDATE writing_flow.pair
                  SET source_modified_at = GREATEST(source_modified_at, $2),
-                     lark_modified_ms = GREATEST(COALESCE(lark_modified_ms, 0), $3),
+                     lark_modified_ms = CASE WHEN $3::bigint IS NULL THEN lark_modified_ms
+                       ELSE GREATEST(COALESCE(lark_modified_ms, 0), $3) END,
                      updated_at = now()
                WHERE pair_id = $1`, [newest.pair_id, sourceModifiedAt, larkModifiedMs]);
           }
@@ -161,12 +209,12 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
              homework_file_id, source_link_index, essay_slot,
              submission_revision, source_modified_at, lark_modified_ms,
              content_sha256, class_code, task_type, document_kind,
-             source_ciphertext, encryption_version)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,1)
+             source_ciphertext, encryption_version,source_type,source_id)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,1,$15,$16)
           RETURNING pair_id`, [
           ...scope, pair.revision, sourceModifiedAt, larkModifiedMs,
           pair.contentSha256, input.classCode,
-          pair.taskType, input.documentKind, pair.sourceCiphertext,
+          pair.taskType, input.documentKind, pair.sourceCiphertext,sourceType,sourceId,
         ]);
         const pairId = inserted.rows[0].pair_id;
         await client.query(`
@@ -205,6 +253,10 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
         [input.appId, input.tableId, input.recordId,
           input.docId, input.linkIndex, receipt.essaySlot]);
       }
+      await client.query(`UPDATE writing_flow.source_record
+        SET dispatch_status='acknowledged',acknowledged_at=now(),next_dispatch_at=NULL,
+            last_error_code=NULL,updated_at=now()
+        WHERE source_id=$1`, [sourceId]);
       return { detectedCount: input.expectedCount, registeredCount: receipts.length, receipts };
     });
   };

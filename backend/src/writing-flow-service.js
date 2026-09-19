@@ -2,8 +2,7 @@ import crypto from 'node:crypto';
 import { withTransaction } from './db.js';
 import { ApiError } from './service.js';
 import { createWritingFlowIntake } from './writing-flow-intake.js';
-
-const WRITING_SOURCE_TABLE_IDS = ['tblEBaI33abutdsq'];
+import { createWritingFlowOperations, STAGES } from './writing-flow-operations.js';
 
 // Nguồn vào: bản sao phân công lớp đã có sẵn trong PostgreSQL.
 // Việc chính: chuẩn hóa tên lớp thành mã lớp và gom các giảng viên đang hoạt động.
@@ -96,6 +95,7 @@ export function mergeClassCoverage(expectedRows = [], seenRows = []) {
 // Trả ra: trạng thái, mã cặp và bước; không đọc bài làm hay kết quả đã mã hóa.
 // Khi lỗi: transaction hoàn tác; màn hình nhận mã lỗi và giữ mục Cần kiểm tra.
 export function createWritingFlowService({ pool, encryptionKey = null }) {
+  const operations = createWritingFlowOperations({ pool, encryptionKey });
   let teacherAssignmentsSource;
   async function teacherAssignmentsForDatabase() {
     if (!teacherAssignmentsSource) {
@@ -108,6 +108,7 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
     return teacherAssignmentsSource;
   }
   return {
+    ...operations,
     intakePairs: createWritingFlowIntake({ pool, encryptionKey }),
     // Nhận vào: định danh execution lỗi từ Error Trigger của n8n.
     // Việc chính: giữ một dòng cho một execution, kể cả lỗi trước khi tạo mã bài.
@@ -159,11 +160,20 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
 
     async listSourceIssues({ limit = 100, offset = 0 } = {}) {
       const result = await pool.query(`
-        SELECT issue_key,source_app_id,source_table_id,source_record_id,
-               homework_file_id,source_link_index,
-               essay_slot,class_code,reason_code,occurrence_count,first_seen_at,last_seen_at
-          FROM writing_flow.source_issue WHERE status='open'
-         ORDER BY last_seen_at DESC,issue_key
+        SELECT i.issue_key,i.source_app_id,i.source_table_id,i.source_record_id,
+               i.homework_file_id,i.source_link_index,
+               i.essay_slot,i.class_code,i.reason_code,i.occurrence_count,
+               i.first_seen_at,i.last_seen_at,
+               s.source_id,s.source_type,s.display_name,s.student_name,s.teacher_names,
+               s.classroom_url,s.file_url,s.source_status
+          FROM writing_flow.source_issue AS i
+          LEFT JOIN writing_flow.source_record AS s
+            ON s.source_app_id=i.source_app_id AND s.source_table_id=i.source_table_id
+           AND s.source_record_id=i.source_record_id
+           AND s.homework_file_id IS NOT DISTINCT FROM i.homework_file_id
+           AND s.source_link_index IS NOT DISTINCT FROM i.source_link_index
+         WHERE i.status='open'
+         ORDER BY i.last_seen_at DESC,i.issue_key
          LIMIT $1 OFFSET $2`, [limit, offset]);
       return result.rows;
     },
@@ -180,54 +190,97 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
       return result.rows;
     },
 
+    async dashboardCounts({ classCode = null, teacherName = null } = {}) {
+      const assignments = await teacherAssignmentsForDatabase();
+      const result = await pool.query(`WITH ${assignments}, current_pair AS (
+          SELECT p.pair_id,p.class_code,p.status,p.skipped_at,
+            coalesce(nullif(s.teacher_names,ARRAY[]::text[]),t.teacher_names,ARRAY[]::text[]) AS teacher_names,
+            coalesce(active.stage_key,CASE WHEN p.status='delivered' THEN 'deliver' ELSE 'intake' END) AS stage_key,
+            coalesce(active.stage_status,CASE WHEN p.status='delivered' THEN 'succeeded' ELSE 'pending' END) AS stage_status
+          FROM writing_flow.pair AS p
+          LEFT JOIN teacher_assignments AS t USING (class_code)
+          LEFT JOIN writing_flow.source_record AS s ON s.source_id=p.source_id
+          LEFT JOIN LATERAL (
+            SELECT sr.stage_key,sr.status AS stage_status
+            FROM writing_flow.stage_result AS sr
+            WHERE sr.pair_id=p.pair_id
+              AND sr.status IN ('pending','running','needs_review')
+            ORDER BY array_position($3::text[],sr.stage_key) LIMIT 1
+          ) AS active ON true
+          WHERE p.status<>'superseded'
+            AND ($1::text IS NULL OR p.class_code=$1)
+            AND ($2::text IS NULL OR $2=ANY(coalesce(nullif(s.teacher_names,ARRAY[]::text[]),t.teacher_names,ARRAY[]::text[])))
+        )
+        SELECT stage_key,stage_status,(skipped_at IS NOT NULL) AS skipped,count(*)::integer AS pair_count
+        FROM current_pair GROUP BY stage_key,stage_status,(skipped_at IS NOT NULL)
+        ORDER BY array_position($3::text[],stage_key),stage_status`,
+      [classCode, teacherName, STAGES]);
+      const support = await pool.query(`SELECT
+          (SELECT count(*)::integer FROM writing_flow.source_issue WHERE status='open') AS source_issues,
+          (SELECT count(*)::integer FROM writing_flow.manual_review WHERE status<>'resolved') AS reviews,
+          (SELECT count(*)::integer FROM writing_flow.workflow_failure
+             WHERE last_seen_at>now()-interval '7 days') AS technical_errors`);
+      return { stages: result.rows, support: support.rows[0] };
+    },
+
     async listClassCoverage() {
       const [expected, seen] = await Promise.all([
-        pool.query(`SELECT source_key,source_updated_at,
-            payload->>'Tên lớp ERP' AS class_name,
-            coalesce((payload->>'Nguồn ERP còn hoạt động')::boolean,false) AS erp_source_found,
-            coalesce((payload->>'Nguồn Classroom còn hoạt động')::boolean,false) AS classroom_source_found
-          FROM mapping.lark_export_classes
-          ORDER BY source_key`),
-        pool.query(`WITH latest AS (
-            SELECT DISTINCT ON (source_app_id,source_table_id)
-                   run_id,source_app_id,source_table_id,started_at
-              FROM writing_flow.scan_run
-             WHERE status <> 'abandoned' AND source_table_id = ANY($1::text[])
-             ORDER BY source_app_id,source_table_id,started_at DESC,run_id DESC
-          )
-          SELECT upper(trim(i.class_code)) AS class_code,
-                 max(latest.started_at) AS last_scanned_at
-            FROM latest JOIN writing_flow.scan_item AS i USING (run_id)
-           WHERE nullif(trim(i.class_code),'') IS NOT NULL
-           GROUP BY upper(trim(i.class_code))`, [WRITING_SOURCE_TABLE_IDS]),
+        pool.query(`SELECT 'registry:' || class_code AS source_key,updated_at AS source_updated_at,
+            coalesce(classroom_name,class_code) AS class_name,true AS erp_source_found,
+            (enabled OR class_code='IC2288') AS classroom_source_found
+          FROM writing_flow.class_registry ORDER BY class_code`),
+        pool.query(`SELECT class_code,last_scan_at AS last_scanned_at
+          FROM writing_flow.class_registry WHERE last_scan_at IS NOT NULL`),
       ]);
       return mergeClassCoverage(expected.rows, seen.rows);
     },
 
-    async listPairs({ classCode = null, teacherName = null, limit = 100, offset = 0 } = {}) {
+    async listPairs({ classCode = null, teacherName = null, stageKey = null,
+      stageStatus = null, view = null, limit = 50, offset = 0,
+      cursorAt = null, cursorId = null } = {}) {
       const assignments = await teacherAssignmentsForDatabase();
       const result = await pool.query(`
         WITH ${assignments}
         SELECT p.pair_id, p.class_code, p.source_app_id, p.source_table_id,
                p.source_record_id, p.homework_file_id,
                p.source_link_index, p.essay_slot, p.task_type, p.status,
-               p.created_at, p.updated_at,
-               coalesce(t.teacher_names,ARRAY[]::text[]) AS teacher_names,
-               current_stage.stage_key, current_stage.stage_status,
-               current_stage.attempt_count
+               p.source_type,p.created_at,p.updated_at,p.finished_at,p.skipped_at,
+               p.skipped_by,p.skip_reason,
+               coalesce(s.display_name,'') AS display_name,
+               coalesce(s.student_name,'') AS student_name,
+               coalesce(nullif(s.teacher_names,ARRAY[]::text[]),t.teacher_names,ARRAY[]::text[]) AS teacher_names,
+               s.classroom_url,s.file_url,s.source_status,s.source_created_at,
+               coalesce(current_stage.stage_key,
+                 CASE WHEN p.status='delivered' THEN 'deliver' ELSE 'intake' END) AS stage_key,
+               coalesce(current_stage.stage_status,
+                 CASE WHEN p.status='delivered' THEN 'succeeded' ELSE 'pending' END) AS stage_status,
+               coalesce(current_stage.attempt_count,0) AS attempt_count
           FROM writing_flow.pair AS p
           LEFT JOIN teacher_assignments AS t USING (class_code)
+          LEFT JOIN writing_flow.source_record AS s ON s.source_id=p.source_id
           LEFT JOIN LATERAL (
             SELECT s.stage_key, s.status AS stage_status, s.attempt_count
-              FROM writing_flow.stage_result AS s
+             FROM writing_flow.stage_result AS s
              WHERE s.pair_id = p.pair_id
-             ORDER BY s.updated_at DESC, s.stage_key
+               AND s.status IN ('pending','running','needs_review')
+             ORDER BY array_position($3::text[],s.stage_key)
              LIMIT 1
           ) AS current_stage ON true
          WHERE ($1::text IS NULL OR p.class_code = $1)
-           AND ($2::text IS NULL OR $2 = ANY(coalesce(t.teacher_names,ARRAY[]::text[])))
+           AND ($2::text IS NULL OR $2 = ANY(coalesce(nullif(s.teacher_names,ARRAY[]::text[]),t.teacher_names,ARRAY[]::text[])))
+           AND p.status<>'superseded'
+           AND ($4::text IS NULL OR coalesce(current_stage.stage_key,
+                 CASE WHEN p.status='delivered' THEN 'deliver' ELSE 'intake' END)=$4)
+           AND ($5::text IS NULL OR coalesce(current_stage.stage_status,
+                 CASE WHEN p.status='delivered' THEN 'succeeded' ELSE 'pending' END)=$5)
+           AND (($6::text='skipped' AND p.skipped_at IS NOT NULL)
+             OR ($6::text='delivered' AND p.status='delivered' AND p.skipped_at IS NULL)
+             OR ($6::text='unfinished' AND p.status<>'delivered' AND p.skipped_at IS NULL)
+             OR ($6::text IS NULL AND p.skipped_at IS NULL))
+           AND ($7::timestamptz IS NULL OR (p.updated_at,p.pair_id)<($7::timestamptz,$8::uuid))
          ORDER BY p.updated_at DESC, p.pair_id DESC
-         LIMIT $3 OFFSET $4`, [classCode, teacherName, limit, offset]);
+         LIMIT $9 OFFSET $10`, [classCode, teacherName, STAGES, stageKey, stageStatus, view,
+        cursorAt, cursorId, limit, offset]);
       return result.rows;
     },
 
@@ -236,10 +289,13 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
     // Trả ra: mã kỹ thuật, trạng thái và lỗi; không truy vấn bài viết, prompt hoặc kết quả đã mã hóa.
     // Khi không thấy bài: trả 404 để trang không nhầm lịch sử của một bài khác.
     async pairHistory({ pairId }) {
-      const found = await pool.query(`SELECT pair_id,class_code,task_type,essay_slot,status
-        FROM writing_flow.pair WHERE pair_id=$1`, [pairId]);
+      const found = await pool.query(`SELECT p.pair_id,p.class_code,p.task_type,p.essay_slot,p.status,
+          p.source_type,p.skipped_at,p.skipped_by,p.skip_reason,p.finished_at,
+          s.display_name,s.student_name,s.teacher_names,s.classroom_url,s.file_url,s.source_status
+        FROM writing_flow.pair AS p LEFT JOIN writing_flow.source_record AS s ON s.source_id=p.source_id
+        WHERE p.pair_id=$1`, [pairId]);
       if (!found.rowCount) throw new ApiError(404, 'WRITING_PAIR_NOT_FOUND', 'Không tìm thấy bài này.');
-      const [stages, attempts, aiCalls, handoffs, reviews] = await Promise.all([
+      const [stages, attempts, aiCalls, handoffs, reviews, operatorEvents] = await Promise.all([
         pool.query(`SELECT stage_key,status,cycle_no,attempt_count,error_code,
             n8n_execution_id,started_at,completed_at,updated_at
           FROM writing_flow.stage_result WHERE pair_id=$1`, [pairId]),
@@ -259,6 +315,9 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
             opened_at,retry_requested_at,retry_accepted_at,resolved_at
           FROM writing_flow.manual_review WHERE pair_id=$1
           ORDER BY opened_at,review_id LIMIT 100`, [pairId]),
+        pool.query(`SELECT event_type,actor_ref,reason,before_state,after_state,created_at,event_id
+          FROM writing_flow.operator_event WHERE pair_id=$1
+          ORDER BY created_at,event_id LIMIT 200`, [pairId]),
       ]);
       const events = [
         ...stages.rows.map(row => ({ kind: 'stage', at: row.updated_at, ...row })),
@@ -266,6 +325,7 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
         ...aiCalls.rows.map(row => ({ kind: 'ai_call', at: row.finished_at || row.created_at, ...row })),
         ...handoffs.rows.map(row => ({ kind: 'handoff', at: row.acknowledged_at || row.last_sent_at || row.created_at, ...row })),
         ...reviews.rows.map(row => ({ kind: 'review', at: row.resolved_at || row.retry_accepted_at || row.retry_requested_at || row.opened_at, ...row })),
+        ...operatorEvents.rows.map(row => ({ kind: 'operator', at: row.created_at, ...row })),
       ].sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
       return { pair: found.rows[0], events };
     },

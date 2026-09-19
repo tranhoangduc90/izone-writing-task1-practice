@@ -41,7 +41,10 @@ const teacherCommentCreate=z.object({sectionKey:lessonSection,fieldKey:lessonSec
  .superRefine((value,context)=>{if(value.end<=value.start||value.end-value.start>2000)context.addIssue({code:'custom',path:['end'],message:'Đoạn comment không hợp lệ.'});});
 const teacherCommentReply=z.object({body:teacherCommentBody,requestId:uuid});
 const teacherCommentStatus=z.object({status:z.enum(['open','addressed']),requestId:uuid});
+const writingSourceType=z.enum(['lark_homework','google_classroom','manual']);
 const writingPairIntake=z.object({
+ sourceType:writingSourceType.default('lark_homework'),
+ sourceId:uuid.nullable().optional(),
  operationKey:z.string().trim().min(1).max(120),
  appId:z.string().trim().min(1).max(120),
  tableId:z.string().trim().min(1).max(120),
@@ -52,9 +55,18 @@ const writingPairIntake=z.object({
  larkMeta:z.object({classCode:z.string().trim().min(1).max(80),imageUrls:z.object({
    1:z.string().max(20000),2:z.string().max(20000),
    3:z.string().max(20000),4:z.string().max(20000)
- })}),
+ })}).nullable().optional(),
+ sourceMeta:z.object({
+   displayName:z.string().trim().max(200).nullable().optional(),
+   studentName:z.string().trim().max(200).nullable().optional(),
+   teacherNames:z.array(z.string().trim().min(1).max(200)).max(20).default([]),
+   classroomUrl:z.string().url().max(2000).nullable().optional(),
+   fileUrl:z.string().url().max(2000).nullable().optional(),
+   sourceStatus:z.string().trim().max(80).nullable().optional(),
+   sourceCreatedAt:z.string().datetime({offset:true}).nullable().optional()
+ }).default({teacherNames:[]}),
  sourceModifiedAt:z.string().trim().min(1).max(80),
- larkModifiedMs:z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+ larkModifiedMs:z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullable().optional(),
  documentKind:z.enum(['google_docs','docx']),
  verifiedMime:z.string().trim().min(1).max(160),
  expectedCount:z.number().int().min(1).max(4),
@@ -66,6 +78,16 @@ const writingPairIntake=z.object({
    revision:z.string().regex(/^[0-9a-f]{64}$/).optional(),
    contentSha256:z.string().regex(/^[0-9a-f]{64}$/).optional()
  })).min(1).max(4)
+}).superRefine((value,context)=>{
+ if(value.sourceType==='lark_homework'&&!value.larkMeta){
+   context.addIssue({code:'custom',path:['larkMeta'],message:'Nguồn Lark thiếu metadata.'});
+ }
+ if(value.sourceType==='lark_homework'&&!value.larkModifiedMs){
+   context.addIssue({code:'custom',path:['larkModifiedMs'],message:'Nguồn Lark thiếu thời điểm sửa.'});
+ }
+ if(value.sourceType==='manual'&&value.classCode!=='MANUAL'){
+   context.addIssue({code:'custom',path:['classCode'],message:'Nguồn thủ công phải dùng lớp MANUAL.'});
+ }
 });
 const writingSourceIssue=z.object({
  appId:z.string().trim().min(1).max(120),
@@ -78,6 +100,9 @@ const writingSourceIssue=z.object({
  reasonCode:z.enum(['FILE_TYPE_UNSUPPORTED','FETCH_FAILED','PARSER_FAILED',
    'MIME_UNVERIFIED','SOURCE_METADATA_MISSING','SOURCE_LINK_INVALID','CLASS_MISSING',
    'SOURCE_CHANGED_DURING_SCAN','TITLE_WRITING','VIETNAMESE_WRITING','TOPIC_NOT_FOUND',
+   'NOT_WRITING_DOCUMENT','TOPIC_NOT_IN_REGISTRY','ESSAY_ANCHOR_MISSING',
+   'ESSAY_CELL_MISSING','TEACHER_COMMENT_ANCHOR_MISSING','RESULT_CELL_AMBIGUOUS',
+   'TABLE_STRUCTURE_INVALID','NO_ESSAY',
    'INTAKE_TOPIC_MISSING','INTAKE_CHART_LINK_INVALID',
    'INTAKE_CHART_LINK_AMBIGUOUS','INTAKE_TASK_TYPE_MISMATCH'])
 });
@@ -164,6 +189,43 @@ const writingWorkflowFailure=z.object({
  executionId:z.string().regex(/^(?:[0-9]{1,20}|trigger-[0-9]{1,20})$/),
  lastNode:z.string().trim().min(1).max(160),
  errorKind:z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,99}$/)
+});
+const writingManualSource=z.object({
+ displayName:z.string().trim().min(2).max(200),
+ documentUrl:z.string().url().max(2000),
+ requestId:uuid
+});
+const writingSourceAck=z.object({
+ sourceId:uuid,outcome:z.enum(['accepted','issue','excluded']),
+ errorCode:z.string().trim().min(1).max(100).nullable().default(null)
+});
+const writingOperatorAction=z.object({
+ requestId:uuid,reason:z.string().trim().min(2).max(500)
+});
+const writingStageRetry=writingOperatorAction.extend({stageKey:writingStage});
+const writingClassRegistryItem=z.object({
+ classCode:z.string().trim().min(1).max(80),courseId:z.string().trim().min(1).max(120),
+ courseName:z.string().trim().max(300).nullable().optional(),cohort:z.string().trim().max(120).nullable().optional(),
+ teacherNames:z.array(z.string().trim().min(1).max(200)).max(20).default([]),enabled:z.boolean().default(true)
+});
+const writingClassroomSource=z.object({
+ courseId:z.string().trim().min(1).max(120),submissionId:z.string().trim().min(1).max(160),
+ courseWorkId:z.string().trim().min(1).max(160),documentId:z.string().trim().min(20).max(160),
+ linkIndex:z.number().int().min(1).max(20),displayName:z.string().trim().max(300).nullable().optional(),
+ classCode:z.string().trim().min(1).max(80),studentName:z.string().trim().max(200).nullable().optional(),
+ teacherNames:z.array(z.string().trim().min(1).max(200)).max(20).default([]),
+ classroomUrl:z.string().url().max(2000).nullable().optional(),fileUrl:z.string().url().max(2000),
+ sourceStatus:z.string().trim().max(80).nullable().optional(),
+ sourceCreatedAt:z.string().datetime({offset:true}).nullable().optional(),
+ sourceUpdatedAt:z.string().datetime({offset:true})
+});
+const writingLegacyItem=z.object({
+ appId:z.string().trim().min(1).max(120),tableId:z.string().trim().min(1).max(120),
+ recordId:z.string().trim().min(1).max(160),essaySlot:z.number().int().min(1).max(4).nullable().optional(),
+ classCode:z.string().trim().max(80).nullable().optional(),studentName:z.string().trim().max(200).nullable().optional(),
+ teacherName:z.string().trim().max(200).nullable().optional(),sourceStatus:z.string().trim().max(80).nullable().optional(),
+ createdAt:z.string().datetime({offset:true}).nullable().optional(),finishedAt:z.string().datetime({offset:true}).nullable().optional(),
+ snapshot:z.record(z.string(),z.unknown())
 });
 const parse=(schema,value,code='INVALID_REQUEST')=>{const r=schema.safeParse(value);if(!r.success)throw new ApiError(400,code,'Dữ liệu gửi lên không hợp lệ.');return r.data;};
 const asyncRoute=fn=>(req,res,next)=>Promise.resolve(fn(req,res,next)).catch(next);
@@ -262,6 +324,35 @@ export function createApp({config,pool,service,lessonService=service,provisional
    r.status(202).json({ok:true,issue:await writingFlowService.recordSourceIssue(
      parse(writingSourceIssue,q.body))});
  }));
+ app.post('/api/v1/internal/writing-flow/sources/due',internal,writingFlowReady,asyncRoute(async(q,r)=>{
+   const input=parse(z.object({sourceTypes:z.array(writingSourceType).min(1).max(3)
+     .default(['manual','google_classroom']),limit:z.number().int().min(1).max(100).default(50)}),q.body);
+   r.json({ok:true,sources:await writingFlowService.claimDueSources(input)});
+ }));
+ app.post('/api/v1/internal/writing-flow/sources/acknowledge',internal,writingFlowReady,asyncRoute(async(q,r)=>{
+   r.json({ok:true,source:await writingFlowService.acknowledgeSource(parse(writingSourceAck,q.body))});
+ }));
+ app.post('/api/v1/internal/writing-flow/classes/upsert',internal,writingFlowReady,asyncRoute(async(q,r)=>{
+   const input=parse(z.object({classes:z.array(writingClassRegistryItem).min(1).max(200)}),q.body);
+   r.json({ok:true,classes:await writingFlowService.upsertClassRegistry(input)});
+ }));
+ app.post('/api/v1/internal/writing-flow/classes/due',internal,writingFlowReady,asyncRoute(async(q,r)=>{
+   const input=parse(z.object({limit:z.number().int().min(1).max(100).default(20)}),q.body);
+   r.json({ok:true,classes:await writingFlowService.claimDueClasses(input)});
+ }));
+ app.post('/api/v1/internal/writing-flow/classes/acknowledge',internal,writingFlowReady,asyncRoute(async(q,r)=>{
+   const input=parse(z.object({classCode:z.string().trim().min(1).max(80),
+     outcome:z.enum(['succeeded','failed']),errorCode:z.string().trim().max(100).nullable().default(null)}),q.body);
+   r.json({ok:true,class:await writingFlowService.acknowledgeClassScan(input)});
+ }));
+ app.post('/api/v1/internal/writing-flow/classroom-sources/upsert',internal,writingFlowReady,asyncRoute(async(q,r)=>{
+   const input=parse(z.object({sources:z.array(writingClassroomSource).min(1).max(500)}),q.body);
+   r.json({ok:true,sources:await writingFlowService.upsertClassroomSources(input)});
+ }));
+ app.post('/api/v1/internal/writing-flow/legacy/import',internal,writingFlowReady,asyncRoute(async(q,r)=>{
+   const input=parse(z.object({records:z.array(writingLegacyItem).min(1).max(200)}),q.body);
+   r.json({ok:true,result:await writingFlowService.importLegacyRecords({...input,actorRef:'legacy_import'})});
+ }));
  app.post('/api/v1/internal/writing-flow/workflow-failures',internal,writingFlowReady,asyncRoute(async(q,r)=>{
    r.status(202).json({ok:true,failure:await writingFlowService.recordWorkflowFailure(
      parse(writingWorkflowFailure,q.body))});
@@ -353,16 +444,34 @@ export function createApp({config,pool,service,lessonService=service,provisional
   app.get('/api/v1/admin/writing-flow/summary',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(_q,r)=>{
     r.json({ok:true,summary:await writingFlowService.summary()});
   }));
+  app.get('/api/v1/admin/writing-flow/counts',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
+    const classCode=q.query.classCode?parse(z.string().trim().min(1).max(80),q.query.classCode):null;
+    const teacherName=q.query.teacherName?parse(z.string().trim().min(1).max(120),q.query.teacherName):null;
+    r.json({ok:true,counts:await writingFlowService.dashboardCounts({classCode,teacherName})});
+  }));
   app.get('/api/v1/admin/writing-flow/class-coverage',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(_q,r)=>{
     r.json({ok:true,classes:await writingFlowService.listClassCoverage()});
   }));
  app.get('/api/v1/admin/writing-flow/pairs',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
-   const limit=parse(z.coerce.number().int().min(1).max(200),q.query.limit??100);
+   const limit=parse(z.coerce.number().int().min(1).max(100),q.query.limit??50);
    const offset=parse(z.coerce.number().int().min(0).max(100000),q.query.offset??0);
    const classCode=q.query.classCode?parse(z.string().trim().min(1).max(80),q.query.classCode):null;
    const teacherName=q.query.teacherName
      ?parse(z.string().trim().min(1).max(120),q.query.teacherName):null;
-   r.json({ok:true,pairs:await writingFlowService.listPairs({classCode,teacherName,limit,offset})});
+   const stageKey=q.query.stageKey?parse(writingStage,q.query.stageKey):null;
+   const stageStatus=q.query.stageStatus?parse(z.enum(['pending','running','needs_review','succeeded','skipped']),q.query.stageStatus):null;
+   const view=q.query.view?parse(z.enum(['unfinished','delivered','skipped']),q.query.view):null;
+   const cursorAt=q.query.cursorAt?parse(z.string().datetime({offset:true}),q.query.cursorAt):null;
+   const cursorId=q.query.cursorId?parse(uuid,q.query.cursorId):null;
+   if(Boolean(cursorAt)!==Boolean(cursorId))throw new ApiError(400,'CURSOR_INCOMPLETE','Thiếu một phần con trỏ trang.');
+   const pairs=await writingFlowService.listPairs({classCode,teacherName,stageKey,stageStatus,
+     view,limit,offset,cursorAt,cursorId});
+   const last=pairs.at(-1);
+   r.json({ok:true,pairs,nextCursor:last&&pairs.length===limit
+     ?{cursorAt:last.updated_at,cursorId:last.pair_id}:null});
+ }));
+ app.get('/api/v1/admin/writing-flow/pairs/:pairId/detail',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
+   r.json({ok:true,detail:await writingFlowService.pairDetail({pairId:parse(uuid,q.params.pairId)})});
  }));
  app.get('/api/v1/admin/writing-flow/pairs/:pairId/history',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
    const pairId=parse(uuid,q.params.pairId);
@@ -377,6 +486,50 @@ export function createApp({config,pool,service,lessonService=service,provisional
    const limit=parse(z.coerce.number().int().min(1).max(200),q.query.limit??100);
    const offset=parse(z.coerce.number().int().min(0).max(100000),q.query.offset??0);
    r.json({ok:true,issues:await writingFlowService.listSourceIssues({limit,offset})});
+ }));
+ app.get('/api/v1/admin/writing-flow/sources',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
+   const limit=parse(z.coerce.number().int().min(1).max(100),q.query.limit??50);
+   const sourceType=q.query.sourceType?parse(z.enum(['lark_homework','google_classroom','manual','legacy']),q.query.sourceType):null;
+   const status=q.query.status?parse(z.enum(['idle','pending','sent','acknowledged','needs_review','excluded']),q.query.status):null;
+   const cursorAt=q.query.cursorAt?parse(z.string().datetime({offset:true}),q.query.cursorAt):null;
+   const cursorId=q.query.cursorId?parse(uuid,q.query.cursorId):null;
+   if(Boolean(cursorAt)!==Boolean(cursorId))throw new ApiError(400,'CURSOR_INCOMPLETE','Thiếu một phần con trỏ trang.');
+   const sources=await writingFlowService.listSources({sourceType,status,limit,cursorAt,cursorId});
+   const last=sources.at(-1);
+   r.json({ok:true,sources,nextCursor:last&&sources.length===limit
+     ?{cursorAt:last.updated_at,cursorId:last.source_id}:null});
+ }));
+ app.post('/api/v1/admin/writing-flow/manual-sources',writes,adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
+   const source=await writingFlowService.addManualSource({...parse(writingManualSource,q.body),
+     actorRef:q.reviewer.email});
+   r.status(202).json({ok:true,source});
+ }));
+ app.post('/api/v1/admin/writing-flow/classes/:classCode/scan',writes,adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
+   const result=await writingFlowService.requestClassScan({
+     classCode:parse(z.string().trim().min(1).max(80),q.params.classCode),
+     ...parse(writingOperatorAction,q.body),actorRef:q.reviewer.email});
+   r.status(202).json({ok:true,result});
+ }));
+ app.get('/api/v1/admin/writing-flow/legacy',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
+   const classCode=q.query.classCode?parse(z.string().trim().min(1).max(80),q.query.classCode):null;
+   const limit=parse(z.coerce.number().int().min(1).max(100),q.query.limit??50);
+   const offset=parse(z.coerce.number().int().min(0).max(100000),q.query.offset??0);
+   r.json({ok:true,records:await writingFlowService.listLegacyRecords({classCode,limit,offset})});
+ }));
+ app.post('/api/v1/admin/writing-flow/pairs/:pairId/skip',writes,adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
+   const result=await writingFlowService.skipPair({pairId:parse(uuid,q.params.pairId),
+     ...parse(writingOperatorAction,q.body),actorRef:q.reviewer.email});
+   r.status(202).json({ok:true,result});
+ }));
+ app.post('/api/v1/admin/writing-flow/pairs/:pairId/restore',writes,adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
+   const result=await writingFlowService.restorePair({pairId:parse(uuid,q.params.pairId),
+     ...parse(writingOperatorAction,q.body),actorRef:q.reviewer.email});
+   r.status(202).json({ok:true,result});
+ }));
+ app.post('/api/v1/admin/writing-flow/pairs/:pairId/retry',writes,adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
+   const result=await writingFlowService.requestStageRetry({pairId:parse(uuid,q.params.pairId),
+     ...parse(writingStageRetry,q.body),actorRef:q.reviewer.email});
+   r.status(202).json({ok:true,result});
  }));
  app.post('/api/v1/admin/writing-flow/source-issues/:issueKey/retry',writes,adminAuth,
    writingFlowAdmin,writingScanReady,asyncRoute(async(q,r)=>{

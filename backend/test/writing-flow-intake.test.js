@@ -8,6 +8,9 @@ function fakePool() {
   const client = {
     async query(sql, values = []) {
       writes.push({ sql, values });
+      if (sql.includes('INSERT INTO writing_flow.source_record')) {
+        return { rowCount: 1, rows: [{ source_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }] };
+      }
       if (sql.includes('SELECT pair_id, submission_revision, content_sha256, source_modified_at')) {
         const matching = pairs.filter(row => row.source_app_id === values[0]
           && row.source_table_id === values[1] && row.source_record_id === values[2]
@@ -52,6 +55,7 @@ function fakePool() {
 
 function input() {
   return {
+    sourceType: 'lark_homework',
     operationKey: 'scan-demo', appId: 'app-demo', tableId: 'table-demo',
     recordId: 'record-demo', docId: 'doc-demo',
     linkIndex: 2, classCode: 'IC2200', sourceModifiedAt: '2026-09-17T08:00:00.000Z',
@@ -59,6 +63,7 @@ function input() {
     larkMeta: { classCode: 'IC2200', imageUrls: {
       1: 'https://example.test/chart-one', 2: '', 3: '', 4: 'https://example.test/chart-four',
     } },
+    sourceMeta: { teacherNames: [] },
     documentKind: 'google_docs', verifiedMime: 'application/vnd.google-apps.document',
     expectedCount: 3, pairs: [1, 2, 4].map(essaySlot => ({
       essaySlot, taskType: essaySlot === 2 ? 'task_2' : 'task_1',

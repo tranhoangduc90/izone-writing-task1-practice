@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' https://accounts.google.com/gsi/style; img-src 'self' data: https://lh3.googleusercontent.com; connect-src 'self' https://ducizone.ddns.net https://accounts.google.com; frame-src https://accounts.google.com; object-src 'none'; base-uri 'none'; form-action 'self' https://accounts.google.com" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Theo dõi chấm Writing 56/67</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./writing-flow.css" />
+  </head>
+  <body class="teacher-page">
+    <header class="topbar"><a class="brand" href="./writing-flow.html">iZONE · Chấm Writing 56/67</a><p id="flow-updated" class="save-state">Chưa đăng nhập</p></header>
+    <main class="page-shell flow-shell">
+      <section id="flow-login" class="card teacher-login" aria-labelledby="flow-login-title">
+        <p class="eyebrow">Dành cho quản trị viên</p>
+        <h1 id="flow-login-title">Theo dõi từng bài chấm</h1>
+        <p>Đăng nhập để xem trạng thái và các bài cần kiểm tra.</p>
+        <div id="google-signin"></div>
+        <p id="flow-login-error" class="form-error" role="alert" hidden></p>
+      </section>
+      <section id="flow-dashboard" hidden>
+        <div class="task-header">
+          <div><p class="eyebrow">Từng đề và bài làm</p><h1>Luồng chấm Writing 56/67</h1><p class="muted">Mỗi bài hoàn thành riêng. Danh sách cập nhật sau khi database ghi nhận.</p></div>
+          <label class="teacher-class-filter">Lớp <select id="flow-class"><option value="">Tất cả lớp</option></select></label>
+        </div>
+        <p id="flow-error" class="notice" role="alert" hidden></p>
+        <section aria-labelledby="flow-coverage-title"><h2 id="flow-coverage-title">Độ phủ lớp đang vận hành</h2><p class="muted">So danh sách lớp đang vận hành đã duyệt với lượt quét Writing gần nhất. Mục màu đỏ cần xử lý trước khi bật lịch chấm.</p><div id="flow-class-coverage" class="flow-list"></div></section>
+        <section aria-labelledby="flow-summary-title"><h2 id="flow-summary-title">Tình hình chấm</h2><div id="flow-summary" class="flow-summary"></div></section>
+        <section aria-labelledby="flow-reviews-title"><h2 id="flow-reviews-title">Cần kiểm tra</h2><p class="muted">Sau ba lượt chưa xong, kiểm tra lý do rồi chọn chạy lại từ đúng bước lỗi.</p><div id="flow-reviews" class="flow-list"></div></section>
+        <section aria-labelledby="flow-source-title"><h2 id="flow-source-title">Bài hoặc tài liệu chưa nhận được</h2><p class="muted">Link lỗi và từng ô bài lỗi được ghi riêng; các bài khác vẫn tiếp tục chấm.</p><div id="flow-source-issues" class="flow-list"></div></section>
+        <section aria-labelledby="flow-technical-title"><h2 id="flow-technical-title">Lỗi kỹ thuật gần đây</h2><p class="muted">Danh sách này thuộc toàn hệ thống; lỗi trước khi nhận bài chưa có mã lớp. Mở lượt chạy n8n để xem lỗi, hoặc mở workflow nếu lỗi xảy ra ngay lúc khởi động.</p><div id="flow-technical-errors" class="flow-list"></div><button id="flow-technical-more" class="secondary" type="button" hidden>Xem thêm lỗi</button></section>
+        <section aria-labelledby="flow-pairs-title"><h2 id="flow-pairs-title">Các bài gần đây</h2><div id="flow-pairs" class="flow-list"></div><button id="flow-more" class="secondary" type="button" hidden>Xem thêm bài</button></section>
+      </section>
+    </main>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script type="module" src="./js/writing-flow.js"></script>
+  </body>
+</html>

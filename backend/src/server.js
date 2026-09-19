@@ -7,6 +7,11 @@ import { createTeacherAuthMiddleware } from './teacher-auth.js';
 import { createProvisionalStudentService } from './provisional-service.js';
 import { createTeacherCommentService } from './teacher-comment-service.js';
 import { createLmsResultService } from './lms-result-service.js';
+import { createWritingFlowService } from './writing-flow-service.js';
+import { createWritingFlowStage } from './writing-flow-stage.js';
+import { createWritingFlowHandoff } from './writing-flow-handoff.js';
+import { createWritingFlowAiCall } from './writing-flow-ai-call.js';
+import { createWritingFlowScan } from './writing-flow-scan.js';
 
 const config = loadConfig();
 const pool = createDatabasePool(config);
@@ -18,6 +23,11 @@ const app = createApp({
   lessonService: createLessonPracticeService({ pool, provisionalService }),
   provisionalService,
   lmsResultService: createLmsResultService({ pool }),
+  writingFlowService: createWritingFlowService({ pool, encryptionKey: config.writingFlowEncryptionKey }),
+  writingFlowStage: createWritingFlowStage({ pool, encryptionKey: config.writingFlowEncryptionKey }),
+  writingFlowHandoff: createWritingFlowHandoff({ pool }),
+  writingFlowAiCall: createWritingFlowAiCall({ pool, encryptionKey: config.writingFlowEncryptionKey }),
+  writingFlowScan: createWritingFlowScan({ pool }),
   teacherCommentService: createTeacherCommentService({ pool }),
   adminAuth: createTeacherAuthMiddleware({ config, pool })
 });

@@ -14,6 +14,10 @@ export function shouldRetrySourceIssue(status, reasons = []) {
     && reasons.every(reason => RETRYABLE_SOURCE_ISSUES.has(String(reason)));
 }
 
+export function shouldResolvePriorTechnicalIssue(status, retryTechnicalIssue) {
+  return status === 'empty' || status === 'issue' && !retryTechnicalIssue;
+}
+
 // Nhận vào: phiên bản từng ô đã lưu và kết quả workflow vừa đọc lại từng file.
 // Việc chính: từ chối chốt nếu thiếu file, sai ô hoặc nội dung bài đã đổi.
 // Trả ra: số file và bài được xác minh; không đọc hoặc trả nội dung học viên.
@@ -441,7 +445,9 @@ export function createWritingFlowScan({ pool }) {
         [item.source_app_id, item.source_table_id, item.source_record_id,
           item.homework_file_id, item.source_link_index, status,
           retryTechnicalIssue, sourceErrorCode]);
-        if (status === 'empty') {
+        // Một lần đọc thành công nhưng kết luận file trống hoặc lỗi format thật
+        // thay thế lỗi kỹ thuật cũ; không để dashboard giữ cảnh báo FETCH_FAILED đã hết.
+        if (shouldResolvePriorTechnicalIssue(status, retryTechnicalIssue)) {
           await client.query(`UPDATE writing_flow.source_issue
             SET status='resolved',resolved_at=now(),last_seen_at=now()
             WHERE source_app_id=$1 AND source_table_id=$2 AND source_record_id=$3

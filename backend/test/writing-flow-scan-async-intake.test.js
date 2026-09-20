@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createWritingFlowScan, shouldRetrySourceIssue } from '../src/writing-flow-scan.js';
+import { createWritingFlowScan, shouldResolvePriorTechnicalIssue,
+  shouldRetrySourceIssue } from '../src/writing-flow-scan.js';
 
 const key = 'a'.repeat(64);
 const request = {
@@ -16,6 +17,9 @@ test('lỗi đọc kỹ thuật được thử tối đa ba lượt còn lỗi n
   assert.equal(shouldRetrySourceIssue('issue', ['TABLE_STRUCTURE_INVALID']), false);
   assert.equal(shouldRetrySourceIssue('issue', ['FETCH_FAILED', 'TABLE_STRUCTURE_INVALID']), false);
   assert.equal(shouldRetrySourceIssue('accepted', ['FETCH_FAILED']), false);
+  assert.equal(shouldResolvePriorTechnicalIssue('empty', false), true);
+  assert.equal(shouldResolvePriorTechnicalIssue('issue', false), true);
+  assert.equal(shouldResolvePriorTechnicalIssue('issue', true), false);
 });
 
 test('biên nhận FETCH_FAILED đưa nguồn về hàng chờ khi chưa đủ ba lượt', async () => {

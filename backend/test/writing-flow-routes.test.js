@@ -22,6 +22,10 @@ function makeApp(role, overrides = {}, stageOverrides = {}, aiOverrides = {}, sc
     listReviews: async () => [{ review_id: reviewId, status: 'open' }],
     listSourceIssues: async () => [{ issue_key: 'a'.repeat(64), reason_code: 'FETCH_FAILED' }],
     listClassCoverage: async () => [{ class_code: 'IC2200', status: 'covered' }],
+    listClasses: async () => [{ class_code: 'IC2200', operational_state: 'active' }],
+    filterOptions: async () => ({ classes: [], teachers: [] }),
+    dailyStats: async () => [{ day: '2026-09-20', completed_count: 2 }],
+    syncClassesFromMapping: async () => ({ active: 1, completed: 1 }),
     recordSourceIssue: async input => ({ issue_key: 'a'.repeat(64), reason_code: input.reasonCode }),
     requestRetry: async input => ({ reviewId: input.reviewId, status: 'retry_requested' }),
     intakePairs: async () => ({ detectedCount: 1, registeredCount: 1, receipts: [] }),
@@ -265,8 +269,33 @@ test('danh sách bài chuyển bộ lọc lớp và giảng viên vào truy vấ
   assert.equal(response.status, 200);
   assert.deepEqual(received, {
     classCode: 'IC2200', teacherName: 'Giảng viên thử', stageKey: null,
-    stageStatus: null, view: null, limit: 50, offset: 10, cursorAt: null, cursorId: null,
+    stageStatus: null, view: null, includeCompleted: false, taskType: null,
+    search: null, dateFrom: null, dateTo: null,
+    limit: 50, offset: 10, cursorAt: null, cursorId: null,
   });
+});
+
+test('API lớp, bộ lọc và biểu đồ chỉ mở cho quản trị viên', async () => {
+  const app = makeApp('admin');
+  assert.equal((await request(makeApp('teacher'))
+    .get('/api/v1/admin/writing-flow/classes?view=completed')).status, 403);
+  const classes = await request(app).get('/api/v1/admin/writing-flow/classes?view=active');
+  assert.equal(classes.status, 200);
+  assert.equal(classes.body.classes[0].class_code, 'IC2200');
+  assert.equal((await request(app).get('/api/v1/admin/writing-flow/filter-options')).status, 200);
+  const stats = await request(app).get('/api/v1/admin/writing-flow/daily-stats')
+    .query({ classCode: 'IC2200', taskType: 'task_1', dateFrom: '2026-09-01', dateTo: '2026-09-20' });
+  assert.equal(stats.status, 200);
+  assert.equal(stats.body.days[0].completed_count, 2);
+});
+
+test('đồng bộ lớp từ mapping chỉ nhận token nội bộ', async () => {
+  const url = '/api/v1/internal/writing-flow/classes/sync-from-mapping';
+  assert.equal((await request(makeApp('admin')).post(url)).status, 401);
+  const response = await request(makeApp('admin')).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`).send({});
+  assert.equal(response.status, 200);
+  assert.equal(response.body.result.active, 1);
 });
 
 test('chỉ quản trị viên thấy đối chiếu lớp đang vận hành với nguồn quét', async () => {

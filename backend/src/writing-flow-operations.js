@@ -66,26 +66,52 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
 
     async claimDueClasses({ limit = 20 } = {}) {
       return withTransaction(pool, async client => {
+        // Một lượt quét đã hết lease ba lần phải dừng ở danh sách cần xử lý.
+        // Không để lịch sau tiếp tục gọi Google cho cùng lớp vô hạn.
+        await client.query(`UPDATE writing_flow.class_registry
+          SET scan_status='needs_review',last_error_code=coalesce(last_error_code,'CLASS_SCAN_TIMEOUT'),
+              next_scan_at=now()+interval '100 years',updated_at=now()
+          WHERE enabled AND scan_status='scanning' AND next_scan_at<=now()
+            AND scan_attempt_count>=3`);
         const due = await client.query(`SELECT class_code FROM writing_flow.class_registry
-          WHERE enabled AND scan_status IN ('pending','scanning','succeeded','failed') AND next_scan_at<=now()
+          WHERE enabled AND mapping_status='approved' AND class_status='on_going'
+            AND scan_status IN ('pending','scanning','succeeded','failed') AND next_scan_at<=now()
           ORDER BY next_scan_at,class_code FOR UPDATE SKIP LOCKED LIMIT $1`, [limit]);
         if (!due.rowCount) return [];
         const codes = due.rows.map(row => row.class_code);
         const result = await client.query(`UPDATE writing_flow.class_registry
-          SET scan_status='scanning',next_scan_at=now()+interval '10 minutes',updated_at=now()
+          SET scan_status='scanning',scan_attempt_count=least(scan_attempt_count+1,3),
+              next_scan_at=now()+interval '20 minutes',updated_at=now()
           WHERE class_code=ANY($1::text[])
-          RETURNING class_code,classroom_course_id,classroom_name,cohort,teacher_names`, [codes]);
+          RETURNING class_code,classroom_course_id,classroom_name,cohort,teacher_names,
+            scan_attempt_count`, [codes]);
         return result.rows;
       });
     },
 
     async acknowledgeClassScan({ classCode, outcome, errorCode = null }) {
       const result = await pool.query(`UPDATE writing_flow.class_registry
-        SET scan_status=CASE WHEN $2='succeeded' THEN 'succeeded' ELSE 'failed' END,
+        SET scan_status=CASE
+              WHEN $2='succeeded' THEN 'succeeded'
+              WHEN scan_attempt_count>=3 THEN 'needs_review'
+              ELSE 'failed' END,
             last_scan_at=now(),last_error_code=$3,next_scan_at=now()+
-              CASE WHEN $2='succeeded' THEN interval '10 minutes' ELSE interval '2 minutes' END,
+              CASE
+                WHEN $2='succeeded' THEN CASE
+                  WHEN (now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::time < time '12:00'
+                    THEN ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date + time '12:00')
+                      AT TIME ZONE 'Asia/Ho_Chi_Minh' - now()
+                  WHEN (now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::time < time '17:00'
+                    THEN ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date + time '17:00')
+                      AT TIME ZONE 'Asia/Ho_Chi_Minh' - now()
+                  ELSE (((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date + 1) + time '05:00')
+                      AT TIME ZONE 'Asia/Ho_Chi_Minh' - now() END
+                WHEN scan_attempt_count>=3 THEN interval '100 years'
+                ELSE make_interval(mins => power(2, greatest(scan_attempt_count-1,0))::integer)
+              END,
+            scan_attempt_count=CASE WHEN $2='succeeded' THEN 0 ELSE scan_attempt_count END,
             updated_at=now() WHERE class_code=$1
-        RETURNING class_code,scan_status,last_scan_at,next_scan_at,last_error_code`,
+        RETURNING class_code,scan_status,scan_attempt_count,last_scan_at,next_scan_at,last_error_code`,
       [classCode, outcome, errorCode]);
       if (!result.rowCount) throw new ApiError(404, 'CLASS_NOT_FOUND', 'Không tìm thấy lớp cần quét.');
       return result.rows[0];
@@ -96,8 +122,10 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
         const duplicate = await existingEvent(client, requestId);
         if (duplicate) return { classCode, status: 'pending', requestId };
         const result = await client.query(`UPDATE writing_flow.class_registry
-          SET scan_status='pending',next_scan_at=now(),last_error_code=NULL,updated_at=now()
-          WHERE class_code=$1 AND enabled RETURNING class_code`, [classCode]);
+          SET scan_status='pending',scan_attempt_count=0,next_scan_at=now(),
+              last_error_code=NULL,updated_at=now()
+          WHERE class_code=$1 AND enabled AND mapping_status='approved'
+            AND class_status='on_going' RETURNING class_code`, [classCode]);
         if (!result.rowCount) throw new ApiError(404, 'CLASS_NOT_FOUND', 'Không tìm thấy lớp đang vận hành.');
         await client.query(`INSERT INTO writing_flow.operator_event
           (class_code,event_type,actor_ref,request_id,reason,after_state)

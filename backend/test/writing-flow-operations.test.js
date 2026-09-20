@@ -107,6 +107,46 @@ test('nguồn được xác nhận thành công sẽ không tự phát lại', a
   assert.equal(seenParams[1], 'acknowledged');
 });
 
+test('chỉ cấp lớp đã duyệt đang học và giới hạn theo tham số thay vì cap ba lớp', async () => {
+  const classCodes = Array.from({ length: 8 }, (_, index) => `IC22${String(index).padStart(2, '0')}`);
+  const statements = [];
+  const pool = poolWith(async (sql, params) => {
+    statements.push({ sql, params });
+    if (sql.includes("SET scan_status='needs_review'")) return { rowCount: 0, rows: [] };
+    if (sql.includes('SELECT class_code FROM writing_flow.class_registry')) {
+      return { rowCount: classCodes.length, rows: classCodes.map(class_code => ({ class_code })) };
+    }
+    if (sql.includes("SET scan_status='scanning'")) {
+      return { rowCount: classCodes.length,
+        rows: classCodes.map(class_code => ({ class_code, scan_attempt_count: 1 })) };
+    }
+    throw new Error(`UNEXPECTED_SQL:${sql}`);
+  });
+  const rows = await createWritingFlowOperations({ pool }).claimDueClasses({ limit: 8 });
+  assert.equal(rows.length, 8);
+  assert.equal(statements[1].params[0], 8);
+  assert.match(statements[1].sql, /mapping_status='approved'/u);
+  assert.match(statements[1].sql, /class_status='on_going'/u);
+  assert.match(statements[1].sql, /FOR UPDATE SKIP LOCKED LIMIT \$1/u);
+});
+
+test('lớp lỗi lần ba vào Cần kiểm tra, lớp thành công về đúng ba mốc quét', async () => {
+  const statements = [];
+  const pool = poolWith(async (sql, params) => {
+    statements.push({ sql, params });
+    return { rowCount: 1, rows: [{ class_code: params[0],
+      scan_status: params[1] === 'succeeded' ? 'succeeded' : 'needs_review' }] };
+  });
+  const operations = createWritingFlowOperations({ pool });
+  assert.equal((await operations.acknowledgeClassScan({ classCode: 'IC2200',
+    outcome: 'failed', errorCode: 'GOOGLE_RATE_LIMIT' })).scan_status, 'needs_review');
+  assert.equal((await operations.acknowledgeClassScan({ classCode: 'IC2200',
+    outcome: 'succeeded' })).scan_status, 'succeeded');
+  assert.match(statements[0].sql, /scan_attempt_count>=3 THEN 'needs_review'/u);
+  for (const time of ['05:00', '12:00', '17:00']) assert.equal(statements[1].sql.includes(time), true);
+  assert.match(statements[1].sql, /Asia\/Ho_Chi_Minh/u);
+});
+
 test('retry không nhận intake, không nhận bài đã bỏ qua và làm mới đúng bước trở về sau', async () => {
   const operationsInvalid = createWritingFlowOperations({ pool: poolWith(async () => ({ rows: [] })) });
   await assert.rejects(() => operationsInvalid.requestStageRetry({ stageKey: 'intake' }),
@@ -146,4 +186,16 @@ test('migration vận hành không có DELETE và có bảng nguồn, sổ lớp
     'pair_source_version', 'legacy_record']) assert.match(sql, new RegExp(`CREATE TABLE IF NOT EXISTS writing_flow\\.${table}`, 'u'));
   assert.doesNotMatch(sql, /\bDELETE\s+FROM\b/iu);
   assert.doesNotMatch(sql, /GRANT\s+DELETE/iu);
+});
+
+test('migration trạng thái lớp và tìm kiếm không cấp quyền ghi database mapping', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const sql = await readFile(new URL('../../docs/migrations/2026-09-20-writing-flow-operations-v3.sql',
+    import.meta.url), 'utf8');
+  for (const column of ['mapping_status', 'class_status', 'eligibility_reason',
+    'scan_attempt_count', 'last_mapping_sync_at']) assert.match(sql, new RegExp(column, 'u'));
+  assert.match(sql, /CREATE OR REPLACE FUNCTION writing_flow\.normalize_search/u);
+  assert.match(sql, /GRANT SELECT ON TABLE mapping\.classroom_course_mapping/u);
+  assert.doesNotMatch(sql, /GRANT\s+(?:INSERT|UPDATE|DELETE)[\s\S]*mapping\./iu);
+  assert.doesNotMatch(sql, /\bDELETE\s+FROM\b/iu);
 });

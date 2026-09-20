@@ -336,6 +336,10 @@ export function createApp({config,pool,service,lessonService=service,provisional
    const input=parse(z.object({classes:z.array(writingClassRegistryItem).min(1).max(200)}),q.body);
    r.json({ok:true,classes:await writingFlowService.upsertClassRegistry(input)});
  }));
+ app.post('/api/v1/internal/writing-flow/classes/sync-from-mapping',internal,writingFlowReady,
+   asyncRoute(async(_q,r)=>{
+     r.json({ok:true,result:await writingFlowService.syncClassesFromMapping()});
+   }));
  app.post('/api/v1/internal/writing-flow/classes/due',internal,writingFlowReady,asyncRoute(async(q,r)=>{
    const input=parse(z.object({limit:z.number().int().min(1).max(100).default(20)}),q.body);
    r.json({ok:true,classes:await writingFlowService.claimDueClasses(input)});
@@ -452,6 +456,21 @@ export function createApp({config,pool,service,lessonService=service,provisional
   app.get('/api/v1/admin/writing-flow/class-coverage',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(_q,r)=>{
     r.json({ok:true,classes:await writingFlowService.listClassCoverage()});
   }));
+  app.get('/api/v1/admin/writing-flow/classes',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
+    const view=parse(z.enum(['active','completed','review','all']),q.query.view??'active');
+    r.json({ok:true,classes:await writingFlowService.listClasses({view})});
+  }));
+  app.get('/api/v1/admin/writing-flow/filter-options',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(_q,r)=>{
+    r.json({ok:true,filters:await writingFlowService.filterOptions()});
+  }));
+  app.get('/api/v1/admin/writing-flow/daily-stats',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
+    const classCode=q.query.classCode?parse(z.string().trim().min(1).max(80),q.query.classCode):null;
+    const teacherName=q.query.teacherName?parse(z.string().trim().min(1).max(120),q.query.teacherName):null;
+    const taskType=q.query.taskType?parse(z.enum(['task_1','task_2']),q.query.taskType):null;
+    const dateFrom=q.query.dateFrom?parse(z.string().date(),q.query.dateFrom):null;
+    const dateTo=q.query.dateTo?parse(z.string().date(),q.query.dateTo):null;
+    r.json({ok:true,days:await writingFlowService.dailyStats({classCode,teacherName,taskType,dateFrom,dateTo})});
+  }));
  app.get('/api/v1/admin/writing-flow/pairs',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
    const limit=parse(z.coerce.number().int().min(1).max(100),q.query.limit??50);
    const offset=parse(z.coerce.number().int().min(0).max(100000),q.query.offset??0);
@@ -461,11 +480,16 @@ export function createApp({config,pool,service,lessonService=service,provisional
    const stageKey=q.query.stageKey?parse(writingStage,q.query.stageKey):null;
    const stageStatus=q.query.stageStatus?parse(z.enum(['pending','running','needs_review','succeeded','skipped']),q.query.stageStatus):null;
    const view=q.query.view?parse(z.enum(['unfinished','delivered','skipped']),q.query.view):null;
+   const includeCompleted=q.query.includeCompleted==='true';
+   const taskType=q.query.taskType?parse(z.enum(['task_1','task_2']),q.query.taskType):null;
+   const search=q.query.search?parse(z.string().trim().min(1).max(500),q.query.search):null;
+   const dateFrom=q.query.dateFrom?parse(z.string().date(),q.query.dateFrom):null;
+   const dateTo=q.query.dateTo?parse(z.string().date(),q.query.dateTo):null;
    const cursorAt=q.query.cursorAt?parse(z.string().datetime({offset:true}),q.query.cursorAt):null;
    const cursorId=q.query.cursorId?parse(uuid,q.query.cursorId):null;
    if(Boolean(cursorAt)!==Boolean(cursorId))throw new ApiError(400,'CURSOR_INCOMPLETE','Thiếu một phần con trỏ trang.');
    const pairs=await writingFlowService.listPairs({classCode,teacherName,stageKey,stageStatus,
-     view,limit,offset,cursorAt,cursorId});
+     view,includeCompleted,taskType,search,dateFrom,dateTo,limit,offset,cursorAt,cursorId});
    const last=pairs.at(-1);
    r.json({ok:true,pairs,nextCursor:last&&pairs.length===limit
      ?{cursorAt:last.updated_at,cursorId:last.pair_id}:null});
@@ -477,16 +501,26 @@ export function createApp({config,pool,service,lessonService=service,provisional
    const pairId=parse(uuid,q.params.pairId);
    r.json({ok:true,history:await writingFlowService.pairHistory({pairId})});
  }));
- app.get('/api/v1/admin/writing-flow/reviews',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
-   const limit=parse(z.coerce.number().int().min(1).max(200),q.query.limit??100);
-   const offset=parse(z.coerce.number().int().min(0).max(100000),q.query.offset??0);
-   r.json({ok:true,reviews:await writingFlowService.listReviews({limit,offset})});
- }));
- app.get('/api/v1/admin/writing-flow/source-issues',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
-   const limit=parse(z.coerce.number().int().min(1).max(200),q.query.limit??100);
-   const offset=parse(z.coerce.number().int().min(0).max(100000),q.query.offset??0);
-   r.json({ok:true,issues:await writingFlowService.listSourceIssues({limit,offset})});
- }));
+  app.get('/api/v1/admin/writing-flow/reviews',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
+    const limit=parse(z.coerce.number().int().min(1).max(200),q.query.limit??100);
+    const offset=parse(z.coerce.number().int().min(0).max(100000),q.query.offset??0);
+    const classCode=q.query.classCode?parse(z.string().trim().min(1).max(80),q.query.classCode):null;
+    const teacherName=q.query.teacherName?parse(z.string().trim().min(1).max(120),q.query.teacherName):null;
+    const stageKey=q.query.stageKey?parse(writingStage,q.query.stageKey):null;
+    const search=q.query.search?parse(z.string().trim().min(1).max(500),q.query.search):null;
+    r.json({ok:true,reviews:await writingFlowService.listReviews({classCode,teacherName,
+      stageKey,search,limit,offset})});
+  }));
+  app.get('/api/v1/admin/writing-flow/source-issues',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
+    const limit=parse(z.coerce.number().int().min(1).max(200),q.query.limit??100);
+    const offset=parse(z.coerce.number().int().min(0).max(100000),q.query.offset??0);
+    const classCode=q.query.classCode?parse(z.string().trim().min(1).max(80),q.query.classCode):null;
+    const teacherName=q.query.teacherName?parse(z.string().trim().min(1).max(120),q.query.teacherName):null;
+    const search=q.query.search?parse(z.string().trim().min(1).max(500),q.query.search):null;
+    const reasonCode=q.query.reasonCode?parse(z.string().trim().min(1).max(100),q.query.reasonCode):null;
+    r.json({ok:true,issues:await writingFlowService.listSourceIssues({classCode,teacherName,
+      search,reasonCode,limit,offset})});
+  }));
  app.get('/api/v1/admin/writing-flow/sources',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
    const limit=parse(z.coerce.number().int().min(1).max(100),q.query.limit??50);
    const sourceType=q.query.sourceType?parse(z.enum(['lark_homework','google_classroom','manual','legacy']),q.query.sourceType):null;

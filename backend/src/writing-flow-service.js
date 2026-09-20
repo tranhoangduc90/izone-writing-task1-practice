@@ -4,7 +4,7 @@ import { ApiError } from './service.js';
 import { createWritingFlowIntake } from './writing-flow-intake.js';
 import { createWritingFlowOperations, STAGES } from './writing-flow-operations.js';
 
-// Nguồn vào: bản sao phân công lớp đã có sẵn trong PostgreSQL.
+// Nguồn vào: mapping lớp và phân công giảng viên đã có sẵn trong PostgreSQL.
 // Việc chính: chuẩn hóa tên lớp thành mã lớp và gom các giảng viên đang hoạt động.
 // Kết quả: dashboard lọc được theo giảng viên mà không ghi hoặc sửa dữ liệu Lark Base.
 // Khi thiếu phân công: trả mảng rỗng để bài vẫn hiện theo lớp và trạng thái.
@@ -12,23 +12,40 @@ const teacherAssignmentsCte = `teacher_assignments AS (
   SELECT class_code,array_agg(DISTINCT teacher_name ORDER BY teacher_name) AS teacher_names
     FROM (
       SELECT CASE
-        WHEN upper(payload->>'Tên lớp') ~ 'IC[[:space:].]*[0-9]{4,6}'
-          THEN 'IC' || regexp_replace(substring(upper(payload->>'Tên lớp')
+        WHEN upper(course.erp_class_name_snapshot) ~ 'IC[[:space:].]*[0-9]{4,6}'
+          THEN 'IC' || regexp_replace(substring(upper(course.erp_class_name_snapshot)
             from 'IC[[:space:].]*[0-9]{4,6}'),'[^0-9]','','g')
-        WHEN upper(payload->>'Tên lớp') ~ 'CS[[:space:].]*[0-9]{6}'
-          THEN 'CS.' || regexp_replace(substring(upper(payload->>'Tên lớp')
+        WHEN upper(course.erp_class_name_snapshot) ~ 'CS[[:space:].]*[0-9]{6}'
+          THEN 'CS.' || regexp_replace(substring(upper(course.erp_class_name_snapshot)
             from 'CS[[:space:].]*[0-9]{6}'),'[^0-9]','','g')
       END AS class_code,
-      nullif(trim(payload->>'Tên hiển thị'),'') AS teacher_name
-      FROM mapping.lark_export_teacher_assignments
-      WHERE payload->>'Trạng thái tài khoản'='active'
+      nullif(trim(account.display_name),'') AS teacher_name
+      FROM mapping.classroom_course_mapping AS course
+      JOIN mapping.reviewer_class_access AS access
+        ON access.erp_course_class_id=course.erp_course_class_id
+      JOIN mapping.reviewer_account AS account
+        ON account.email=access.reviewer_email AND account.status='active'
     ) AS normalized
    WHERE class_code IS NOT NULL AND teacher_name IS NOT NULL
    GROUP BY class_code
 )`;
-const emptyTeacherAssignmentsCte = `teacher_assignments AS (
-  SELECT NULL::text AS class_code,ARRAY[]::text[] AS teacher_names WHERE false
-)`;
+const MAPPING_CLASS_SQL = `SELECT course.erp_course_class_id,
+    course.erp_class_name_snapshot,course.classroom_course_id,
+    course.classroom_course_name_snapshot,course.status AS mapping_status,
+    course.updated_at,
+    coalesce(array_agg(DISTINCT lower(access.class_status_snapshot))
+      FILTER (WHERE access.class_status_snapshot IS NOT NULL),ARRAY[]::text[]) AS class_statuses,
+    coalesce(array_agg(DISTINCT account.display_name ORDER BY account.display_name)
+      FILTER (WHERE account.status='active' AND nullif(trim(account.display_name),'') IS NOT NULL),
+      ARRAY[]::text[]) AS teacher_names
+  FROM mapping.classroom_course_mapping AS course
+  LEFT JOIN mapping.reviewer_class_access AS access
+    ON access.erp_course_class_id=course.erp_course_class_id
+  LEFT JOIN mapping.reviewer_account AS account ON account.email=access.reviewer_email
+  GROUP BY course.erp_course_class_id,course.erp_class_name_snapshot,
+    course.classroom_course_id,course.classroom_course_name_snapshot,
+    course.status,course.updated_at
+  ORDER BY course.erp_class_name_snapshot,course.erp_course_class_id`;
 
 // Nhận vào: tên lớp từ nguồn mapping hoặc mã lớp trong bảng homework.
 // Việc chính: nhận cả IC2269 và dạng CS.070626, rồi đưa về một cách viết ổn định.
@@ -41,6 +58,63 @@ export function classCodeFromName(value) {
   const compact = match[1].replace(/\s+/gu, '');
   if (compact.startsWith('IC')) return `IC${compact.replace(/\D/gu, '')}`;
   return `CS.${compact.replace(/\D/gu, '')}`;
+}
+
+export function documentIdFromSearch(value) {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  const fromUrl = text.match(/docs\.google\.com\/document\/d\/([A-Za-z0-9_-]{20,})/u)?.[1];
+  if (fromUrl) return fromUrl;
+  return /^[A-Za-z0-9_-]{20,}$/u.test(text) ? text : null;
+}
+
+export function mappingClassState(row) {
+  const classCode = classCodeFromName(row.erp_class_name_snapshot);
+  const statuses = [...new Set((row.class_statuses || []).filter(Boolean))];
+  const classStatus = statuses.length === 1 && ['on_going', 'completed'].includes(statuses[0])
+    ? statuses[0] : statuses.length > 1 ? 'conflict' : 'unknown';
+  let operationalState = 'active';
+  if (classCode === 'IC2288') operationalState = 'excluded';
+  else if (!classCode) operationalState = 'missing_class_code';
+  else if (!row.classroom_course_id) operationalState = 'missing_classroom_course';
+  else if (row.mapping_status !== 'approved') operationalState = 'pending_review';
+  else if (classStatus === 'completed') operationalState = 'completed';
+  else if (classStatus !== 'on_going') operationalState = 'status_review';
+  return { class_code: classCode || null, class_name: row.erp_class_name_snapshot,
+    erp_course_class_id: row.erp_course_class_id,
+    classroom_course_id: row.classroom_course_id,
+    classroom_name: row.classroom_course_name_snapshot,
+    mapping_status: row.mapping_status, class_status: classStatus,
+    teacher_names: row.teacher_names || [], source_updated_at: row.updated_at,
+    operational_state: operationalState, enabled: operationalState === 'active' };
+}
+
+// Nhận vào: toàn bộ lớp vừa đọc từ database mapping.
+// Việc chính: phát hiện một mã lớp trỏ tới nhiều Classroom hoặc một Classroom trỏ tới nhiều mã lớp.
+// Trả ra: các dòng xung đột được đưa vào danh sách cần kiểm tra và không được cấp lịch quét.
+// Khi có xung đột: sổ lớp cũ của các mã liên quan sẽ bị tạm dừng trong cùng transaction đồng bộ.
+export function markMappingConflicts(rows = []) {
+  const byCode = new Map();
+  const byCourse = new Map();
+  for (const row of rows) {
+    if (row.class_code) {
+      const courses = byCode.get(row.class_code) || new Set();
+      if (row.classroom_course_id) courses.add(String(row.classroom_course_id));
+      byCode.set(row.class_code, courses);
+    }
+    if (row.classroom_course_id) {
+      const codes = byCourse.get(String(row.classroom_course_id)) || new Set();
+      if (row.class_code) codes.add(row.class_code);
+      byCourse.set(String(row.classroom_course_id), codes);
+    }
+  }
+  return rows.map(row => {
+    const codeConflict = row.class_code && (byCode.get(row.class_code)?.size || 0) > 1;
+    const courseConflict = row.classroom_course_id
+      && (byCourse.get(String(row.classroom_course_id))?.size || 0) > 1;
+    if (!codeConflict && !courseConflict) return row;
+    return { ...row, operational_state: 'mapping_conflict', enabled: false };
+  });
 }
 
 // Nhận vào: lớp đang vận hành từ mapping và mã lớp thấy trong lượt quét Writing gần nhất.
@@ -66,6 +140,10 @@ export function mergeClassCoverage(expectedRows = [], seenRows = []) {
     current.erp_source_found = current.erp_source_found && source.erp_source_found !== false;
     current.classroom_source_found = current.classroom_source_found
       && source.classroom_source_found !== false;
+    current.mapping_status = source.mapping_status || null;
+    current.class_status = source.class_status || null;
+    current.operational_state = source.operational_state || null;
+    current.teacher_names = source.teacher_names || [];
     rows.set(classCode, current);
   }
   for (const source of seenRows) {
@@ -78,11 +156,15 @@ export function mergeClassCoverage(expectedRows = [], seenRows = []) {
     current.last_scanned_at = source.last_scanned_at || null;
     rows.set(classCode, current);
   }
-  const priority = { missing_source: 0, mapping_issue: 1, class_code_missing: 2,
-    unexpected_source: 3, excluded: 4, covered: 5 };
+  const priority = { missing_source: 0, mapping_issue: 1, mapping_conflict: 2,
+    class_code_missing: 3, status_review: 4, pending_review: 5, unexpected_source: 6,
+    excluded: 7, completed: 8, covered: 9 };
   const covered = [...rows.values()].map(row => ({ ...row,
     status: row.class_code === 'IC2288' ? 'excluded'
-      : row.expected && (!row.erp_source_found || !row.classroom_source_found) ? 'mapping_issue'
+      : row.operational_state === 'completed' ? 'completed'
+        : ['status_review', 'pending_review', 'missing_classroom_course', 'mapping_conflict']
+            .includes(row.operational_state) ? row.operational_state
+          : row.expected && (!row.erp_source_found || !row.classroom_source_found) ? 'mapping_issue'
         : row.expected && !row.seen ? 'missing_source'
           : !row.expected && row.seen ? 'unexpected_source' : 'covered' }));
   return [...covered, ...missingCode].sort((a, b) =>
@@ -96,20 +178,82 @@ export function mergeClassCoverage(expectedRows = [], seenRows = []) {
 // Khi lỗi: transaction hoàn tác; màn hình nhận mã lỗi và giữ mục Cần kiểm tra.
 export function createWritingFlowService({ pool, encryptionKey = null }) {
   const operations = createWritingFlowOperations({ pool, encryptionKey });
-  let teacherAssignmentsSource;
   async function teacherAssignmentsForDatabase() {
-    if (!teacherAssignmentsSource) {
-      teacherAssignmentsSource = pool.query(`SELECT coalesce(has_table_privilege(
-          current_user,to_regclass('mapping.lark_export_teacher_assignments'),'SELECT'),false)
-          AS can_read`)
-        .then(result => result.rows[0]?.can_read
-          ? teacherAssignmentsCte : emptyTeacherAssignmentsCte);
-    }
-    return teacherAssignmentsSource;
+    return teacherAssignmentsCte;
+  }
+  async function mappingClasses(client = pool) {
+    const result = await client.query(MAPPING_CLASS_SQL);
+    return markMappingConflicts(result.rows.map(mappingClassState));
   }
   return {
     ...operations,
     intakePairs: createWritingFlowIntake({ pool, encryptionKey }),
+    // Đọc thẳng database mapping rồi cập nhật sổ lớp Writing trong một transaction.
+    // Không gọi Lark; lớp completed/không rõ vẫn được giữ để dashboard giải thích.
+    async syncClassesFromMapping() {
+      return withTransaction(pool, async client => {
+        const classes = await mappingClasses(client);
+        if (!classes.length) {
+          throw new ApiError(503, 'MAPPING_CLASSES_EMPTY',
+            'Database mapping chưa trả lớp nào; hệ thống giữ nguyên sổ lớp hiện tại.');
+        }
+        const registryClasses = classes.filter(row => row.class_code && row.classroom_course_id
+          && row.operational_state !== 'mapping_conflict');
+        const registered = [];
+        for (const item of registryClasses) {
+          const result = await client.query(`INSERT INTO writing_flow.class_registry
+            (class_code,classroom_course_id,classroom_name,teacher_names,enabled,source_ref,
+             scan_status,next_scan_at,erp_course_class_id,mapping_status,class_status,
+             eligibility_reason,last_mapping_sync_at,updated_at)
+            VALUES ($1,$2,$3,$4,$5,'mapping_database',
+              CASE WHEN $5 THEN 'pending' ELSE 'paused' END,
+              CASE WHEN $5 THEN now() ELSE now()+interval '100 years' END,
+              $6,$7,$8,$9,now(),now())
+            ON CONFLICT (class_code) DO UPDATE SET
+              classroom_course_id=EXCLUDED.classroom_course_id,
+              classroom_name=EXCLUDED.classroom_name,teacher_names=EXCLUDED.teacher_names,
+              enabled=EXCLUDED.enabled,source_ref='mapping_database',
+              erp_course_class_id=EXCLUDED.erp_course_class_id,
+              mapping_status=EXCLUDED.mapping_status,class_status=EXCLUDED.class_status,
+              eligibility_reason=EXCLUDED.eligibility_reason,last_mapping_sync_at=now(),
+              scan_status=CASE
+                WHEN NOT EXCLUDED.enabled THEN 'paused'
+                WHEN NOT writing_flow.class_registry.enabled
+                  OR writing_flow.class_registry.classroom_course_id IS DISTINCT FROM EXCLUDED.classroom_course_id
+                  THEN 'pending' ELSE writing_flow.class_registry.scan_status END,
+              scan_attempt_count=CASE WHEN NOT EXCLUDED.enabled THEN 0
+                WHEN NOT writing_flow.class_registry.enabled THEN 0
+                ELSE writing_flow.class_registry.scan_attempt_count END,
+              next_scan_at=CASE
+                WHEN NOT EXCLUDED.enabled THEN now()+interval '100 years'
+                WHEN NOT writing_flow.class_registry.enabled
+                  OR writing_flow.class_registry.classroom_course_id IS DISTINCT FROM EXCLUDED.classroom_course_id
+                  THEN now() ELSE writing_flow.class_registry.next_scan_at END,
+              updated_at=now()
+            RETURNING class_code,enabled,mapping_status,class_status,scan_status`,
+          [item.class_code, item.classroom_course_id, item.classroom_name,
+            item.teacher_names, item.enabled, item.erp_course_class_id,
+            item.mapping_status, item.class_status, item.operational_state]);
+          registered.push(result.rows[0]);
+        }
+        const codes = registryClasses.map(row => row.class_code);
+        if (!codes.length) {
+          throw new ApiError(503, 'MAPPING_CLASSES_INVALID',
+            'Chưa có lớp mapping nào đủ mã lớp và Classroom ID.');
+        }
+        await client.query(`UPDATE writing_flow.class_registry
+          SET enabled=false,scan_status='paused',scan_attempt_count=0,
+              eligibility_reason='not_in_mapping',next_scan_at=now()+interval '100 years',
+              last_mapping_sync_at=now(),updated_at=now()
+          WHERE NOT (class_code=ANY($1::text[]))`, [codes]);
+        return { received: classes.length, registered: registered.length,
+          active: registered.filter(row => row.enabled).length,
+          completed: classes.filter(row => row.operational_state === 'completed').length,
+          needsReview: classes.filter(row => ['missing_class_code','missing_classroom_course',
+            'pending_review','status_review','mapping_conflict'].includes(row.operational_state)).length,
+          excluded: classes.filter(row => row.operational_state === 'excluded').length };
+      });
+    },
     // Nhận vào: định danh execution lỗi từ Error Trigger của n8n.
     // Việc chính: giữ một dòng cho một execution, kể cả lỗi trước khi tạo mã bài.
     // Trả ra: biên nhận và số lần cùng lỗi được gửi; không lưu stack hoặc nội dung bài.
@@ -158,8 +302,12 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
       return result.rows[0];
     },
 
-    async listSourceIssues({ limit = 100, offset = 0 } = {}) {
+    async listSourceIssues({ classCode = null, teacherName = null, search = null,
+      reasonCode = null, limit = 100, offset = 0 } = {}) {
+      const assignments = await teacherAssignmentsForDatabase();
+      const searchDocId = documentIdFromSearch(search);
       const result = await pool.query(`
+        WITH ${assignments}
         SELECT i.issue_key,i.source_app_id,i.source_table_id,i.source_record_id,
                i.homework_file_id,i.source_link_index,
                i.essay_slot,i.class_code,i.reason_code,i.occurrence_count,
@@ -169,12 +317,25 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
           FROM writing_flow.source_issue AS i
           LEFT JOIN writing_flow.source_record AS s
             ON s.source_app_id=i.source_app_id AND s.source_table_id=i.source_table_id
-           AND s.source_record_id=i.source_record_id
-           AND s.homework_file_id IS NOT DISTINCT FROM i.homework_file_id
-           AND s.source_link_index IS NOT DISTINCT FROM i.source_link_index
+            AND s.source_record_id=i.source_record_id
+            AND s.homework_file_id IS NOT DISTINCT FROM i.homework_file_id
+            AND s.source_link_index IS NOT DISTINCT FROM i.source_link_index
+          LEFT JOIN teacher_assignments AS teachers
+            ON teachers.class_code=coalesce(i.class_code,s.class_code)
+          LEFT JOIN writing_flow.class_registry AS registry
+            ON registry.class_code=coalesce(i.class_code,s.class_code)
          WHERE i.status='open'
+           AND registry.class_status IS DISTINCT FROM 'completed'
+           AND ($1::text IS NULL OR coalesce(i.class_code,s.class_code)=$1)
+           AND ($2::text IS NULL OR $2=ANY(coalesce(nullif(s.teacher_names,ARRAY[]::text[]),
+             teachers.teacher_names,ARRAY[]::text[])))
+           AND ($3::text IS NULL OR i.homework_file_id=$4
+             OR writing_flow.normalize_search(s.student_name)
+               LIKE '%' || writing_flow.normalize_search($3) || '%')
+           AND ($5::text IS NULL OR i.reason_code=$5)
          ORDER BY i.last_seen_at DESC,i.issue_key
-         LIMIT $1 OFFSET $2`, [limit, offset]);
+         LIMIT $6 OFFSET $7`, [classCode, teacherName, search, searchDocId,
+        reasonCode, limit, offset]);
       return result.rows;
     },
     async summary() {
@@ -185,6 +346,8 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
                coalesce(t.teacher_names,ARRAY[]::text[]) AS teacher_names
           FROM writing_flow.pair AS p
           LEFT JOIN teacher_assignments AS t USING (class_code)
+          LEFT JOIN writing_flow.class_registry AS registry USING (class_code)
+         WHERE registry.class_status IS DISTINCT FROM 'completed'
          GROUP BY p.class_code,p.status,t.teacher_names
          ORDER BY p.class_code,p.status`);
       return result.rows;
@@ -200,6 +363,7 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
           FROM writing_flow.pair AS p
           LEFT JOIN teacher_assignments AS t USING (class_code)
           LEFT JOIN writing_flow.source_record AS s ON s.source_id=p.source_id
+          LEFT JOIN writing_flow.class_registry AS registry USING (class_code)
           LEFT JOIN LATERAL (
             SELECT sr.stage_key,sr.status AS stage_status
             FROM writing_flow.stage_result AS sr
@@ -208,6 +372,7 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
             ORDER BY array_position($3::text[],sr.stage_key) LIMIT 1
           ) AS active ON true
           WHERE p.status<>'superseded'
+            AND registry.class_status IS DISTINCT FROM 'completed'
             AND ($1::text IS NULL OR p.class_code=$1)
             AND ($2::text IS NULL OR $2=ANY(coalesce(nullif(s.teacher_names,ARRAY[]::text[]),t.teacher_names,ARRAY[]::text[])))
         )
@@ -215,36 +380,106 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
         FROM current_pair GROUP BY stage_key,stage_status,(skipped_at IS NOT NULL)
         ORDER BY array_position($3::text[],stage_key),stage_status`,
       [classCode, teacherName, STAGES]);
-      const support = await pool.query(`SELECT
-          (SELECT count(*)::integer FROM writing_flow.source_issue WHERE status='open') AS source_issues,
-          (SELECT count(*)::integer FROM writing_flow.manual_review WHERE status<>'resolved') AS reviews,
+      const support = await pool.query(`WITH ${assignments} SELECT
+          (SELECT count(*)::integer FROM writing_flow.source_issue AS issue
+            LEFT JOIN writing_flow.source_record AS source
+              ON source.source_app_id=issue.source_app_id
+             AND source.source_table_id=issue.source_table_id
+             AND source.source_record_id=issue.source_record_id
+             AND source.homework_file_id IS NOT DISTINCT FROM issue.homework_file_id
+             AND source.source_link_index IS NOT DISTINCT FROM issue.source_link_index
+            LEFT JOIN teacher_assignments AS teachers
+              ON teachers.class_code=coalesce(issue.class_code,source.class_code)
+            WHERE issue.status='open'
+              AND ($1::text IS NULL OR coalesce(issue.class_code,source.class_code)=$1)
+              AND ($2::text IS NULL OR $2=ANY(coalesce(nullif(source.teacher_names,ARRAY[]::text[]),
+                teachers.teacher_names,ARRAY[]::text[])))) AS source_issues,
+          (SELECT count(*)::integer FROM writing_flow.manual_review AS review
+            JOIN writing_flow.pair AS pair ON pair.pair_id=review.pair_id
+            LEFT JOIN writing_flow.source_record AS source ON source.source_id=pair.source_id
+            LEFT JOIN teacher_assignments AS teachers USING (class_code)
+            WHERE review.status<>'resolved'
+              AND ($1::text IS NULL OR pair.class_code=$1)
+              AND ($2::text IS NULL OR $2=ANY(coalesce(nullif(source.teacher_names,ARRAY[]::text[]),
+                teachers.teacher_names,ARRAY[]::text[])))) AS reviews,
           (SELECT count(*)::integer FROM writing_flow.workflow_failure
-             WHERE last_seen_at>now()-interval '7 days') AS technical_errors`);
+             WHERE last_seen_at>now()-interval '7 days') AS technical_errors`,
+      [classCode, teacherName]);
       return { stages: result.rows, support: support.rows[0] };
     },
 
     async listClassCoverage() {
-      const [expected, seen] = await Promise.all([
-        pool.query(`SELECT 'registry:' || class_code AS source_key,updated_at AS source_updated_at,
-            coalesce(classroom_name,class_code) AS class_name,true AS erp_source_found,
-            (enabled OR class_code='IC2288') AS classroom_source_found
-          FROM writing_flow.class_registry ORDER BY class_code`),
+      const [mapping, seen] = await Promise.all([
+        mappingClasses(),
         pool.query(`SELECT class_code,last_scan_at AS last_scanned_at
           FROM writing_flow.class_registry WHERE last_scan_at IS NOT NULL`),
       ]);
-      return mergeClassCoverage(expected.rows, seen.rows);
+      const expected = mapping.map(item => ({ ...item, expected: item.enabled,
+        erp_source_found: true, classroom_source_found: Boolean(item.classroom_course_id) }));
+      return mergeClassCoverage(expected, seen.rows);
+    },
+
+    async listClasses({ view = 'active' } = {}) {
+      const mapping = await mappingClasses();
+      const registry = await pool.query(`SELECT class_code,scan_status,scan_attempt_count,
+          last_scan_at,next_scan_at,last_error_code,updated_at
+        FROM writing_flow.class_registry`);
+      const byCode = new Map(registry.rows.map(row => [row.class_code, row]));
+      const rows = mapping.map(item => ({ ...item, ...(byCode.get(item.class_code) || {}) }));
+      if (view === 'active') return rows.filter(row => row.operational_state === 'active');
+      if (view === 'completed') return rows.filter(row => row.operational_state === 'completed');
+      if (view === 'review') return rows.filter(row => !['active', 'completed', 'excluded']
+        .includes(row.operational_state));
+      return rows;
+    },
+
+    async filterOptions() {
+      const [classes, teachers] = await Promise.all([
+        pool.query(`SELECT class_code,classroom_name,class_status,mapping_status,enabled
+          FROM writing_flow.class_registry ORDER BY class_code`),
+        pool.query(`SELECT DISTINCT unnest(teacher_names) AS teacher_name
+          FROM writing_flow.source_record WHERE cardinality(teacher_names)>0
+          ORDER BY teacher_name`),
+      ]);
+      return { classes: classes.rows, teachers: teachers.rows.map(row => row.teacher_name) };
+    },
+
+    async dailyStats({ classCode = null, teacherName = null, taskType = null,
+      dateFrom = null, dateTo = null } = {}) {
+      const assignments = await teacherAssignmentsForDatabase();
+      const result = await pool.query(`WITH ${assignments}
+        SELECT (deliver.completed_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date AS day,
+          count(DISTINCT p.pair_id)::integer AS completed_count
+        FROM writing_flow.pair AS p
+        JOIN writing_flow.stage_result AS deliver
+          ON deliver.pair_id=p.pair_id AND deliver.stage_key='deliver'
+         AND deliver.status='succeeded' AND deliver.completed_at IS NOT NULL
+        LEFT JOIN writing_flow.source_record AS source ON source.source_id=p.source_id
+        LEFT JOIN teacher_assignments AS teachers USING (class_code)
+        WHERE p.status='delivered' AND p.skipped_at IS NULL
+          AND ($1::text IS NULL OR p.class_code=$1)
+          AND ($2::text IS NULL OR $2=ANY(coalesce(nullif(source.teacher_names,ARRAY[]::text[]),
+            teachers.teacher_names,ARRAY[]::text[])))
+          AND ($3::text IS NULL OR p.task_type=$3)
+          AND ($4::date IS NULL OR (deliver.completed_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date >= $4)
+          AND ($5::date IS NULL OR (deliver.completed_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date <= $5)
+        GROUP BY day ORDER BY day`, [classCode, teacherName, taskType, dateFrom, dateTo]);
+      return result.rows;
     },
 
     async listPairs({ classCode = null, teacherName = null, stageKey = null,
-      stageStatus = null, view = null, limit = 50, offset = 0,
+      stageStatus = null, view = null, includeCompleted = false, taskType = null,
+      search = null, dateFrom = null, dateTo = null, limit = 50, offset = 0,
       cursorAt = null, cursorId = null } = {}) {
       const assignments = await teacherAssignmentsForDatabase();
+      const searchDocId = documentIdFromSearch(search);
       const result = await pool.query(`
         WITH ${assignments}
         SELECT p.pair_id, p.class_code, p.source_app_id, p.source_table_id,
                p.source_record_id, p.homework_file_id,
                p.source_link_index, p.essay_slot, p.task_type, p.status,
-               p.source_type,p.created_at,p.updated_at,p.finished_at,p.skipped_at,
+               p.source_type,p.created_at,p.updated_at,
+               coalesce(p.finished_at,deliver.completed_at) AS finished_at,p.skipped_at,
                p.skipped_by,p.skip_reason,
                coalesce(s.display_name,'') AS display_name,
                coalesce(s.student_name,'') AS student_name,
@@ -254,12 +489,19 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
                  CASE WHEN p.status='delivered' THEN 'deliver' ELSE 'intake' END) AS stage_key,
                coalesce(current_stage.stage_status,
                  CASE WHEN p.status='delivered' THEN 'succeeded' ELSE 'pending' END) AS stage_status,
-               coalesce(current_stage.attempt_count,0) AS attempt_count
+               coalesce(current_stage.attempt_count,0) AS attempt_count,
+               current_stage.error_code AS last_error_code,p.source_ciphertext,
+               EXISTS (SELECT 1 FROM writing_flow.stage_result AS graded
+                 WHERE graded.pair_id=p.pair_id AND graded.stage_key IN ('main','render')
+                   AND graded.status='succeeded') AS grading_text_available
           FROM writing_flow.pair AS p
           LEFT JOIN teacher_assignments AS t USING (class_code)
           LEFT JOIN writing_flow.source_record AS s ON s.source_id=p.source_id
+          LEFT JOIN writing_flow.class_registry AS registry USING (class_code)
+          LEFT JOIN writing_flow.stage_result AS deliver
+            ON deliver.pair_id=p.pair_id AND deliver.stage_key='deliver'
           LEFT JOIN LATERAL (
-            SELECT s.stage_key, s.status AS stage_status, s.attempt_count
+            SELECT s.stage_key, s.status AS stage_status, s.attempt_count,s.error_code
              FROM writing_flow.stage_result AS s
              WHERE s.pair_id = p.pair_id
                AND s.status IN ('pending','running','needs_review')
@@ -269,6 +511,15 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
          WHERE ($1::text IS NULL OR p.class_code = $1)
            AND ($2::text IS NULL OR $2 = ANY(coalesce(nullif(s.teacher_names,ARRAY[]::text[]),t.teacher_names,ARRAY[]::text[])))
            AND p.status<>'superseded'
+           AND ($7::boolean OR registry.class_status IS DISTINCT FROM 'completed')
+           AND ($8::text IS NULL OR p.task_type=$8)
+           AND ($9::text IS NULL OR p.homework_file_id=$10
+             OR writing_flow.normalize_search(s.student_name)
+               LIKE '%' || writing_flow.normalize_search($9) || '%')
+           AND ($11::date IS NULL OR coalesce(s.source_created_at,p.created_at)
+             >= ($11::date AT TIME ZONE 'Asia/Ho_Chi_Minh'))
+           AND ($12::date IS NULL OR coalesce(s.source_created_at,p.created_at)
+             < (($12::date+1) AT TIME ZONE 'Asia/Ho_Chi_Minh'))
            AND ($4::text IS NULL OR coalesce(current_stage.stage_key,
                  CASE WHEN p.status='delivered' THEN 'deliver' ELSE 'intake' END)=$4)
            AND ($5::text IS NULL OR coalesce(current_stage.stage_status,
@@ -277,11 +528,23 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
              OR ($6::text='delivered' AND p.status='delivered' AND p.skipped_at IS NULL)
              OR ($6::text='unfinished' AND p.status<>'delivered' AND p.skipped_at IS NULL)
              OR ($6::text IS NULL AND p.skipped_at IS NULL))
-           AND ($7::timestamptz IS NULL OR (p.updated_at,p.pair_id)<($7::timestamptz,$8::uuid))
+           AND ($13::timestamptz IS NULL OR (p.updated_at,p.pair_id)<($13::timestamptz,$14::uuid))
          ORDER BY p.updated_at DESC, p.pair_id DESC
-         LIMIT $9 OFFSET $10`, [classCode, teacherName, STAGES, stageKey, stageStatus, view,
+         LIMIT $15 OFFSET $16`, [classCode, teacherName, STAGES, stageKey, stageStatus, view,
+        includeCompleted, taskType, search, searchDocId, dateFrom, dateTo,
         cursorAt, cursorId, limit, offset]);
-      return result.rows;
+      return result.rows.map(row => {
+        let topic = null; let imageUrl = null; let trCcCheck = null;
+        if (key && row.source_ciphertext) {
+          try {
+            const decoded = JSON.parse(open(row.source_ciphertext, key));
+            topic = decoded[1] || null; imageUrl = decoded[2] || null;
+            trCcCheck = typeof decoded[4] === 'boolean' ? decoded[4] : null;
+          } catch { /* Chi tiết vẫn báo lỗi giải mã khi người dùng mở dòng. */ }
+        }
+        const { source_ciphertext: _hidden, ...safe } = row;
+        return { ...safe, topic, image_url: imageUrl, tr_cc_check: trCcCheck };
+      });
     },
 
     // Nhận vào: mã của đúng một cặp đề–bài do quản trị viên chọn trên trang.
@@ -330,8 +593,10 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
       return { pair: found.rows[0], events };
     },
 
-    async listReviews({ limit = 100, offset = 0 } = {}) {
+    async listReviews({ classCode = null, teacherName = null, stageKey = null,
+      search = null, limit = 100, offset = 0 } = {}) {
       const assignments = await teacherAssignmentsForDatabase();
+      const searchDocId = documentIdFromSearch(search);
       const result = await pool.query(`
         WITH ${assignments}
         SELECT r.review_id, r.pair_id, r.stage_key, r.cycle_no, r.status,
@@ -340,15 +605,28 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
                p.source_table_id, p.source_record_id,
                p.homework_file_id, p.source_link_index, p.essay_slot,
                p.task_type,
-               coalesce(t.teacher_names,ARRAY[]::text[]) AS teacher_names
+               coalesce(nullif(source.teacher_names,ARRAY[]::text[]),
+                 t.teacher_names,ARRAY[]::text[]) AS teacher_names,
+               source.student_name,source.classroom_url,source.file_url,source.source_status
           FROM writing_flow.manual_review AS r
           JOIN writing_flow.pair AS p ON p.pair_id = r.pair_id
           LEFT JOIN teacher_assignments AS t USING (class_code)
+          LEFT JOIN writing_flow.source_record AS source ON source.source_id=p.source_id
+          LEFT JOIN writing_flow.class_registry AS registry USING (class_code)
           JOIN writing_flow.stage_result AS s
             ON s.pair_id = r.pair_id AND s.stage_key = r.stage_key
          WHERE r.status <> 'resolved'
+           AND registry.class_status IS DISTINCT FROM 'completed'
+           AND ($1::text IS NULL OR p.class_code=$1)
+           AND ($2::text IS NULL OR $2=ANY(coalesce(nullif(source.teacher_names,ARRAY[]::text[]),
+             t.teacher_names,ARRAY[]::text[])))
+           AND ($3::text IS NULL OR r.stage_key=$3)
+           AND ($4::text IS NULL OR p.homework_file_id=$5
+             OR writing_flow.normalize_search(source.student_name)
+               LIKE '%' || writing_flow.normalize_search($4) || '%')
          ORDER BY r.opened_at, r.review_id
-         LIMIT $1 OFFSET $2`, [limit, offset]);
+         LIMIT $6 OFFSET $7`, [classCode, teacherName, stageKey, search, searchDocId,
+        limit, offset]);
       return result.rows;
     },
 

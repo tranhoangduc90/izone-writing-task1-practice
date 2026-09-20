@@ -1,10 +1,43 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { classCodeFromName, createWritingFlowService,
-  mergeClassCoverage } from '../src/writing-flow-service.js';
+import { classCodeFromName, createWritingFlowService, documentIdFromSearch,
+  mappingClassState, markMappingConflicts, mergeClassCoverage } from '../src/writing-flow-service.js';
 
 const reviewId = '11111111-1111-4111-8111-111111111111';
 const requestId = '22222222-2222-4222-8222-222222222222';
+
+test('trạng thái lớp chỉ active khi mapping đã duyệt và lớp đang học', () => {
+  const base = { erp_course_class_id: 1, erp_class_name_snapshot: 'IELTS IC2269',
+    classroom_course_id: 'course-1', classroom_course_name_snapshot: 'IELTS IC2269',
+    mapping_status: 'approved', class_statuses: ['on_going'], teacher_names: ['GV thử'] };
+  assert.equal(mappingClassState(base).operational_state, 'active');
+  assert.equal(mappingClassState({ ...base, class_statuses: ['completed'] }).operational_state,
+    'completed');
+  assert.equal(mappingClassState({ ...base, mapping_status: 'pending_review' }).operational_state,
+    'pending_review');
+  assert.equal(mappingClassState({ ...base, class_statuses: [] }).operational_state,
+    'status_review');
+  assert.equal(mappingClassState({ ...base, erp_class_name_snapshot: 'IC2288' }).operational_state,
+    'excluded');
+});
+
+test('mapping trùng mã lớp hoặc Classroom bị dừng để kiểm tra', () => {
+  const rows = markMappingConflicts([
+    { class_code: 'IC2200', classroom_course_id: 'course-a', operational_state: 'active', enabled: true },
+    { class_code: 'IC2200', classroom_course_id: 'course-b', operational_state: 'active', enabled: true },
+    { class_code: 'IC2201', classroom_course_id: 'course-c', operational_state: 'active', enabled: true },
+    { class_code: 'IC2202', classroom_course_id: 'course-c', operational_state: 'active', enabled: true },
+  ]);
+  assert.equal(rows.every(row => row.operational_state === 'mapping_conflict'), true);
+  assert.equal(rows.every(row => row.enabled === false), true);
+});
+
+test('tìm kiếm nhận URL Docs, Docs ID và không đoán chuỗi ngắn', () => {
+  const id = '1BIb2pqpoe-j_5GzLfY5UXzdJzQ1JWQQVKU6FjRcyORs';
+  assert.equal(documentIdFromSearch(`https://docs.google.com/document/d/${id}/edit`), id);
+  assert.equal(documentIdFromSearch(id), id);
+  assert.equal(documentIdFromSearch('Nguyễn Văn A'), null);
+});
 
 // Cơ sở dữ liệu giả chỉ mô phỏng khóa và transaction để kiểm một lần bấm không phát hai việc.
 function fakePool(attemptCount = 3) {
@@ -130,9 +163,10 @@ test('dịch vụ chỉ đọc sổ lớp của hệ thống mới và mốc qu�
   const calls = [];
   const pool = { query: async (sql, values = []) => {
     calls.push({ sql, values });
-    if (sql.includes("'registry:' || class_code")) return { rows: [{
-      source_key: 'class:1', class_name: 'IELTS IC2269',
-      erp_source_found: true, classroom_source_found: true,
+    if (sql.includes('FROM mapping.classroom_course_mapping AS course')) return { rows: [{
+      erp_course_class_id: 'class:1', erp_class_name_snapshot: 'IELTS IC2269',
+      classroom_course_id: 'course-1', classroom_course_name_snapshot: 'IELTS IC2269',
+      mapping_status: 'approved', class_statuses: ['on_going'], teacher_names: [],
     }] };
     return { rows: [{ class_code: 'IC2269', last_scanned_at: '2026-09-19T08:00:00Z' }] };
   } };
@@ -140,41 +174,42 @@ test('dịch vụ chỉ đọc sổ lớp của hệ thống mới và mốc qu�
   assert.equal(rows[0].status, 'covered');
   assert.equal(calls.length, 2);
   assert.deepEqual(calls[1].values, []);
-  assert.equal(calls.every(call => call.sql.includes('writing_flow.class_registry')), true);
+  assert.equal(calls[0].sql.includes('mapping.classroom_course_mapping'), true);
+  assert.equal(calls[1].sql.includes('writing_flow.class_registry'), true);
+  assert.equal(calls.every(call => !call.sql.includes('lark_export_teacher_assignments')), true);
   assert.equal(calls.every(call => !/student|essay|ciphertext|token/iu.test(call.sql)), true);
 });
 
-test('thống kê giảng viên chỉ đọc bản sao phân công và lọc ngay trong database', async () => {
+test('thống kê giảng viên đọc trực tiếp database mapping và lọc ngay trong database', async () => {
   const calls = [];
   const pool = { query: async (sql, values = []) => {
     calls.push({ sql, values });
-    if (sql.includes('has_table_privilege')) return { rows: [{ can_read: true }] };
     return { rows: [] };
   } };
   const service = createWritingFlowService({ pool });
   await service.summary();
   await service.listPairs({ classCode: 'IC2200', teacherName: 'Giảng viên thử',
     limit: 50, offset: 10 });
-  assert.equal(calls.length, 3);
-  assert.equal(calls.slice(1).every(call => call.sql.includes('mapping.lark_export_teacher_assignments')), true);
-  assert.equal(calls.slice(1).every(call => /Trạng thái tài khoản'='active/u.test(call.sql)), true);
+  assert.equal(calls.length, 2);
+  assert.equal(calls.every(call => call.sql.includes('mapping.classroom_course_mapping')), true);
+  assert.equal(calls.every(call => call.sql.includes("account.status='active'")), true);
+  assert.equal(calls.every(call => !call.sql.includes('lark_export_teacher_assignments')), true);
   assert.equal(calls.every(call => !/\b(?:INSERT|UPDATE|DELETE)\b/iu.test(call.sql)), true);
-  assert.deepEqual(calls[2].values, ['IC2200', 'Giảng viên thử',
+  assert.deepEqual(calls[1].values, ['IC2200', 'Giảng viên thử',
     ['intake', 'precheck', 'main', 'critic', 'arbiter', 'render', 'deliver'],
-    null, null, null, null, null, 50, 10]);
+    null, null, null, false, null, null, null, null, null, null, null, 50, 10]);
 });
 
-test('database thiếu view phân công vẫn trả dashboard và không đoán tên giảng viên', async () => {
+test('dashboard không còn phụ thuộc view phân công Lark', async () => {
   const calls = [];
   const pool = { query: async (sql, values = []) => {
     calls.push({ sql, values });
-    if (sql.includes('has_table_privilege')) return { rows: [{ can_read: false }] };
     return { rows: [] };
   } };
   const service = createWritingFlowService({ pool });
   await service.summary();
   await service.listPairs({ teacherName: 'Không có trong staging' });
-  assert.equal(calls.length, 3);
-  assert.equal(calls.slice(1).every(call => call.sql.includes('WHERE false')), true);
-  assert.equal(calls.slice(1).every(call => !call.sql.includes('lark_export_teacher_assignments')), true);
+  assert.equal(calls.length, 2);
+  assert.equal(calls.every(call => call.sql.includes('mapping.reviewer_class_access')), true);
+  assert.equal(calls.every(call => !call.sql.includes('lark_export_teacher_assignments')), true);
 });

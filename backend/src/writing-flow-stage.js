@@ -42,8 +42,11 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
         SELECT pair_id, submission_revision, status, source_ciphertext,
                source_app_id, source_table_id, source_record_id,
                homework_file_id, source_link_index,
-               essay_slot, class_code, document_kind, source_modified_at
-          FROM writing_flow.pair WHERE pair_id = $1 FOR UPDATE`, [pairId]);
+               essay_slot, class_code, document_kind, source_modified_at,
+               source_type, source_id,
+               (SELECT s.display_name FROM writing_flow.source_record AS s
+                 WHERE s.source_id=p.source_id) AS source_display_name
+          FROM writing_flow.pair AS p WHERE pair_id = $1 FOR UPDATE`, [pairId]);
       if (pairResult.rowCount !== 1) throw new ApiError(404, 'PAIR_NOT_FOUND', 'Không tìm thấy bài chấm.');
       const pair = pairResult.rows[0];
       if (pair.submission_revision !== revision) {
@@ -209,6 +212,9 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
             essaySlot: pair.essay_slot,
             classCode: pair.class_code,
             documentKind: pair.document_kind,
+            sourceType: pair.source_type || 'lark_homework',
+            sourceId: pair.source_id || null,
+            sourceDisplayName: pair.source_display_name || null,
             sourceModifiedAt: new Date(pair.source_modified_at).toISOString() };
         })(),
         previous: Object.fromEntries(results.rows.map(row => [row.stage_key, decode(row.result_ciphertext, key)])),

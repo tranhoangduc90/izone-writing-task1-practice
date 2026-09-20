@@ -21,6 +21,8 @@ test('bàn giao bước chấm giữ đúng file, link và ô homework', async (
           source_record_id: 'record-demo', homework_file_id: 'doc-demo',
           source_link_index: 2, essay_slot: 4, class_code: 'IC2200',
           document_kind: 'google_docs', source_modified_at: '2026-09-17T08:00:00Z',
+          source_type: 'google_classroom', source_id: 'source-demo',
+          source_display_name: 'Writing homework 4',
         }],
       };
       if (sql.includes('SELECT handoff_id, from_stage')) return {
@@ -55,6 +57,8 @@ test('bàn giao bước chấm giữ đúng file, link và ô homework', async (
     recordId: 'record-demo', homeworkFileId: 'doc-demo',
     sourceLinkIndex: 2, essaySlot: 4, classCode: 'IC2200',
     documentKind: 'google_docs',
+    sourceType: 'google_classroom', sourceId: 'source-demo',
+    sourceDisplayName: 'Writing homework 4',
     sourceModifiedAt: '2026-09-17T08:00:00.000Z',
   });
   assert.deepEqual(result.previous.intake, { operationKey: 'scan-demo' });

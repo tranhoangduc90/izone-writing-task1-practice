@@ -253,7 +253,14 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
 
     async claimDueSources({ sourceTypes = ['manual', 'google_classroom'], limit = 50 } = {}) {
       return withTransaction(pool, async client => {
-        const due = await client.query(`SELECT s.source_id
+        const due = await client.query(`WITH capacity AS (
+          SELECT greatest(0,100-count(*))::int AS available
+          FROM writing_flow.source_record queued
+          WHERE queued.source_type = ANY($1::text[])
+            AND queued.dispatch_status='sent'
+            AND queued.last_dispatched_at > now()-interval '6 hours'
+        )
+        SELECT s.source_id
           FROM writing_flow.source_record s
           WHERE s.source_type = ANY($1::text[])
             AND s.dispatch_status IN ('pending','sent')
@@ -267,7 +274,8 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
                 AND r.source_app_id=s.source_app_id
                 AND r.source_table_id=s.source_table_id)
           ORDER BY s.next_dispatch_at NULLS FIRST,s.created_at,s.source_id
-          FOR UPDATE OF s SKIP LOCKED LIMIT $2`, [sourceTypes, limit]);
+          FOR UPDATE OF s SKIP LOCKED
+          LIMIT least($2,(SELECT available FROM capacity))`, [sourceTypes, limit]);
         if (!due.rowCount) return [];
         const ids = due.rows.map(row => row.source_id);
         const result = await client.query(`UPDATE writing_flow.source_record

@@ -88,7 +88,9 @@ test('hàng nguồn nhận 50 file mặc định, khóa SKIP LOCKED và không c
   const rows = await createWritingFlowOperations({ pool }).claimDueSources();
   assert.equal(rows.length, 20);
   assert.equal(observed[0].params[1], 50);
-  assert.match(observed[0].sql, /FOR UPDATE OF s SKIP LOCKED LIMIT \$2/u);
+  assert.match(observed[0].sql, /greatest\(0,100-count\(\*\)\)/u);
+  assert.match(observed[0].sql,
+    /FOR UPDATE OF s SKIP LOCKED[\s\S]*LIMIT least\(\$2,\(SELECT available FROM capacity\)\)/u);
   assert.match(observed[0].sql, /NOT EXISTS[\s\S]*scan_run[\s\S]*source_table_id=s\.source_table_id/u);
   assert.match(observed[0].sql, /last_dispatched_at[\s\S]*interval '6 hours'/u);
   assert.doesNotMatch(observed[0].sql, /scan_item/u);

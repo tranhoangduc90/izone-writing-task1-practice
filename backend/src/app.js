@@ -257,10 +257,10 @@ export function writingWriteRateKey(req) {
 export function writingWriteRateLimit(req) {
   return writingRateIdentity(req) ? 240 : 2_000;
 }
-function cors(config){return(req,res,next)=>{const origin=req.get('origin');if(origin&&!config.allowedOrigins.has(origin))return res.status(403).json({ok:false,error:'ORIGIN_NOT_ALLOWED'});if(origin){res.set('Access-Control-Allow-Origin',origin);res.set('Vary','Origin');}res.set('Access-Control-Allow-Methods','GET, POST, PUT, OPTIONS');res.set('Access-Control-Allow-Headers','Authorization, Content-Type, If-None-Match, If-Match');res.set('Access-Control-Expose-Headers','ETag, Retry-After, X-Writing-Request-Id');res.set('Cache-Control','no-store');return req.method==='OPTIONS'?res.status(204).end():next();};}
+function cors(config){return(req,res,next)=>{const origin=req.get('origin');if(origin&&!config.allowedOrigins.has(origin))return res.status(403).json({ok:false,error:'ORIGIN_NOT_ALLOWED'});if(origin){res.set('Access-Control-Allow-Origin',origin);res.set('Vary','Origin');}res.set('Access-Control-Allow-Credentials','true');res.set('Access-Control-Allow-Methods','GET, POST, PUT, DELETE, OPTIONS');res.set('Access-Control-Allow-Headers','Authorization, Content-Type, If-None-Match, If-Match, x-izone-csrf');res.set('Access-Control-Expose-Headers','ETag, Retry-After, X-Writing-Request-Id');res.set('Cache-Control','no-store');return req.method==='OPTIONS'?res.status(204).end():next();};}
 function csvCell(value){const text=String(value??'');return /[",\r\n]/.test(text)?`"${text.replaceAll('"','""')}"`:text;}
 
-export function createApp({config,pool,service,lessonService=service,provisionalService=null,lmsResultService=null,teacherCommentService=null,teacherClassAccess=null,writingFlowService=null,writingFlowStage=null,writingFlowHandoff=null,writingFlowAiCall=null,writingFlowScan=null,adminAuth=(_q,r)=>r.status(503).json({ok:false,error:'ADMIN_AUTH_NOT_CONFIGURED'})}){
+export function createApp({config,pool,service,lessonService=service,provisionalService=null,lmsResultService=null,teacherCommentService=null,teacherClassAccess=null,writingFlowService=null,writingFlowStage=null,writingFlowHandoff=null,writingFlowAiCall=null,writingFlowScan=null,teacherAuth=null,adminAuth=(_q,r)=>r.status(503).json({ok:false,error:'ADMIN_AUTH_NOT_CONFIGURED'})}){
  const app=express();app.disable('x-powered-by');app.set('trust proxy',config.trustProxyHops);
  // Ghi mã truy vết trước khi CORS hoặc giới hạn tốc độ chặn yêu cầu Writing.
  app.use('/api/v1/internal/writing-flow',writingFlowRequestLog());
@@ -280,6 +280,11 @@ export function createApp({config,pool,service,lessonService=service,provisional
  app.use('/api/v1/internal/writing-flow',express.json({limit:'512kb',strict:true}));
  app.use(express.json({limit:'96kb',strict:true}));
  app.get('/health',(_q,r)=>r.json({ok:true}));app.get('/ready',asyncRoute(async(_q,r)=>{await pool.query('SELECT 1');r.json({ok:true});}));
+ const authLoginLimiter=rateLimit({windowMs:10*60_000,limit:20,standardHeaders:'draft-8',legacyHeaders:false,message:{ok:false,error:'RATE_LIMITED'}});
+ const authReady=(_q,r)=>r.status(503).json({ok:false,error:'ADMIN_AUTH_NOT_CONFIGURED'});
+ app.post('/api/v1/auth/session',authLoginLimiter,asyncRoute(teacherAuth?.login||authReady));
+ app.get('/api/v1/auth/session',adminAuth,asyncRoute(async(q,r)=>r.json({ok:true,reviewer:q.reviewer})));
+ app.delete('/api/v1/auth/session',adminAuth,asyncRoute(teacherAuth?.logout||authReady));
  // Hai lớp: mỗi phiên có quota riêng, đồng thời toàn bộ request ghi từ một IP vẫn có trần chống lạm dụng.
  const writes=[
   rateLimit({windowMs:60_000,limit:2_000,keyGenerator:q=>ipKeyGenerator(q.ip),standardHeaders:'draft-8',legacyHeaders:false,message:{ok:false,error:'RATE_LIMITED'}}),

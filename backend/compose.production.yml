@@ -1,11 +1,19 @@
 services:
   writing-task1-practice-api:
     build: .
+    image: izone-writing-practice-api:20260920.1-teacher-session
     container_name: writing-task1-practice-api
     restart: unless-stopped
     init: true
     stop_grace_period: 15s
     env_file: /opt/writing-task1-practice-api/.env
+    environment:
+      TEACHER_SESSION_IDLE_DAYS: "90"
+      TEACHER_SESSION_ABSOLUTE_DAYS: "365"
+      TEACHER_SESSION_COOKIE_PATH: /writing-api
+      TEACHER_SESSION_COOKIE_SECURE: "true"
+      TEACHER_SESSION_COOKIE_PARTITIONED: "true"
+      TEACHER_SESSION_COOKIE_SAME_SITE: None
     ports:
       - "127.0.0.1:8790:8790"
     networks: [mapping-api-net, n8n-net]

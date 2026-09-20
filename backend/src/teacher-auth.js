@@ -1,36 +1,197 @@
+import crypto from 'node:crypto';
 import { OAuth2Client } from 'google-auth-library';
 
-// Nhận Google ID token của giảng viên, xác minh chữ ký/audience rồi kiểm quyền
-// trong reviewer_account. Lỗi xác thực chỉ trả trạng thái chung, không lộ token.
-export function createTeacherAuthMiddleware({ config, pool, verifyGoogleToken }) {
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+function readCookie(req, name) {
+  const header = String(req.get('cookie') || '');
+  for (const part of header.split(';')) {
+    const separator = part.indexOf('=');
+    if (separator < 0 || part.slice(0, separator).trim() !== name) continue;
+    try { return decodeURIComponent(part.slice(separator + 1).trim()); } catch { return ''; }
+  }
+  return '';
+}
+
+function settings(config) {
+  return {
+    cookieName: config.teacherSessionCookieName || 'izone_teacher_session',
+    cookiePath: config.teacherSessionCookiePath || '/writing-api',
+    cookieSecure: config.teacherSessionCookieSecure ?? config.nodeEnv === 'production',
+    cookiePartitioned: config.teacherSessionCookiePartitioned ?? config.nodeEnv === 'production',
+    cookieSameSite: config.teacherSessionCookieSameSite || (config.nodeEnv === 'production' ? 'None' : 'Lax'),
+    idleDays: config.teacherSessionIdleDays || 90,
+    absoluteDays: config.teacherSessionAbsoluteDays || 365
+  };
+}
+
+function cookie(options, value, maxAgeSeconds) {
+  const parts = [
+    `${options.cookieName}=${encodeURIComponent(value)}`,
+    `Path=${options.cookiePath}`,
+    'HttpOnly',
+    `SameSite=${options.cookieSameSite}`,
+    `Max-Age=${Math.max(0, Math.floor(maxAgeSeconds))}`
+  ];
+  if (options.cookieSecure) parts.push('Secure');
+  if (options.cookiePartitioned) parts.push('Partitioned');
+  return parts.join('; ');
+}
+
+function hashToken(token) {
+  return crypto.createHash('sha256').update(token).digest();
+}
+
+function reviewer(account, fallbackName = '') {
+  const canManage = account.role === 'admin';
+  return {
+    email: account.email,
+    displayName: account.display_name || fallbackName || account.email,
+    role: account.role,
+    canAccessAllClasses: canManage,
+    canManage
+  };
+}
+
+function rejectUnauthorized(res) {
+  return res.status(401).json({ ok: false, error: 'UNAUTHORIZED' });
+}
+
+function csrfAllowed(req, res, config) {
+  if (SAFE_METHODS.has(req.method)) return true;
+  const origin = req.get('origin') || '';
+  if (req.get('x-izone-csrf') === '1' && config.allowedOrigins.has(origin)) return true;
+  res.status(403).json({ ok: false, error: 'CSRF_REJECTED' });
+  return false;
+}
+
+// Google credential chỉ mở phiên. Các request sau dùng cookie HttpOnly; database chỉ lưu hash.
+export function createTeacherAuthService({ config, pool, verifyGoogleToken }) {
+  const options = settings(config);
   const oauthClient = new OAuth2Client(config.googleClientId);
   const verify = verifyGoogleToken || (async token => {
     const ticket = await oauthClient.verifyIdToken({ idToken: token, audience: config.googleClientId });
     return ticket.getPayload();
   });
-  return async function teacherAuth(req, res, next) {
-    const authorization = req.get('authorization') || '';
-    const token = authorization.startsWith('Bearer ') ? authorization.slice(7).trim() : '';
-    if (!token) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED' });
+
+  async function fromGoogle(token) {
     let payload;
-    try { payload = await verify(token); } catch { return res.status(401).json({ ok: false, error: 'UNAUTHORIZED' }); }
+    try { payload = await verify(token); } catch { return { error: 'unauthorized' }; }
     const email = String(payload?.email || '').trim().toLowerCase();
     const subject = String(payload?.sub || '').trim();
-    if (!email || !subject || payload?.email_verified !== true) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED' });
-    const account = await pool.query(`UPDATE mapping.reviewer_account
-      SET google_subject=COALESCE(google_subject,$2),last_login_at=now(),updated_at=now()
-      WHERE email=$1 AND status='active' AND (google_subject IS NULL OR google_subject=$2)
-      RETURNING email,role,can_access_all_classes`, [email, subject]);
-    if (account.rowCount !== 1 || !['admin', 'teacher'].includes(account.rows[0].role)) return res.status(403).json({ ok: false, error: 'ACCESS_DENIED' });
-    // Quyền toàn hệ thống của dashboard Writing chỉ dựa trên role=admin.
-    // Cờ cũ can_access_all_classes không được dùng để vượt phạm vi lớp của giảng viên.
-    const canManage = account.rows[0].role === 'admin';
-    req.reviewer = {
-      email: account.rows[0].email,
-      role: account.rows[0].role,
-      canAccessAllClasses: canManage,
-      canManage
-    };
+    if (!email || !subject || payload?.email_verified !== true) return { error: 'unauthorized' };
+    const account = await pool.query(
+      `UPDATE mapping.reviewer_account
+       SET google_subject = COALESCE(google_subject, $2), last_login_at = now(), updated_at = now()
+       WHERE email = $1 AND status = 'active' AND (google_subject IS NULL OR google_subject = $2)
+       RETURNING email, display_name, role, can_access_all_classes`,
+      [email, subject]
+    );
+    if (account.rowCount !== 1 || !['admin', 'teacher'].includes(account.rows[0].role)) return { error: 'forbidden' };
+    return { reviewer: reviewer(account.rows[0], payload.name), subject };
+  }
+
+  async function fromSession(rawToken) {
+    if (!/^[A-Za-z0-9_-]{43}$/.test(rawToken)) return null;
+    const result = await pool.query(
+      `UPDATE mapping.reviewer_session AS session
+       SET last_seen_at = now(),
+           idle_expires_at = LEAST(session.absolute_expires_at, now() + ($2::int * interval '1 day'))
+       FROM mapping.reviewer_account AS account
+       WHERE session.token_hash = $1
+         AND session.reviewer_email = account.email
+         AND session.google_subject = account.google_subject
+         AND session.revoked_at IS NULL
+         AND session.idle_expires_at > now()
+         AND session.absolute_expires_at > now()
+         AND account.status = 'active'
+         AND account.role IN ('admin', 'teacher')
+       RETURNING account.email, account.display_name, account.role,
+                 account.can_access_all_classes, session.idle_expires_at, session.absolute_expires_at`,
+      [hashToken(rawToken), options.idleDays]
+    );
+    if (result.rowCount !== 1) return null;
+    return { reviewer: reviewer(result.rows[0]), row: result.rows[0] };
+  }
+
+  function refreshCookie(res, rawToken, row) {
+    const idleExpiry = new Date(row.idle_expires_at).getTime();
+    const absoluteExpiry = new Date(row.absolute_expires_at).getTime();
+    const fallbackMs = options.idleDays * 86_400_000;
+    const remainingMs = Math.min(
+      Number.isFinite(idleExpiry) ? idleExpiry - Date.now() : fallbackMs,
+      Number.isFinite(absoluteExpiry) ? absoluteExpiry - Date.now() : fallbackMs
+    );
+    res.append('Set-Cookie', cookie(options, rawToken, Math.max(0, remainingMs / 1000)));
+  }
+
+  async function authenticate(req, res, next) {
+    const rawSession = readCookie(req, options.cookieName);
+    if (rawSession) {
+      const session = await fromSession(rawSession);
+      if (session) {
+        req.reviewer = session.reviewer;
+        req.authSource = 'session';
+        req.teacherSessionToken = rawSession;
+        if (req.method !== 'DELETE') refreshCookie(res, rawSession, session.row);
+        if (!csrfAllowed(req, res, config)) return undefined;
+        return next();
+      }
+    }
+
+    // Tương thích tạm với dashboard đã mở trước khi frontend cookie được phát hành.
+    const authorization = req.get('authorization') || '';
+    const bearer = authorization.startsWith('Bearer ') ? authorization.slice(7).trim() : '';
+    if (!bearer) {
+      if (rawSession) res.append('Set-Cookie', cookie(options, '', 0));
+      return rejectUnauthorized(res);
+    }
+    const account = await fromGoogle(bearer);
+    if (account.error === 'forbidden') return res.status(403).json({ ok: false, error: 'ACCESS_DENIED' });
+    if (account.error) return rejectUnauthorized(res);
+    req.reviewer = account.reviewer;
+    req.authSource = 'google_bearer';
     return next();
-  };
+  }
+
+  async function login(req, res) {
+    const credential = typeof req.body?.credential === 'string' ? req.body.credential.trim() : '';
+    if (credential.length < 20 || credential.length > 8192) return rejectUnauthorized(res);
+    const account = await fromGoogle(credential);
+    if (account.error === 'forbidden') return res.status(403).json({ ok: false, error: 'ACCESS_DENIED' });
+    if (account.error) return rejectUnauthorized(res);
+
+    const rawSession = crypto.randomBytes(32).toString('base64url');
+    const inserted = await pool.query(
+      `INSERT INTO mapping.reviewer_session (
+         token_hash, reviewer_email, google_subject, idle_expires_at, absolute_expires_at
+       ) VALUES (
+         $1, $2, $3, now() + ($4::int * interval '1 day'), now() + ($5::int * interval '1 day')
+       )
+       RETURNING idle_expires_at, absolute_expires_at`,
+      [hashToken(rawSession), account.reviewer.email, account.subject, options.idleDays, options.absoluteDays]
+    );
+    refreshCookie(res, rawSession, inserted.rows[0] || {});
+    return res.status(201).json({ ok: true, reviewer: account.reviewer });
+  }
+
+  async function logout(req, res) {
+    const rawSession = req.teacherSessionToken || readCookie(req, options.cookieName);
+    if (rawSession) {
+      await pool.query(
+        `UPDATE mapping.reviewer_session
+         SET revoked_at = COALESCE(revoked_at, now()), revoked_reason = COALESCE(revoked_reason, 'logout')
+         WHERE token_hash = $1`,
+        [hashToken(rawSession)]
+      );
+    }
+    res.append('Set-Cookie', cookie(options, '', 0));
+    return res.json({ ok: true });
+  }
+
+  return { authenticate, login, logout };
+}
+
+export function createTeacherAuthMiddleware(dependencies) {
+  return createTeacherAuthService(dependencies).authenticate;
 }

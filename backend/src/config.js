@@ -9,12 +9,37 @@ const schema = z.object({
   TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(3).default(1),
   INTERNAL_API_TOKEN: z.string().min(32),
   GOOGLE_CLIENT_ID: z.string().trim().min(1),
+  TEACHER_SESSION_IDLE_DAYS: z.coerce.number().int().min(1).max(180).default(90),
+  TEACHER_SESSION_ABSOLUTE_DAYS: z.coerce.number().int().min(1).max(730).default(365),
+  TEACHER_SESSION_COOKIE_NAME: z.string().regex(/^[A-Za-z0-9_]+$/).default('izone_teacher_session'),
+  TEACHER_SESSION_COOKIE_PATH: z.string().regex(/^\/[A-Za-z0-9_/-]*$/).default('/writing-api'),
+  TEACHER_SESSION_COOKIE_SECURE: z.enum(['true', 'false']).optional(),
+  TEACHER_SESSION_COOKIE_PARTITIONED: z.enum(['true', 'false']).optional(),
+  TEACHER_SESSION_COOKIE_SAME_SITE: z.enum(['lax', 'strict', 'none']).optional(),
   PROVISIONAL_STUDENT_PIN_PEPPER: z.string().min(32),
   WRITING_FLOW_ENCRYPTION_KEY: z.string().regex(/^[a-fA-F0-9]{64}$/).optional()
+}).superRefine((value, context) => {
+  if (value.TEACHER_SESSION_ABSOLUTE_DAYS < value.TEACHER_SESSION_IDLE_DAYS) {
+    context.addIssue({ code: 'custom', path: ['TEACHER_SESSION_ABSOLUTE_DAYS'], message: 'Hạn tuyệt đối phải lớn hơn hoặc bằng hạn nhàn rỗi.' });
+  }
 });
 
 export function loadConfig(env = process.env) {
   const value = schema.parse(env);
+  const teacherSessionCookieSecure = value.TEACHER_SESSION_COOKIE_SECURE
+    ? value.TEACHER_SESSION_COOKIE_SECURE === 'true'
+    : value.NODE_ENV === 'production';
+  const teacherSessionCookieSameSite = value.TEACHER_SESSION_COOKIE_SAME_SITE
+    || (teacherSessionCookieSecure ? 'none' : 'lax');
+  const teacherSessionCookiePartitioned = value.TEACHER_SESSION_COOKIE_PARTITIONED
+    ? value.TEACHER_SESSION_COOKIE_PARTITIONED === 'true'
+    : value.NODE_ENV === 'production';
+  if (teacherSessionCookieSameSite === 'none' && !teacherSessionCookieSecure) {
+    throw new Error('Cookie SameSite=None bắt buộc bật Secure.');
+  }
+  if (teacherSessionCookiePartitioned && !teacherSessionCookieSecure) {
+    throw new Error('Cookie Partitioned bắt buộc bật Secure.');
+  }
   return {
     nodeEnv: value.NODE_ENV,
     port: value.PORT,
@@ -24,6 +49,13 @@ export function loadConfig(env = process.env) {
     trustProxyHops: value.TRUST_PROXY_HOPS,
     internalApiToken: value.INTERNAL_API_TOKEN,
     googleClientId: value.GOOGLE_CLIENT_ID,
+    teacherSessionIdleDays: value.TEACHER_SESSION_IDLE_DAYS,
+    teacherSessionAbsoluteDays: value.TEACHER_SESSION_ABSOLUTE_DAYS,
+    teacherSessionCookieName: value.TEACHER_SESSION_COOKIE_NAME,
+    teacherSessionCookiePath: value.TEACHER_SESSION_COOKIE_PATH,
+    teacherSessionCookieSecure,
+    teacherSessionCookiePartitioned,
+    teacherSessionCookieSameSite: teacherSessionCookieSameSite[0].toUpperCase() + teacherSessionCookieSameSite.slice(1),
     provisionalStudentPinPepper: value.PROVISIONAL_STUDENT_PIN_PEPPER,
     writingFlowEncryptionKey: value.WRITING_FLOW_ENCRYPTION_KEY || null
   };

@@ -174,7 +174,8 @@ test('bước sau retry nhận đúng hash mới một lần khi khóa đầu v�
       };
       if (sql.includes('SELECT pair_id, stage_key, status')) return {
         rowCount: 1, rows: [{ pair_id: pairId, stage_key: 'render', status: 'pending',
-          cycle_no: 2, attempt_count: 0, input_sha256: null, error_code: null }],
+          cycle_no: 2, attempt_count: 0, input_sha256: 'a'.repeat(64),
+          error_code: 'UPSTREAM_RETRY_REQUESTED' }],
       };
       if (sql.includes('SET input_sha256=$3')) {
         updates.push(params);

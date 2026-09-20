@@ -131,16 +131,16 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
         && stage.status === 'pending'
         && Number(stage.attempt_count) === 0
         && stage.error_code === 'REPUBLISH_REQUESTED';
-      // Retry từ một bước trước xóa khóa đầu vào của các bước sau. Lần bàn giao
-      // mới đầu tiên được phép nhận hash mới; từ lượt thứ hai trở đi vẫn khóa chặt.
+      // Retry từ một bước trước đánh dấu các bước sau đang chờ đầu vào mới. Lần
+      // bàn giao mới đầu tiên được phép thay hash; từ lượt thứ hai vẫn khóa chặt.
       const acceptsResetInput = handoff.from_stage !== 'retry'
         && stage.status === 'pending'
         && Number(stage.attempt_count) === 0
-        && !stage.input_sha256;
+        && stage.error_code === 'UPSTREAM_RETRY_REQUESTED';
       if ((acceptsRepublishedRender || acceptsResetInput)
         && stage.input_sha256 !== handoff.source_result_sha256) {
         await client.query(`UPDATE writing_flow.stage_result
-          SET input_sha256=$3,updated_at=now()
+          SET input_sha256=$3,error_code=NULL,updated_at=now()
           WHERE pair_id=$1 AND stage_key=$2`,
         [pairId, stageKey, handoff.source_result_sha256]);
         stage = { ...stage, input_sha256: handoff.source_result_sha256 };

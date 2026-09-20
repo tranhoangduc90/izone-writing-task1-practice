@@ -177,7 +177,8 @@ test('retry không nhận intake, không nhận bài đã bỏ qua và làm mớ
   assert.equal(reset.params[2], 4);
   assert.equal(reset.params[3], 'critic');
   assert.deepEqual(reset.params[1], STAGES);
-  assert.match(reset.sql, /input_sha256=CASE WHEN stage_key=\$4 THEN input_sha256 ELSE NULL END/u);
+  assert.match(reset.sql,
+    /error_code=CASE WHEN stage_key=\$4 THEN NULL ELSE 'UPSTREAM_RETRY_REQUESTED' END/u);
   assert.equal(statements.some(item => item.sql.includes("'SUPERSEDED_BY_OPERATOR_RETRY'")), true);
 });
 

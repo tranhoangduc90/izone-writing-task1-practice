@@ -411,8 +411,8 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
           .map(row => ({ stageKey: row.stage_key, status: row.status, cycleNo: row.cycle_no }));
         await client.query(`UPDATE writing_flow.stage_result
           SET status='pending',cycle_no=cycle_no+1,attempt_count=0,result_sha256=NULL,
-              result_ciphertext=NULL,selected_attempt_no=NULL,error_code=NULL,
-              input_sha256=CASE WHEN stage_key=$4 THEN input_sha256 ELSE NULL END,
+              result_ciphertext=NULL,selected_attempt_no=NULL,
+              error_code=CASE WHEN stage_key=$4 THEN NULL ELSE 'UPSTREAM_RETRY_REQUESTED' END,
               n8n_execution_id=NULL,started_at=NULL,lease_expires_at=NULL,
               completed_at=NULL,updated_at=now()
           WHERE pair_id=$1 AND array_position($2::text[],stage_key) >= $3`,

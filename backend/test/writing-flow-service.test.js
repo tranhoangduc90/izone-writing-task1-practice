@@ -234,7 +234,7 @@ test('số đếm dashboard ghi rõ bảng lớp khi pair và source cùng có c
   const calls = [];
   const pool = { query: async (sql, values = []) => {
     calls.push({ sql, values });
-    if (/teacher_assignments AS teachers USING \(class_code\)/u.test(sql)) {
+    if (/USING \(class_code\)/u.test(sql)) {
       const error = new Error('column reference "class_code" is ambiguous');
       error.code = '42702';
       throw error;
@@ -247,6 +247,7 @@ test('số đếm dashboard ghi rõ bảng lớp khi pair và source cùng có c
   const result = await createWritingFlowService({ pool }).dashboardCounts();
   assert.deepEqual(result.support, { source_issues: 0, reviews: 0, technical_errors: 0 });
   assert.equal(calls.length, 2);
+  assert.equal(calls.every(call => !/USING \(class_code\)/u.test(call.sql)), true);
   assert.match(calls[1].sql,
     /teacher_assignments AS teachers ON teachers\.class_code=pair\.class_code/u);
 });

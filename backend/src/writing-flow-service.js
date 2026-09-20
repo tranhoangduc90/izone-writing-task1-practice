@@ -406,9 +406,9 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
             coalesce(active.stage_key,CASE WHEN p.status='delivered' THEN 'deliver' ELSE 'intake' END) AS stage_key,
             coalesce(active.stage_status,CASE WHEN p.status='delivered' THEN 'succeeded' ELSE 'pending' END) AS stage_status
           FROM writing_flow.pair AS p
-          LEFT JOIN teacher_assignments AS t USING (class_code)
+          LEFT JOIN teacher_assignments AS t ON t.class_code=p.class_code
           LEFT JOIN writing_flow.source_record AS s ON s.source_id=p.source_id
-          LEFT JOIN writing_flow.class_registry AS registry USING (class_code)
+          LEFT JOIN writing_flow.class_registry AS registry ON registry.class_code=p.class_code
           LEFT JOIN LATERAL (
             SELECT sr.stage_key,sr.status AS stage_status
             FROM writing_flow.stage_result AS sr
@@ -560,9 +560,9 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
                  WHERE graded.pair_id=p.pair_id AND graded.stage_key IN ('main','render')
                    AND graded.status='succeeded') AS grading_text_available
           FROM writing_flow.pair AS p
-          LEFT JOIN teacher_assignments AS t USING (class_code)
+          LEFT JOIN teacher_assignments AS t ON t.class_code=p.class_code
           LEFT JOIN writing_flow.source_record AS s ON s.source_id=p.source_id
-          LEFT JOIN writing_flow.class_registry AS registry USING (class_code)
+          LEFT JOIN writing_flow.class_registry AS registry ON registry.class_code=p.class_code
           LEFT JOIN writing_flow.stage_result AS deliver
             ON deliver.pair_id=p.pair_id AND deliver.stage_key='deliver'
           LEFT JOIN LATERAL (

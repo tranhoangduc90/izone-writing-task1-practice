@@ -442,7 +442,7 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
           (SELECT count(*)::integer FROM writing_flow.manual_review AS review
             JOIN writing_flow.pair AS pair ON pair.pair_id=review.pair_id
             LEFT JOIN writing_flow.source_record AS source ON source.source_id=pair.source_id
-            LEFT JOIN teacher_assignments AS teachers USING (class_code)
+            LEFT JOIN teacher_assignments AS teachers ON teachers.class_code=pair.class_code
             WHERE review.status<>'resolved'
               AND ($1::text IS NULL OR pair.class_code=$1)
               AND ($2::text IS NULL OR $2=ANY(coalesce(nullif(source.teacher_names,ARRAY[]::text[]),

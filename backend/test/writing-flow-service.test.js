@@ -229,3 +229,24 @@ test('dashboard không còn phụ thuộc view phân công Lark', async () => {
   assert.equal(calls.every(call => call.sql.includes('mapping.reviewer_class_access')), true);
   assert.equal(calls.every(call => !call.sql.includes('lark_export_teacher_assignments')), true);
 });
+
+test('số đếm dashboard ghi rõ bảng lớp khi pair và source cùng có class_code', async () => {
+  const calls = [];
+  const pool = { query: async (sql, values = []) => {
+    calls.push({ sql, values });
+    if (/teacher_assignments AS teachers USING \(class_code\)/u.test(sql)) {
+      const error = new Error('column reference "class_code" is ambiguous');
+      error.code = '42702';
+      throw error;
+    }
+    if (sql.includes('AS source_issues')) {
+      return { rows: [{ source_issues: 0, reviews: 0, technical_errors: 0 }] };
+    }
+    return { rows: [] };
+  } };
+  const result = await createWritingFlowService({ pool }).dashboardCounts();
+  assert.deepEqual(result.support, { source_issues: 0, reviews: 0, technical_errors: 0 });
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].sql,
+    /teacher_assignments AS teachers ON teachers\.class_code=pair\.class_code/u);
+});

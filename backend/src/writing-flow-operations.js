@@ -258,6 +258,9 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
           WHERE s.source_type = ANY($1::text[])
             AND s.dispatch_status IN ('pending','sent')
             AND coalesce(s.next_dispatch_at,now()) <= now()
+            AND (s.dispatch_status='pending'
+              OR coalesce(s.last_dispatched_at,'-infinity'::timestamptz)
+                 <= now()-interval '6 hours')
             AND NOT EXISTS (
               SELECT 1 FROM writing_flow.scan_run r
               WHERE r.status='open'
@@ -269,7 +272,7 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
         const ids = due.rows.map(row => row.source_id);
         const result = await client.query(`UPDATE writing_flow.source_record
           SET dispatch_status='sent',dispatch_count=dispatch_count+1,last_dispatched_at=now(),
-              next_dispatch_at=now()+interval '2 minutes',updated_at=now()
+              next_dispatch_at=now()+interval '6 hours',updated_at=now()
           WHERE source_id=ANY($1::uuid[])
           RETURNING source_id,source_type,source_app_id,source_table_id,source_record_id,
             homework_file_id,source_link_index,display_name,class_code,student_name,

@@ -90,8 +90,10 @@ test('hàng nguồn nhận 50 file mặc định, khóa SKIP LOCKED và không c
   assert.equal(observed[0].params[1], 50);
   assert.match(observed[0].sql, /FOR UPDATE OF s SKIP LOCKED LIMIT \$2/u);
   assert.match(observed[0].sql, /NOT EXISTS[\s\S]*scan_run[\s\S]*source_table_id=s\.source_table_id/u);
+  assert.match(observed[0].sql, /last_dispatched_at[\s\S]*interval '6 hours'/u);
   assert.doesNotMatch(observed[0].sql, /scan_item/u);
   assert.deepEqual(observed[1].params[0], ids);
+  assert.match(observed[1].sql, /next_dispatch_at=now\(\)\+interval '6 hours'/u);
 });
 
 test('nguồn được xác nhận thành công sẽ không tự phát lại', async () => {

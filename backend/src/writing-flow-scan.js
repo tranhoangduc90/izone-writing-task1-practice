@@ -4,6 +4,15 @@ import { ApiError } from './service.js';
 
 const digest = value => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const itemKey = item => digest([item.recordId, item.docId ?? '', item.linkIndex]);
+const RETRYABLE_SOURCE_ISSUES = new Set(['FETCH_FAILED', 'SOURCE_METADATA_MISSING']);
+
+// Nhận vào: kết luận của một link và các mã lỗi đã ghi bền.
+// Việc chính: chỉ coi lỗi đọc kỹ thuật là có thể thử lại; lỗi nội dung/format cần người sửa nguồn.
+// Trả ra: true để source_record quay về hàng chờ, nhưng SQL vẫn chặn sau lần thứ ba.
+export function shouldRetrySourceIssue(status, reasons = []) {
+  return status === 'issue' && reasons.length > 0
+    && reasons.every(reason => RETRYABLE_SOURCE_ISSUES.has(String(reason)));
+}
 
 // Nhận vào: phiên bản từng ô đã lưu và kết quả workflow vừa đọc lại từng file.
 // Việc chính: từ chối chốt nếu thiếu file, sai ô hoặc nội dung bài đã đổi.
@@ -365,7 +374,7 @@ export function createWritingFlowScan({ pool }) {
         }
         let issues = { rows: [], rowCount: 0 };
         if (needsIssues) {
-          issues = await client.query(`SELECT issue_key,essay_slot FROM writing_flow.source_issue
+          issues = await client.query(`SELECT issue_key,essay_slot,reason_code FROM writing_flow.source_issue
             WHERE issue_key=ANY($1::text[]) AND source_app_id=$2 AND source_table_id=$3
               AND source_record_id=$4 AND homework_file_id IS NOT DISTINCT FROM $5
               AND source_link_index=$6 AND status='open'`,
@@ -409,18 +418,39 @@ export function createWritingFlowScan({ pool }) {
           issueKeys.length, issueKeys, receiptSha256, pairIds]);
         // Nguồn Classroom và file thêm thủ công dùng cùng sổ quét bền. Khi link đã
         // có biên nhận thật, đánh dấu nguồn đã xử lý để bộ phát không gửi lại vô hạn.
+        const issueReasons = issues.rows.map(issue => issue.reason_code);
+        const retryTechnicalIssue = shouldRetrySourceIssue(status, issueReasons);
+        const sourceErrorCode = status === 'issue'
+          ? (issueReasons.length === 1 ? issueReasons[0] : 'SOURCE_ISSUE') : null;
         await client.query(`UPDATE writing_flow.source_record
-          SET dispatch_status=CASE WHEN $6='issue' THEN 'needs_review'
+          SET dispatch_status=CASE
+                WHEN $6='issue' AND $7 AND dispatch_count<3 THEN 'pending'
+                WHEN $6='issue' THEN 'needs_review'
                 WHEN $6='excluded' THEN 'excluded' ELSE 'acknowledged' END,
               acknowledged_at=CASE WHEN $6 IN ('accepted','partial','empty') THEN now()
-                ELSE acknowledged_at END,next_dispatch_at=NULL,
-              last_error_code=CASE WHEN $6='issue' THEN coalesce(last_error_code,'SOURCE_ISSUE')
+                ELSE acknowledged_at END,
+              next_dispatch_at=CASE
+                WHEN $6='issue' AND $7 AND dispatch_count<3
+                  THEN now()+interval '30 seconds'*greatest(1,dispatch_count)
+                ELSE NULL END,
+              last_error_code=CASE WHEN $6='issue' THEN $8
                 ELSE NULL END,updated_at=now()
           WHERE source_app_id=$1 AND source_table_id=$2 AND source_record_id=$3
             AND homework_file_id IS NOT DISTINCT FROM $4 AND source_link_index=$5
             AND source_type IN ('google_classroom','manual')`,
         [item.source_app_id, item.source_table_id, item.source_record_id,
-          item.homework_file_id, item.source_link_index, status]);
+          item.homework_file_id, item.source_link_index, status,
+          retryTechnicalIssue, sourceErrorCode]);
+        if (status === 'empty') {
+          await client.query(`UPDATE writing_flow.source_issue
+            SET status='resolved',resolved_at=now(),last_seen_at=now()
+            WHERE source_app_id=$1 AND source_table_id=$2 AND source_record_id=$3
+              AND homework_file_id IS NOT DISTINCT FROM $4 AND source_link_index=$5
+              AND status='open' AND reason_code=ANY($6::text[])`,
+          [item.source_app_id, item.source_table_id, item.source_record_id,
+            item.homework_file_id, item.source_link_index,
+            [...RETRYABLE_SOURCE_ISSUES]]);
+        }
         return { itemKey: key, status };
       });
     },

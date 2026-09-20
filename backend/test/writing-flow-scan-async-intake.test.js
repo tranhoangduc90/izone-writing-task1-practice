@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createWritingFlowScan } from '../src/writing-flow-scan.js';
+import { createWritingFlowScan, shouldRetrySourceIssue } from '../src/writing-flow-scan.js';
 
 const key = 'a'.repeat(64);
 const request = {
@@ -9,6 +9,43 @@ const request = {
   expectedPairs: [{ essaySlot: 1, revision: 'b'.repeat(64) }],
   expectedIssues: [{ essaySlot: 2, reasonCode: 'SOURCE_MISSING' }],
 };
+
+test('lỗi đọc kỹ thuật được thử tối đa ba lượt còn lỗi nguồn thật dừng ngay', () => {
+  assert.equal(shouldRetrySourceIssue('issue', ['FETCH_FAILED']), true);
+  assert.equal(shouldRetrySourceIssue('issue', ['SOURCE_METADATA_MISSING']), true);
+  assert.equal(shouldRetrySourceIssue('issue', ['TABLE_STRUCTURE_INVALID']), false);
+  assert.equal(shouldRetrySourceIssue('issue', ['FETCH_FAILED', 'TABLE_STRUCTURE_INVALID']), false);
+  assert.equal(shouldRetrySourceIssue('accepted', ['FETCH_FAILED']), false);
+});
+
+test('biên nhận FETCH_FAILED đưa nguồn về hàng chờ khi chưa đủ ba lượt', async () => {
+  let sourceUpdate = null;
+  const issueKey = 'e'.repeat(64);
+  const client = { async query(sql, args) {
+    if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return {};
+    if (sql.includes('SELECT i.*,r.status AS run_status')) return { rowCount: 1, rows: [{
+      run_status: 'open', status: 'pending', source_app_id: 'app-demo',
+      source_table_id: 'table-demo', source_record_id: 'record-demo',
+      homework_file_id: 'doc-demo', source_link_index: 2,
+    }] };
+    if (sql.includes('FROM writing_flow.source_issue')) return { rowCount: 1, rows: [{
+      issue_key: issueKey, essay_slot: null, reason_code: 'FETCH_FAILED',
+    }] };
+    if (sql.includes('UPDATE writing_flow.scan_item')) return { rowCount: 1 };
+    if (sql.includes('UPDATE writing_flow.source_record')) {
+      sourceUpdate = { sql, args };
+      return { rowCount: 1 };
+    }
+    throw new Error(`UNEXPECTED_QUERY:${sql}`);
+  }, release() {} };
+  const service = createWritingFlowScan({ pool: { connect: async () => client } });
+  await service.acknowledge({ runId: 'run-demo', itemKey: key,
+    status: 'issue', issueKeys: [issueKey], detectedSlotCount: null });
+  assert.match(sourceUpdate.sql, /dispatch_count<3/u);
+  assert.match(sourceUpdate.sql, /interval '30 seconds'/u);
+  assert.equal(sourceUpdate.args[6], true);
+  assert.equal(sourceUpdate.args[7], 'FETCH_FAILED');
+});
 
 test('đọc lại lỗi nguồn tạo đúng một lượt quét idempotent và giữ nguyên mốc', async () => {
   const issueKey = 'd'.repeat(64);

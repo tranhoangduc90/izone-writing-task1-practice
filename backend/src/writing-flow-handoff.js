@@ -4,7 +4,8 @@ import { sha256 } from './writing-flow-crypto.js';
 // Nhận vào: số yêu cầu bàn giao tối đa của một lượt quét.
 // Việc chính: cấp lại những yêu cầu chưa được bước sau xác nhận, cùng đúng mã cặp/phiên bản.
 // Trả ra: danh sách nhỏ để n8n gọi workflow bước sau mà không chờ kết quả chấm.
-// Khi gọi workflow lỗi: yêu cầu vẫn còn trong database và sẽ được cấp lại sau 30 giây.
+// Khi n8n đã nhận một bàn giao: giữ nguyên trong hàng đợi đủ lâu để execution chờ suất chạy.
+// Chỉ phát lại sau sáu giờ như một lớp cứu hộ cuối, tránh nhân bản execution khi n8n đang đông.
 export function createWritingFlowHandoff({ pool }) {
   async function due(limit = 20) {
     return withTransaction(pool, async client => {
@@ -18,15 +19,16 @@ export function createWritingFlowHandoff({ pool }) {
           SELECT h.handoff_id
             FROM writing_flow.handoff h
             JOIN writing_flow.pair p ON p.pair_id=h.pair_id
-           WHERE h.status IN ('pending','sent')
-             AND h.next_send_at<=now()
+           WHERE ((h.status='pending' AND h.next_send_at<=now())
+               OR (h.status='sent' AND h.next_send_at<=now()
+                 AND h.last_sent_at<=now()-interval '6 hours'))
              AND p.status NOT IN ('delivered','superseded')
            ORDER BY h.next_send_at,h.created_at,h.handoff_id
            LIMIT $1 FOR UPDATE OF h SKIP LOCKED
         )
         UPDATE writing_flow.handoff h
            SET status='sent',send_count=h.send_count+1,last_sent_at=now(),
-               next_send_at=now()+interval '30 seconds'
+               next_send_at=now()+interval '6 hours'
           FROM ready,writing_flow.pair p
          WHERE h.handoff_id=ready.handoff_id AND p.pair_id=h.pair_id
         RETURNING h.handoff_id,h.pair_id,h.to_stage,h.send_count,p.submission_revision`,

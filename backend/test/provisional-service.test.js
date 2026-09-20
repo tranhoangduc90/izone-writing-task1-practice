@@ -10,6 +10,24 @@ test('API không khởi động chức năng mã tạm nếu pepper yếu', () =
   assert.throws(() => createProvisionalStudentService({ pool: {}, pepper: 'ngắn' }), /32 ký tự/);
 });
 
+test('danh sách học viên tạm dùng cùng quyền Lark dự phòng với dashboard chính', async () => {
+  let receivedSql = '';
+  const pool = { query: async (sql, params) => {
+    receivedSql = sql;
+    assert.deepEqual(params, ['writing-task2-test', null, false, 'teacher@example.invalid']);
+    return { rows: [] };
+  } };
+  const service = createProvisionalStudentService({ pool, pepper: 'p'.repeat(32) });
+  assert.deepEqual(await service.listPending({
+    activitySlug: 'writing-task2-test',
+    reviewerEmail: 'teacher@example.invalid',
+    canAccessAllClasses: false,
+  }), []);
+  assert.match(receivedSql, /mapping\.reviewer_class_access/u);
+  assert.match(receivedSql, /mapping\.lark_export_teacher_assignments/u);
+  assert.match(receivedSql, /scope\.erp_course_class_id=ANY\(assignment\.scope_class_ids\)/u);
+});
+
 function transactionPool(queryHandler) {
   return {
     connect: async () => ({

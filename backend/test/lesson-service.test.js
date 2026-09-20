@@ -12,6 +12,32 @@ test('dữ liệu response động ghi đè cột tương thích cũ khi tải l
   assert.doesNotMatch(source, dynamicFirst);
 });
 
+test('dashboard lớp và phần chấm từng câu cùng nhận phân công Lark chưa materialize', async () => {
+  let rosterQuery = '';
+  const pool = { query: async (sql, params) => {
+    if (sql.includes('SELECT activity.id,activity.grading_pool')) {
+      assert.deepEqual(params, ['writing-task2-test']);
+      return { rowCount: 1, rows: [{ id: 7, gradingPool: 'task1' }] };
+    }
+    if (sql.includes('FROM writing_practice.activity activity') && sql.includes('activity_roster roster')) {
+      rosterQuery = sql;
+      assert.deepEqual(params, ['writing-task2-test', null, false, 'teacher@example.invalid']);
+      return { rowCount: 0, rows: [] };
+    }
+    throw new Error(`Truy vấn ngoài dự kiến: ${sql}`);
+  } };
+  const result = await createLessonPracticeService({ pool }).listLive({
+    activitySlug: 'writing-task2-test',
+    classRef: null,
+    reviewerEmail: 'teacher@example.invalid',
+    canAccessAllClasses: false,
+  });
+  assert.deepEqual(result.students, []);
+  assert.match(rosterQuery, /mapping\.reviewer_class_access/u);
+  assert.match(rosterQuery, /mapping\.lark_export_teacher_assignments/u);
+  assert.match(rosterQuery, /scope\.erp_course_class_id=ANY\(assignment\.scope_class_ids\)/u);
+});
+
 test('backend từ chối Check khi phần bắt buộc trước đó chưa đạt', async () => {
   const calls = [];
   const client = {

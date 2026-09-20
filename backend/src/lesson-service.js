@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { withTransaction } from './db.js';
 import { ApiError } from './service.js';
+import { reviewerClassAccessSql } from './teacher-class-access-sql.js';
 
 const hash = value => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const meaningfulText = value => String(value ?? '').replace(/[\s\u200B-\u200D\u2060\uFEFF]/gu, '');
@@ -282,11 +283,7 @@ export function createLessonPracticeService({ pool, provisionalService = null, n
       ) support_summary ON true
       WHERE activity.slug=$1 AND activity.status='active'
         AND ($2::uuid IS NULL OR scope.public_id=$2::uuid)
-        AND ($3::boolean OR EXISTS (
-          SELECT 1 FROM mapping.reviewer_class_access access
-          WHERE access.reviewer_email=$4
-            AND access.erp_course_class_id=scope.erp_course_class_id
-        ))
+        AND ($3::boolean OR ${reviewerClassAccessSql('scope', '$4')})
       ORDER BY scope.class_name_snapshot,roster.display_alias`,
       [activitySlug, classRef || null, canAccessAllClasses, reviewerEmail])
     ]);

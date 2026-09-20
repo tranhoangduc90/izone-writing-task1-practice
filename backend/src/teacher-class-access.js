@@ -1,4 +1,5 @@
 import { ApiError } from './service.js';
+import { reviewerClassAccessSql } from './teacher-class-access-sql.js';
 
 export function reviewerIsAdmin(reviewer) {
   return reviewer?.role === 'admin';
@@ -17,11 +18,7 @@ export function createTeacherClassAccessService({ pool }) {
     const result = await pool.query(`SELECT DISTINCT scope.class_name_snapshot AS "classCode"
       FROM writing_practice.activity_class_scope scope
       WHERE scope.status='active' AND scope.end_date>=CURRENT_DATE
-        AND ($1::boolean OR EXISTS (
-          SELECT 1 FROM mapping.reviewer_class_access access
-          WHERE access.reviewer_email=$2
-            AND access.erp_course_class_id=scope.erp_course_class_id
-        ))
+        AND ($1::boolean OR ${reviewerClassAccessSql('scope', '$2')})
       ORDER BY scope.class_name_snapshot`, [reviewerIsAdmin(reviewer), reviewer.email]);
     return result.rows.map(row => ({ classCode: row.classCode }));
   }
@@ -36,11 +33,9 @@ export function createTeacherClassAccessService({ pool }) {
     return assertQuery(reviewer, `SELECT 1
       FROM writing_practice.activity_class_scope scope
       JOIN writing_practice.activity activity ON activity.id=scope.activity_id
-      JOIN mapping.reviewer_class_access access
-        ON access.erp_course_class_id=scope.erp_course_class_id
       WHERE scope.public_id=$1 AND activity.slug=$3
         AND scope.status='active' AND scope.end_date>=CURRENT_DATE
-        AND access.reviewer_email=$2
+        AND ${reviewerClassAccessSql('scope', '$2')}
       LIMIT 1`, classRef, [activitySlug]);
   }
 
@@ -48,9 +43,7 @@ export function createTeacherClassAccessService({ pool }) {
     return assertQuery(reviewer, `SELECT 1
       FROM writing_practice.activity_session session
       JOIN writing_practice.activity_class_scope scope ON scope.id=session.activity_class_id
-      JOIN mapping.reviewer_class_access access
-        ON access.erp_course_class_id=scope.erp_course_class_id
-      WHERE session.public_id=$1 AND access.reviewer_email=$2
+      WHERE session.public_id=$1 AND ${reviewerClassAccessSql('scope', '$2')}
       LIMIT 1`, sessionRef);
   }
 
@@ -59,9 +52,7 @@ export function createTeacherClassAccessService({ pool }) {
       FROM writing_practice.check_attempt attempt
       JOIN writing_practice.activity_session session ON session.id=attempt.session_id
       JOIN writing_practice.activity_class_scope scope ON scope.id=session.activity_class_id
-      JOIN mapping.reviewer_class_access access
-        ON access.erp_course_class_id=scope.erp_course_class_id
-      WHERE attempt.public_id=$1 AND access.reviewer_email=$2
+      WHERE attempt.public_id=$1 AND ${reviewerClassAccessSql('scope', '$2')}
       LIMIT 1`, attemptRef);
   }
 
@@ -69,9 +60,7 @@ export function createTeacherClassAccessService({ pool }) {
     return assertQuery(reviewer, `SELECT 1
       FROM writing_practice.provisional_student student
       JOIN writing_practice.activity_class_scope scope ON scope.id=student.activity_class_id
-      JOIN mapping.reviewer_class_access access
-        ON access.erp_course_class_id=scope.erp_course_class_id
-      WHERE student.student_public_id=$1 AND access.reviewer_email=$2
+      WHERE student.student_public_id=$1 AND ${reviewerClassAccessSql('scope', '$2')}
       LIMIT 1`, studentRef);
   }
 
@@ -80,9 +69,7 @@ export function createTeacherClassAccessService({ pool }) {
       FROM writing_practice.teacher_comment_thread thread
       JOIN writing_practice.activity_session session ON session.id=thread.session_id
       JOIN writing_practice.activity_class_scope scope ON scope.id=session.activity_class_id
-      JOIN mapping.reviewer_class_access access
-        ON access.erp_course_class_id=scope.erp_course_class_id
-      WHERE thread.public_id=$1 AND access.reviewer_email=$2
+      WHERE thread.public_id=$1 AND ${reviewerClassAccessSql('scope', '$2')}
       LIMIT 1`, threadRef);
   }
 

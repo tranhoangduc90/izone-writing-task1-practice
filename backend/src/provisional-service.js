@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { promisify } from 'node:util';
 import { withTransaction } from './db.js';
 import { ApiError } from './service.js';
+import { reviewerClassAccessSql } from './teacher-class-access-sql.js';
 
 const scrypt = promisify(crypto.scrypt);
 const invisible = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060\ufeff]/gu;
@@ -120,11 +121,7 @@ export function createProvisionalStudentService({ pool, pepper }) {
       JOIN writing_practice.activity activity ON activity.id=scope.activity_id
       WHERE activity.slug=$1 AND provisional.status IN ('pending','conflict')
         AND ($2::uuid IS NULL OR scope.public_id=$2::uuid)
-        AND ($3::boolean OR EXISTS (
-          SELECT 1 FROM mapping.reviewer_class_access access
-          WHERE access.reviewer_email=$4
-            AND access.erp_course_class_id=scope.erp_course_class_id
-        ))
+        AND ($3::boolean OR ${reviewerClassAccessSql('scope', '$4')})
       ORDER BY provisional.created_at`, [activitySlug, classRef, canAccessAllClasses, reviewerEmail]);
     return result.rows;
   }

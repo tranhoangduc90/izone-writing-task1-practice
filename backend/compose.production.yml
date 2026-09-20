@@ -13,7 +13,7 @@ services:
       TEACHER_SESSION_COOKIE_PATH: /writing-api
       TEACHER_SESSION_COOKIE_SECURE: "true"
       TEACHER_SESSION_COOKIE_PARTITIONED: "true"
-      TEACHER_SESSION_COOKIE_SAME_SITE: None
+      TEACHER_SESSION_COOKIE_SAME_SITE: none
     ports:
       - "127.0.0.1:8790:8790"
     networks: [mapping-api-net, n8n-net]

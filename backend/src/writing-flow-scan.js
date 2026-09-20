@@ -553,11 +553,23 @@ export function createWritingFlowScan({ pool }) {
     },
 
     // Nhận vào: số link tối đa để gửi trong một nhịp.
-    // Việc chính: cấp lại link chưa có biên nhận, mỗi lần cách nhau ít nhất 30 giây.
+    // Việc chính: giữ tối đa 100 link đang giao; mỗi link chỉ gửi lại sau sáu giờ nếu mất biên nhận.
     // Trả ra: định danh nguồn để workflow đọc lại bản hiện tại; không chứa bài học viên.
     // Khi workflow sau không chạy: link vẫn pending và được cấp lại.
     async due({ limit = 100 } = {}) {
       return withTransaction(pool, async client => {
+        await client.query(`SELECT pg_advisory_xact_lock(
+          hashtext('writing_flow.scan_item_due'))`);
+        const inflight = await client.query(`SELECT count(*)::int AS inflight_count
+          FROM writing_flow.scan_item i
+          JOIN writing_flow.scan_run r ON r.run_id=i.run_id
+          WHERE i.status='pending' AND r.status='open'
+            AND i.send_count>0
+            AND i.last_sent_at>now()-interval '6 hours'`);
+        const requested = Math.max(1, Math.min(100, Number(limit) || 100));
+        const available = Math.max(0, 100 - Number(inflight.rows[0]?.inflight_count || 0));
+        const claimLimit = Math.min(requested, available);
+        if (!claimLimit) return [];
         const result = await client.query(`WITH ready AS (
           SELECT i.run_id,i.item_key,s.source_id,s.source_type,
             s.source_updated_at,s.file_url,s.display_name,s.student_name,
@@ -570,12 +582,13 @@ export function createWritingFlowScan({ pool }) {
             AND s.homework_file_id IS NOT DISTINCT FROM i.homework_file_id
             AND s.source_link_index=i.source_link_index
           WHERE i.status='pending' AND r.status='open' AND i.next_send_at<=now()
+            AND (i.send_count=0 OR i.last_sent_at<=now()-interval '6 hours')
           ORDER BY i.next_send_at,i.run_id,i.item_key
           LIMIT $1 FOR UPDATE OF i SKIP LOCKED
         )
         UPDATE writing_flow.scan_item i
         SET send_count=i.send_count+1,last_sent_at=now(),
-            next_send_at=now()+interval '30 seconds'
+            next_send_at=now()+interval '6 hours'
         FROM ready,writing_flow.scan_run r
         WHERE i.run_id=ready.run_id AND i.item_key=ready.item_key
           AND r.run_id=i.run_id

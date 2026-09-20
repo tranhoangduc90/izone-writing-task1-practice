@@ -82,9 +82,13 @@ test('đọc lại lỗi nguồn tạo đúng một lượt quét idempotent và
 });
 
 test('lượt gửi lại mang đủ metadata của nguồn Classroom để không đọc nhầm Lark', async () => {
+  let claimSql = '';
   const client = { async query(sql) {
     if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return {};
+    if (sql.includes('pg_advisory_xact_lock')) return { rows: [{}] };
+    if (sql.includes('inflight_count')) return { rows: [{ inflight_count: 0 }] };
     if (sql.includes('UPDATE writing_flow.scan_item i')) {
+      claimSql = sql;
       assert.match(sql, /LEFT JOIN writing_flow\.source_record/u);
       return { rows: [{ run_id: 'run-demo', item_key: key,
         source_record_id: 'submission-demo', homework_file_id: 'doc-demo',
@@ -107,6 +111,23 @@ test('lượt gửi lại mang đủ metadata của nguồn Classroom để khô
   assert.equal(rows[0].sourceId, '11111111-1111-4111-8111-111111111111');
   assert.equal(rows[0].sourceMeta.displayName, 'Writing homework');
   assert.equal(rows[0].sourceMeta.courseWorkId, 'cw-demo');
+  assert.match(claimSql, /last_sent_at<=now\(\)-interval '6 hours'/u);
+  assert.match(claimSql, /next_send_at=now\(\)\+interval '6 hours'/u);
+  assert.doesNotMatch(claimSql, /interval '30 seconds'/u);
+});
+
+test('hàng đọc file dừng cấp khi đã có 100 link chưa nhận biên nhận', async () => {
+  let claimed = false;
+  const client = { async query(sql) {
+    if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return {};
+    if (sql.includes('pg_advisory_xact_lock')) return { rows: [{}] };
+    if (sql.includes('inflight_count')) return { rows: [{ inflight_count: 100 }] };
+    if (sql.includes('UPDATE writing_flow.scan_item i')) claimed = true;
+    return { rows: [] };
+  }, release() {} };
+  const service = createWritingFlowScan({ pool: { connect: async () => client } });
+  assert.deepEqual(await service.due({ limit: 100 }), []);
+  assert.equal(claimed, false);
 });
 
 test('ghi kế hoạch hai ô trước khi phát, gửi lại cùng kế hoạch không tạo bản khác', async () => {

@@ -1,6 +1,7 @@
 import { withTransaction } from './db.js';
 import { ApiError } from './service.js';
 import { keyFromHex, seal, sha256 } from './writing-flow-crypto.js';
+import { writingSearchTokens } from './writing-flow-search.js';
 
 const MIME = {
   google_docs: 'application/vnd.google-apps.document',
@@ -217,6 +218,12 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
           pair.taskType, input.documentKind, pair.sourceCiphertext,sourceType,sourceId,
         ]);
         const pairId = inserted.rows[0].pair_id;
+        const searchTokens = writingSearchTokens(pair.essay, key);
+        if (searchTokens.length) {
+          await client.query(`INSERT INTO writing_flow.pair_search_token (pair_id,token_hash)
+            SELECT $1,token FROM unnest($2::bytea[]) AS token
+            ON CONFLICT DO NOTHING`, [pairId, searchTokens]);
+        }
         await client.query(`
           INSERT INTO writing_flow.stage_result
             (pair_id, stage_key, status, cycle_no, attempt_count, input_sha256,

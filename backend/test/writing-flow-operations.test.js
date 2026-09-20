@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createWritingFlowOperations, documentIdFromUrl, STAGES }
   from '../src/writing-flow-operations.js';
+import { seal } from '../src/writing-flow-crypto.js';
 
 function poolWith(handler) {
   const client = {
@@ -111,6 +112,51 @@ test('nguồn được xác nhận thành công sẽ không tự phát lại', a
   assert.equal(seenParams[1], 'acknowledged');
 });
 
+test('đồng bộ Classroom bổ sung tên homework cho nguồn chuyển tiếp sau mỗi lượt', async () => {
+  const statements = [];
+  const pool = poolWith(async (sql, params) => {
+    statements.push({ sql, params });
+    if (sql.includes('INSERT INTO writing_flow.source_record')) return { rowCount: 1,
+      rows: [{ source_id: '11111111-1111-4111-8111-111111111111' }] };
+    if (sql.includes('WITH classroom_candidate')) return { rowCount: 1, rows: [] };
+    throw new Error(`UNEXPECTED_SQL:${sql}`);
+  });
+  await createWritingFlowOperations({ pool }).upsertClassroomSources({ sources: [{
+    courseId: 'course', submissionId: 'submission', documentId: 'doc', linkIndex: 1,
+    displayName: 'Writing homework 12', classCode: 'IC2200', studentName: 'Học viên giả',
+    teacherNames: ['Giảng viên giả'], classroomUrl: 'https://classroom.google.com/c/demo',
+    fileUrl: 'https://docs.google.com/document/d/demo/edit', sourceStatus: 'TURNED_IN',
+    sourceUpdatedAt: '2026-09-20T00:00:00Z',
+  }] });
+  const backfill = statements.find(item => item.sql.includes('WITH classroom_candidate'));
+  assert.match(backfill.sql, /count\(\*\) OVER \(PARTITION BY homework_file_id\)/u);
+  assert.match(backfill.sql, /homework_file_id=ANY\(\$1::text\[\]\)/u);
+  assert.deepEqual(backfill.params, [['doc']]);
+  assert.match(backfill.sql, /display_name=coalesce/u);
+  assert.match(backfill.sql, /legacy\.source_type='lark_homework'/u);
+});
+
+test('lịch sử chỉ trả bản mới nhất mỗi ô và giải mã các field dashboard', async () => {
+  const hexKey = '22'.repeat(32);
+  const snapshot = { homeworkTitle: 'Writing homework 12',
+    classroomUrl: 'https://classroom.google.com/c/demo', topic: 'Đề giả',
+    essay: 'Nội dung bài giả', image: 'https://example.invalid/chart.png',
+    trcc: true, lms: 'https://ducizone.ddns.net/writing/shared/writing-essays/'
+      + `${'a'.repeat(48)}/view?v=1` };
+  const pool = poolWith(async sql => {
+    assert.match(sql, /DISTINCT ON \(source_app_id,source_table_id,source_record_id,essay_slot\)/u);
+    return { rowCount: 1, rows: [{ legacy_id: 'legacy', essay_slot: 2,
+      snapshot_ciphertext: seal(JSON.stringify(snapshot), Buffer.from(hexKey, 'hex')) }] };
+  });
+  const [row] = await createWritingFlowOperations({ pool, encryptionKey: hexKey })
+    .listLegacyRecords({ limit: 1 });
+  assert.equal(row.homework_title, 'Writing homework 12');
+  assert.equal(row.topic, 'Đề giả');
+  assert.equal(row.essay_preview, 'Nội dung bài giả');
+  assert.equal(row.tr_cc_check, true);
+  assert.equal(Object.hasOwn(row, 'snapshot_ciphertext'), false);
+});
+
 test('chỉ cấp lớp đã duyệt đang học và giới hạn theo tham số thay vì cap ba lớp', async () => {
   const classCodes = Array.from({ length: 8 }, (_, index) => `IC22${String(index).padStart(2, '0')}`);
   const statements = [];
@@ -218,4 +264,15 @@ test('migration nhật ký cho phép ghi thay đổi mapping và có chỉ mục
   assert.match(sql, /class_mapping_changed/u);
   assert.match(sql, /writing_operator_event_class_idx/u);
   assert.doesNotMatch(sql, /\bDELETE\s+FROM\b/iu);
+});
+
+test('migration dashboard tạo chỉ mục HMAC và không lưu nội dung rõ', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const sql = await readFile(new URL('../../docs/migrations/2026-09-20-writing-flow-dashboard-fields-v5.sql',
+    import.meta.url), 'utf8');
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS writing_flow\.pair_search_token/u);
+  assert.match(sql, /token_hash bytea/u);
+  assert.match(sql, /writing_pair_search_token_lookup_idx/u);
+  assert.match(sql, /display_name=coalesce/u);
+  assert.doesNotMatch(sql, /essay_text|content_text|GRANT\s+DELETE/iu);
 });

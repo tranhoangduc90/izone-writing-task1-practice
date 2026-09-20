@@ -33,6 +33,9 @@ function fakePool() {
           new Date(row.source_modified_at).getTime(), new Date(values[1]).getTime()));
         row.lark_modified_ms = Math.max(row.lark_modified_ms ?? 0, values[2]);
       }
+      if (sql.includes('INSERT INTO writing_flow.pair_search_token')) {
+        return { rowCount: Array.isArray(values[1]) ? values[1].length : 0, rows: [] };
+      }
       if (sql.includes('INSERT INTO writing_flow.pair')) {
         const pair_id = `pair-${pairs.length + 1}`;
         pairs.push({ pair_id, source_app_id: values[0], source_table_id: values[1],
@@ -162,6 +165,16 @@ test('mã hồ sơ giống nhau ở bảng Lark khác không ghi đè bài của
   assert.equal(pairs.length, 6);
   assert.equal(pairs.filter(row => row.status === 'superseded').length, 0);
   assert.notEqual(first.receipts[0].pairId, second.receipts[0].pairId);
+});
+
+test('bài mới lập chỉ mục tìm kiếm bằng dấu vân tay, không ghi nội dung rõ', async () => {
+  const { pool, writes } = fakePool();
+  await createWritingFlowIntake({ pool, encryptionKey: '11'.repeat(32) })(input());
+  const searchWrites = writes.filter(row => row.sql.includes('writing_flow.pair_search_token'));
+  assert.equal(searchWrites.length, 3);
+  assert.equal(searchWrites.every(row => row.values[1].every(token => Buffer.isBuffer(token)
+    && token.length === 32)), true);
+  assert.equal(searchWrites.some(row => JSON.stringify(row.values).includes('Bài giả')), false);
 });
 
 test('IC2288 không tạo bản ghi chấm dù có bài trong file', async () => {

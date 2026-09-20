@@ -272,7 +272,7 @@ test('danh sách bài chuyển bộ lọc lớp và giảng viên vào truy vấ
   assert.deepEqual(received, {
     classCode: 'IC2200', teacherName: 'Giảng viên thử', stageKey: null,
     stageStatus: null, view: null, includeCompleted: false, taskType: null,
-    search: null, dateFrom: null, dateTo: null,
+    search: null, searchScope: 'all', dateFrom: null, dateTo: null,
     limit: 50, offset: 10, cursorAt: null, cursorId: null,
   });
 });

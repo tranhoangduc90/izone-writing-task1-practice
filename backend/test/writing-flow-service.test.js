@@ -215,7 +215,7 @@ test('thống kê giảng viên đọc trực tiếp database mapping và lọc 
   assert.equal(calls.every(call => !/USING \(class_code\)/u.test(call.sql)), true);
   assert.deepEqual(calls[1].values, ['IC2200', 'Giảng viên thử',
     ['intake', 'precheck', 'main', 'critic', 'arbiter', 'render', 'deliver'],
-    null, null, null, false, null, null, null, null, null, null, null, 50, 10]);
+    null, null, null, false, null, null, true, null, true, [], null, null, null, null, 50, 10]);
 });
 
 test('dashboard không còn phụ thuộc view phân công Lark', async () => {
@@ -232,21 +232,37 @@ test('dashboard không còn phụ thuộc view phân công Lark', async () => {
   assert.equal(calls.every(call => !call.sql.includes('lark_export_teacher_assignments')), true);
 });
 
-test('mọi tab dashboard đọc được danh sách bài có nội dung mã hóa', async () => {
-  const encryptionKey = Buffer.alloc(32, 7);
+test('mọi tab dashboard giải mã đúng khóa hex như production và trả đủ dữ liệu hiển thị', async () => {
+  const encryptionKey = Buffer.alloc(32, 7).toString('hex');
+  const binaryKey = Buffer.from(encryptionKey, 'hex');
   const sourceCiphertext = seal(JSON.stringify([
     'Bài viết thử', 'Đề bài thử', 'https://example.invalid/chart.png', null, true,
-  ]), encryptionKey);
+  ]), binaryKey);
+  const resultUrl = `https://ducizone.ddns.net/writing/shared/writing-essays/${'a'.repeat(48)}/view?v=2`;
+  const renderCiphertext = seal(JSON.stringify({ resultUrl }), binaryKey);
   const pool = { query: async () => ({ rows: [{
     pair_id: '11111111-1111-4111-8111-111111111111',
-    source_ciphertext: sourceCiphertext,
+    source_ciphertext: sourceCiphertext, render_result_ciphertext: renderCiphertext,
   }] }) };
   const rows = await createWritingFlowService({ pool, encryptionKey }).listPairs({ limit: 1 });
   assert.equal(rows.length, 1);
   assert.equal(rows[0].topic, 'Đề bài thử');
   assert.equal(rows[0].image_url, 'https://example.invalid/chart.png');
   assert.equal(rows[0].tr_cc_check, true);
+  assert.equal(rows[0].essay_preview, 'Bài viết thử');
+  assert.equal(rows[0].lms_url, resultUrl);
+  assert.equal(rows[0].data_issue_code, null);
   assert.equal(Object.hasOwn(rows[0], 'source_ciphertext'), false);
+  assert.equal(Object.hasOwn(rows[0], 'render_result_ciphertext'), false);
+});
+
+test('dòng lỗi giải mã được đánh dấu rõ thay vì âm thầm hiện ô trống', async () => {
+  const encryptionKey = Buffer.alloc(32, 8).toString('hex');
+  const pool = { query: async () => ({ rows: [{ pair_id: 'pair-bad',
+    source_ciphertext: Buffer.from('khong-hop-le') }] }) };
+  const [row] = await createWritingFlowService({ pool, encryptionKey }).listPairs({ limit: 1 });
+  assert.equal(row.data_issue_code, 'SOURCE_DECRYPT_FAILED');
+  assert.equal(row.topic, null);
 });
 
 test('số đếm dashboard ghi rõ bảng lớp khi pair và source cùng có class_code', async () => {

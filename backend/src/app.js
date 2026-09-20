@@ -488,13 +488,14 @@ export function createApp({config,pool,service,lessonService=service,provisional
    const includeCompleted=q.query.includeCompleted==='true';
    const taskType=q.query.taskType?parse(z.enum(['task_1','task_2']),q.query.taskType):null;
    const search=q.query.search?parse(z.string().trim().min(1).max(500),q.query.search):null;
+   const searchScope=parse(z.enum(['all','identity','docs','content']),q.query.searchScope??'all');
    const dateFrom=q.query.dateFrom?parse(z.string().date(),q.query.dateFrom):null;
    const dateTo=q.query.dateTo?parse(z.string().date(),q.query.dateTo):null;
    const cursorAt=q.query.cursorAt?parse(z.string().datetime({offset:true}),q.query.cursorAt):null;
    const cursorId=q.query.cursorId?parse(uuid,q.query.cursorId):null;
    if(Boolean(cursorAt)!==Boolean(cursorId))throw new ApiError(400,'CURSOR_INCOMPLETE','Thiếu một phần con trỏ trang.');
    const pairs=await writingFlowService.listPairs({classCode,teacherName,stageKey,stageStatus,
-     view,includeCompleted,taskType,search,dateFrom,dateTo,limit,offset,cursorAt,cursorId});
+     view,includeCompleted,taskType,search,searchScope,dateFrom,dateTo,limit,offset,cursorAt,cursorId});
    const last=pairs.at(-1);
    r.json({ok:true,pairs,nextCursor:last&&pairs.length===limit
      ?{cursorAt:last.updated_at,cursorId:last.pair_id}:null});

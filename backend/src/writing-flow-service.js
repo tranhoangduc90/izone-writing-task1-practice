@@ -3,7 +3,8 @@ import { withTransaction } from './db.js';
 import { ApiError } from './service.js';
 import { createWritingFlowIntake } from './writing-flow-intake.js';
 import { createWritingFlowOperations, STAGES } from './writing-flow-operations.js';
-import { open } from './writing-flow-crypto.js';
+import { keyFromHex, open } from './writing-flow-crypto.js';
+import { normalizeWritingSearch, writingSearchPreview, writingSearchTokens } from './writing-flow-search.js';
 
 // Nguồn vào: mapping lớp và phân công giảng viên đã có sẵn trong PostgreSQL.
 // Việc chính: chuẩn hóa tên lớp thành mã lớp và gom các giảng viên đang hoạt động.
@@ -178,6 +179,7 @@ export function mergeClassCoverage(expectedRows = [], seenRows = []) {
 // Trả ra: trạng thái, mã cặp và bước; không đọc bài làm hay kết quả đã mã hóa.
 // Khi lỗi: transaction hoàn tác; màn hình nhận mã lỗi và giữ mục Cần kiểm tra.
 export function createWritingFlowService({ pool, encryptionKey = null }) {
+  const key = Buffer.isBuffer(encryptionKey) ? encryptionKey : keyFromHex(encryptionKey);
   const operations = createWritingFlowOperations({ pool, encryptionKey });
   async function teacherAssignmentsForDatabase() {
     return teacherAssignmentsCte;
@@ -535,10 +537,26 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
 
     async listPairs({ classCode = null, teacherName = null, stageKey = null,
       stageStatus = null, view = null, includeCompleted = false, taskType = null,
-      search = null, dateFrom = null, dateTo = null, limit = 50, offset = 0,
+      search = null, searchScope = 'all', dateFrom = null, dateTo = null, limit = 50, offset = 0,
       cursorAt = null, cursorId = null } = {}) {
+      if (encryptionKey && !key) throw new ApiError(503, 'WRITING_FLOW_ENCRYPTION_NOT_READY',
+        'Khóa đọc dữ liệu Writing không hợp lệ.');
       const assignments = await teacherAssignmentsForDatabase();
       const searchDocId = documentIdFromSearch(search);
+      const normalizedSearch = normalizeWritingSearch(search);
+      let contentPairIds = [];
+      if (search && ['all', 'content'].includes(searchScope) && key) {
+        const tokens = writingSearchTokens(search, key);
+        if (tokens.length) {
+          const candidates = await pool.query(`SELECT pair_id
+            FROM writing_flow.pair_search_token
+            WHERE token_hash=ANY($1::bytea[])
+            GROUP BY pair_id
+            HAVING count(DISTINCT token_hash)=$2
+            LIMIT 1000`, [tokens, tokens.length]);
+          contentPairIds = candidates.rows.map(row => row.pair_id);
+        }
+      }
       const result = await pool.query(`
         WITH ${assignments}
         SELECT p.pair_id, p.class_code, p.source_app_id, p.source_table_id,
@@ -557,6 +575,7 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
                  CASE WHEN p.status='delivered' THEN 'succeeded' ELSE 'pending' END) AS stage_status,
                coalesce(current_stage.attempt_count,0) AS attempt_count,
                current_stage.error_code AS last_error_code,p.source_ciphertext,
+               render.result_ciphertext AS render_result_ciphertext,
                EXISTS (SELECT 1 FROM writing_flow.stage_result AS graded
                  WHERE graded.pair_id=p.pair_id AND graded.stage_key IN ('main','render')
                    AND graded.status='succeeded') AS grading_text_available
@@ -566,6 +585,8 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
           LEFT JOIN writing_flow.class_registry AS registry ON registry.class_code=p.class_code
           LEFT JOIN writing_flow.stage_result AS deliver
             ON deliver.pair_id=p.pair_id AND deliver.stage_key='deliver'
+          LEFT JOIN writing_flow.stage_result AS render
+            ON render.pair_id=p.pair_id AND render.stage_key='render' AND render.status='succeeded'
           LEFT JOIN LATERAL (
             SELECT s.stage_key, s.status AS stage_status, s.attempt_count,s.error_code
              FROM writing_flow.stage_result AS s
@@ -579,13 +600,15 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
            AND p.status<>'superseded'
            AND ($7::boolean OR registry.class_status IS DISTINCT FROM 'completed')
            AND ($8::text IS NULL OR p.task_type=$8)
-           AND ($9::text IS NULL OR p.homework_file_id=$10
-             OR writing_flow.normalize_search(s.student_name)
-               LIKE '%' || writing_flow.normalize_search($9) || '%')
-           AND ($11::date IS NULL OR coalesce(s.source_created_at,p.created_at)
-             >= ($11::date AT TIME ZONE 'Asia/Ho_Chi_Minh'))
-           AND ($12::date IS NULL OR coalesce(s.source_created_at,p.created_at)
-             < (($12::date+1) AT TIME ZONE 'Asia/Ho_Chi_Minh'))
+           AND ($9::text IS NULL
+             OR ($10::boolean AND (p.homework_file_id=$11
+               OR writing_flow.normalize_search(s.student_name)
+                 LIKE '%' || writing_flow.normalize_search($9) || '%'))
+             OR ($12::boolean AND p.pair_id=ANY($13::uuid[])))
+           AND ($14::date IS NULL OR coalesce(s.source_created_at,p.created_at)
+             >= ($14::date AT TIME ZONE 'Asia/Ho_Chi_Minh'))
+           AND ($15::date IS NULL OR coalesce(s.source_created_at,p.created_at)
+             < (($15::date+1) AT TIME ZONE 'Asia/Ho_Chi_Minh'))
            AND ($4::text IS NULL OR coalesce(current_stage.stage_key,
                  CASE WHEN p.status='delivered' THEN 'deliver' ELSE 'intake' END)=$4)
            AND ($5::text IS NULL OR coalesce(current_stage.stage_status,
@@ -594,22 +617,33 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
              OR ($6::text='delivered' AND p.status='delivered' AND p.skipped_at IS NULL)
              OR ($6::text='unfinished' AND p.status<>'delivered' AND p.skipped_at IS NULL)
              OR ($6::text IS NULL AND p.skipped_at IS NULL))
-           AND ($13::timestamptz IS NULL OR (p.updated_at,p.pair_id)<($13::timestamptz,$14::uuid))
+           AND ($16::timestamptz IS NULL OR (p.updated_at,p.pair_id)<($16::timestamptz,$17::uuid))
          ORDER BY p.updated_at DESC, p.pair_id DESC
-         LIMIT $15 OFFSET $16`, [classCode, teacherName, STAGES, stageKey, stageStatus, view,
-        includeCompleted, taskType, search, searchDocId, dateFrom, dateTo,
-        cursorAt, cursorId, limit, offset]);
+         LIMIT $18 OFFSET $19`, [classCode, teacherName, STAGES, stageKey, stageStatus, view,
+        includeCompleted, taskType, search, ['all', 'identity', 'docs'].includes(searchScope),
+        searchDocId, ['all', 'content'].includes(searchScope), contentPairIds,
+        dateFrom, dateTo, cursorAt, cursorId, limit, offset]);
       return result.rows.map(row => {
-        let topic = null; let imageUrl = null; let trCcCheck = null;
-        if (encryptionKey && row.source_ciphertext) {
+        let topic = null; let imageUrl = null; let trCcCheck = null; let essayPreview = null;
+        let lmsUrl = null; let dataIssueCode = null;
+        if (key && row.source_ciphertext) {
           try {
-            const decoded = JSON.parse(open(row.source_ciphertext, encryptionKey));
+            const decoded = JSON.parse(open(row.source_ciphertext, key));
             topic = decoded[1] || null; imageUrl = decoded[2] || null;
             trCcCheck = typeof decoded[4] === 'boolean' ? decoded[4] : null;
-          } catch { /* Chi tiết vẫn báo lỗi giải mã khi người dùng mở dòng. */ }
+            essayPreview = writingSearchPreview(decoded[0]);
+          } catch { dataIssueCode = 'SOURCE_DECRYPT_FAILED'; }
         }
-        const { source_ciphertext: _hidden, ...safe } = row;
-        return { ...safe, topic, image_url: imageUrl, tr_cc_check: trCcCheck };
+        if (key && row.render_result_ciphertext) {
+          try {
+            const rendered = JSON.parse(open(row.render_result_ciphertext, key));
+            const value = String(rendered?.resultUrl || '');
+            if (/^https:\/\/ducizone\.ddns\.net\/writing\/shared\/writing-essays\/[a-f0-9]{48}\/view\?v=\d+$/u.test(value)) lmsUrl = value;
+          } catch { dataIssueCode ||= 'RESULT_DECRYPT_FAILED'; }
+        }
+        const { source_ciphertext: _hidden, render_result_ciphertext: _hiddenRender, ...safe } = row;
+        return { ...safe, topic, image_url: imageUrl, tr_cc_check: trCcCheck,
+          essay_preview: essayPreview, lms_url: lmsUrl, data_issue_code: dataIssueCode };
       });
     },
 

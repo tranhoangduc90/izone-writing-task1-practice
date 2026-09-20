@@ -180,6 +180,35 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
             item.sourceUpdatedAt, JSON.stringify(snapshot)]);
           rows.push(result.rows[0]);
         }
+        // Nguồn Lark chỉ còn dùng trong giai đoạn chuyển đổi. Khi Docs ID khớp duy nhất
+        // một bài Classroom, bổ sung tên homework và metadata để dashboard không còn ô trống.
+        const updatedDocumentIds = [...new Set(sources.map(item => item.documentId).filter(Boolean))];
+        if (updatedDocumentIds.length) await client.query(`WITH classroom_candidate AS (
+            SELECT source_id,homework_file_id,display_name,student_name,teacher_names,classroom_url,
+              source_status,source_created_at,metadata,
+              count(*) OVER (PARTITION BY homework_file_id) AS match_count
+            FROM writing_flow.source_record
+            WHERE source_type='google_classroom' AND homework_file_id=ANY($1::text[])
+          ), unique_classroom AS (SELECT * FROM classroom_candidate WHERE match_count=1)
+          UPDATE writing_flow.source_record AS legacy
+          SET display_name=coalesce(nullif(legacy.display_name,''),source.display_name),
+              student_name=coalesce(nullif(legacy.student_name,''),source.student_name),
+              teacher_names=CASE WHEN cardinality(legacy.teacher_names)=0
+                THEN source.teacher_names ELSE legacy.teacher_names END,
+              classroom_url=coalesce(nullif(legacy.classroom_url,''),source.classroom_url),
+              source_status=coalesce(nullif(legacy.source_status,''),source.source_status),
+              source_created_at=coalesce(legacy.source_created_at,source.source_created_at),
+              metadata=legacy.metadata || jsonb_build_object(
+                'classroomBackfillSourceId',source.source_id::text,
+                'classroomBackfilledAt',to_jsonb(now())),updated_at=now()
+          FROM unique_classroom AS source
+          WHERE legacy.source_type='lark_homework'
+            AND legacy.homework_file_id=ANY($1::text[])
+            AND legacy.homework_file_id=source.homework_file_id
+            AND (nullif(legacy.display_name,'') IS NULL OR nullif(legacy.student_name,'') IS NULL
+              OR cardinality(legacy.teacher_names)=0 OR nullif(legacy.classroom_url,'') IS NULL
+              OR nullif(legacy.source_status,'') IS NULL OR legacy.source_created_at IS NULL)`,
+        [updatedDocumentIds]);
         return rows;
       });
     },
@@ -198,7 +227,7 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
              snapshot_sha256,snapshot_ciphertext)
             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
             ON CONFLICT DO NOTHING RETURNING legacy_id`,
-          [item.appId, item.tableId, item.recordId, item.essaySlot || null, item.classCode || null,
+          [item.appId, item.tableId, item.recordId, item.essaySlot ?? null, item.classCode || null,
             item.studentName || null, item.teacherName || null, item.sourceStatus || null,
             item.createdAt || null, item.finishedAt || null, digest, seal(snapshotJson, key)]);
           imported += result.rowCount;
@@ -208,13 +237,32 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
     },
 
     async listLegacyRecords({ classCode = null, limit = 50, offset = 0 } = {}) {
-      const result = await pool.query(`SELECT legacy_id,source_record_id,essay_slot,class_code,
-          student_name,teacher_name,source_status,created_at_source,finished_at_source,
-          linked_pair_id,match_status,imported_at
-        FROM writing_flow.legacy_record WHERE ($1::text IS NULL OR class_code=$1)
+      if (!key) throw new ApiError(503, 'WRITING_FLOW_ENCRYPTION_NOT_READY',
+        'Chưa cấu hình nơi đọc lịch sử.');
+      const result = await pool.query(`SELECT * FROM (
+          SELECT DISTINCT ON (source_app_id,source_table_id,source_record_id,essay_slot)
+            legacy_id,source_record_id,essay_slot,class_code,student_name,teacher_name,
+            source_status,created_at_source,finished_at_source,linked_pair_id,match_status,
+            imported_at,snapshot_ciphertext
+          FROM writing_flow.legacy_record
+          WHERE ($1::text IS NULL OR class_code=$1)
+          ORDER BY source_app_id,source_table_id,source_record_id,essay_slot,imported_at DESC,legacy_id DESC
+        ) AS latest
         ORDER BY coalesce(created_at_source,imported_at) DESC,legacy_id DESC LIMIT $2 OFFSET $3`,
       [classCode, limit, offset]);
-      return result.rows;
+      return result.rows.map(row => {
+        let snapshot = {};
+        let dataIssueCode = null;
+        try { snapshot = JSON.parse(open(row.snapshot_ciphertext, key)); }
+        catch { dataIssueCode = 'LEGACY_DECRYPT_FAILED'; }
+        const { snapshot_ciphertext: _hidden, ...safe } = row;
+        return { ...safe, homework_title: snapshot.homeworkTitle || null,
+          classroom_url: snapshot.classroomUrl || null, file_url: snapshot.fileUrl || null,
+          topic: snapshot.topic || null, image_url: snapshot.image || null,
+          essay_preview: String(snapshot.essay || '').slice(0, 420) || null,
+          tr_cc_check: snapshot.trcc ?? null, lms_url: snapshot.lms || null,
+          data_issue_code: dataIssueCode };
+      });
     },
 
     async addManualSource({ displayName, documentUrl, requestId, actorRef }) {

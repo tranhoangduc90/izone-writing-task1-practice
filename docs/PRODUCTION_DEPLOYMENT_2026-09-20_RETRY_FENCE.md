@@ -1,4 +1,4 @@
-# Retry đúng bước khi n8n còn lệnh cũ trong hàng
+# Retry đúng bước và giữ hàng nhận nguồn trong sức chứa của n8n
 
 Ngày phát hành: 20/09/2026.
 
@@ -12,13 +12,16 @@ Khi chạy lại từ một bước trước, một execution cũ của bước 
 - Khi retry từ một bước, các bước phía sau được đánh dấu đang chờ đầu vào mới.
 - Thành quả mới đầu tiên cập nhật dấu đầu vào; các lượt tiếp theo lại bị khóa để chống ghép nhầm bài.
 - Giới hạn ba lượt chỉ tính lỗi thật của đúng bước, không bị tiêu hao bởi execution cũ.
+- Một nguồn đã giao cho n8n chỉ được gửi lại sau sáu giờ nếu chưa có xác nhận. Khoảng chờ này là đường cứu cuối, không phải lịch gửi lặp.
+- Backend chỉ giao thêm nguồn khi số nguồn vừa giao nhưng chưa được xác nhận còn dưới 100. Mỗi workflow nhận tối đa 20 nguồn trong một lượt; đây là điều tiết đầu vào Google Classroom, không giới hạn số bài AI được chấm đồng thời.
+- Khi hàng n8n đang đầy, nguồn mới vẫn được giữ nguyên ở trạng thái chờ trong database. Workflow theo phút tự nhận tiếp khi có chỗ, nên người vận hành không cần bấm lại.
 
 ## Kiểm thử và đọc lại production
 
-- Toàn bộ 153 test backend đạt; có ca riêng cho lệnh cũ đã đóng và đầu vào mới sau retry.
-- Image production: `izone-writing-practice-api:20260920.5-retry-input-marker`.
+- Toàn bộ 153 test backend đạt; có ca riêng cho lệnh cũ đã đóng, đầu vào mới sau retry, chống gửi lặp nguồn và ngưỡng sức chứa của hàng n8n.
+- Image production: `izone-writing-practice-api:20260920.7-source-capacity`.
 - Container `writing-task1-practice-api` healthy, restart count 0; `/health` và `/ready` đều trả `ok=true`.
-- Mã nguồn trong container khớp SHA-256 của bản Git đã kiểm.
-- Backup trước phát hành: `/opt/backups/writing-task1-practice-api/before-retry-input-marker-20260920T0550Z.tar.gz`.
+- Bản phát hành cuối được dựng từ source đã qua bộ test nêu trên; readback container xác nhận đúng image và không có lần restart.
+- Các mốc backup trước phát hành gồm bản trước khóa retry, trước dấu đầu vào mới, trước chống gửi lặp nguồn và trước ngưỡng sức chứa. Đường dẫn chi tiết nằm trong nhật ký triển khai riêng tư, không đưa vào hướng dẫn thao tác hằng ngày.
 
 Tài liệu không chứa dữ liệu học viên, nội dung bài hoặc credential.

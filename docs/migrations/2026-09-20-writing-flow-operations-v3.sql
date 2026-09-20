@@ -82,9 +82,22 @@ AS $function$
     '[^a-z0-9]+',' ','g'));
 $function$;
 
-GRANT SELECT ON TABLE mapping.classroom_course_mapping TO writing_practice_api;
-GRANT SELECT ON TABLE mapping.reviewer_class_access TO writing_practice_api;
-GRANT SELECT ON TABLE mapping.reviewer_account TO writing_practice_api;
+-- Một số database staging cũ chưa có đủ ba bảng mapping. Migration vẫn cần chạy được
+-- để kiểm phần Writing; bảng nào chưa có sẽ được fixture staging tạo riêng trước khi thử API.
+DO $grant_mapping_read_only$
+DECLARE table_name text;
+BEGIN
+  FOREACH table_name IN ARRAY ARRAY[
+    'mapping.classroom_course_mapping',
+    'mapping.reviewer_class_access',
+    'mapping.reviewer_account'
+  ] LOOP
+    IF to_regclass(table_name) IS NOT NULL THEN
+      EXECUTE format('GRANT SELECT ON TABLE %s TO writing_practice_api',table_name);
+    END IF;
+  END LOOP;
+END;
+$grant_mapping_read_only$;
 GRANT EXECUTE ON FUNCTION writing_flow.normalize_search(text) TO writing_practice_api;
 
 COMMIT;

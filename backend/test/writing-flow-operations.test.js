@@ -195,7 +195,8 @@ test('migration trạng thái lớp và tìm kiếm không cấp quyền ghi dat
   for (const column of ['mapping_status', 'class_status', 'eligibility_reason',
     'scan_attempt_count', 'last_mapping_sync_at']) assert.match(sql, new RegExp(column, 'u'));
   assert.match(sql, /CREATE OR REPLACE FUNCTION writing_flow\.normalize_search/u);
-  assert.match(sql, /GRANT SELECT ON TABLE mapping\.classroom_course_mapping/u);
+  assert.match(sql, /mapping\.classroom_course_mapping/u);
+  assert.match(sql, /GRANT SELECT ON TABLE %s TO writing_practice_api/u);
   assert.doesNotMatch(sql, /GRANT\s+(?:INSERT|UPDATE|DELETE)[\s\S]*mapping\./iu);
   assert.doesNotMatch(sql, /\bDELETE\s+FROM\b/iu);
 });

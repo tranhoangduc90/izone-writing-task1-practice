@@ -246,6 +246,12 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
             imported_at,snapshot_ciphertext
           FROM writing_flow.legacy_record
           WHERE ($1::text IS NULL OR class_code=$1)
+            AND (essay_slot IS NOT NULL OR NOT EXISTS (
+              SELECT 1 FROM writing_flow.legacy_record AS slotted
+              WHERE slotted.source_app_id=writing_flow.legacy_record.source_app_id
+                AND slotted.source_table_id=writing_flow.legacy_record.source_table_id
+                AND slotted.source_record_id=writing_flow.legacy_record.source_record_id
+                AND slotted.essay_slot IS NOT NULL))
           ORDER BY source_app_id,source_table_id,source_record_id,essay_slot,imported_at DESC,legacy_id DESC
         ) AS latest
         ORDER BY coalesce(created_at_source,imported_at) DESC,legacy_id DESC LIMIT $2 OFFSET $3`,

@@ -145,6 +145,8 @@ test('lịch sử chỉ trả bản mới nhất mỗi ô và giải mã các fi
       + `${'a'.repeat(48)}/view?v=1` };
   const pool = poolWith(async sql => {
     assert.match(sql, /DISTINCT ON \(source_app_id,source_table_id,source_record_id,essay_slot\)/u);
+    assert.match(sql, /essay_slot IS NOT NULL OR NOT EXISTS/u);
+    assert.match(sql, /slotted\.source_record_id=writing_flow\.legacy_record\.source_record_id/u);
     return { rowCount: 1, rows: [{ legacy_id: 'legacy', essay_slot: 2,
       snapshot_ciphertext: seal(JSON.stringify(snapshot), Buffer.from(hexKey, 'hex')) }] };
   });

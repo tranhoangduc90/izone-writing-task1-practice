@@ -3,7 +3,7 @@ import { loadConfig } from './config.js';
 import { createDatabasePool } from './db.js';
 import { createWritingPracticeService } from './service.js';
 import { createLessonPracticeService } from './lesson-service.js';
-import { createTeacherAuthMiddleware } from './teacher-auth.js';
+import { createTeacherAuthService } from './teacher-auth.js';
 import { createProvisionalStudentService } from './provisional-service.js';
 import { createTeacherCommentService } from './teacher-comment-service.js';
 import { createLmsResultService } from './lms-result-service.js';
@@ -16,6 +16,7 @@ import { createWritingFlowScan } from './writing-flow-scan.js';
 const config = loadConfig();
 const pool = createDatabasePool(config);
 const provisionalService = createProvisionalStudentService({ pool, pepper: config.provisionalStudentPinPepper });
+const teacherAuth = createTeacherAuthService({ config, pool });
 const app = createApp({
   config,
   pool,
@@ -29,7 +30,8 @@ const app = createApp({
   writingFlowAiCall: createWritingFlowAiCall({ pool, encryptionKey: config.writingFlowEncryptionKey }),
   writingFlowScan: createWritingFlowScan({ pool }),
   teacherCommentService: createTeacherCommentService({ pool }),
-  adminAuth: createTeacherAuthMiddleware({ config, pool })
+  teacherAuth,
+  adminAuth: teacherAuth.authenticate
 });
 const server = app.listen(config.port, '0.0.0.0', () => console.log(`Writing Task 1 API đang lắng nghe tại cổng ${config.port}.`));
 server.requestTimeout = 30_000;

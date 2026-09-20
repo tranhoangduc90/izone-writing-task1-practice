@@ -60,7 +60,7 @@ Không có endpoint sửa, xóa, chấp thuận hoặc ẩn comment. Nếu học
 
 ### `POST /api/v1/admin/sessions/:sessionRef/sections/:section/reopen`
 
-Yêu cầu Google ID token của giảng viên có quyền; mở vòng mới và ghi audit, không xóa lịch sử cũ.
+Yêu cầu cookie phiên của giảng viên có quyền; mở vòng mới và ghi audit, không xóa lịch sử cũ. Google ID token chỉ được dùng khi mở phiên, không gửi lại trên từng request.
 
 ## API nội bộ dành cho n8n
 

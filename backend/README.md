@@ -26,7 +26,7 @@ Nguồn quyết định là [SYSTEM_CONTRACT.md](../docs/SYSTEM_CONTRACT.md). C�
 - API giảng viên dưới `/api/v1/admin/.../teacher-comments` cho mọi tài khoản teacher đã xác minh tạo comment, trả lời và đánh dấu đã xử lý. Trạng thái đã xử lý vẫn luôn được trả về và hiển thị.
 - API n8n là `/api/v1/internal/grading-jobs/{claim,:jobRef/complete,:jobRef/fail,recover}` với `Authorization: Bearer …`; claim nhận lease 420 giây, riêng Draft được API gia hạn thành 1.200 giây, và không trả tên học viên. API không áp trần concurrency toàn cục; n8n kiểm soát số lượt chạy đồng thời. `maxJobs` chỉ là kích thước một lần lấy hàng đợi.
 
-`needs_revision` mới tăng `failStreak`; lần 3, 6, 9… trả `supportWarning`. `passed` khóa đúng section và đưa `failStreak` về 0. Riêng Draft chỉ được hoàn tất khi callback chứa link HTTPS đúng host `practice.izone.edu.vn` và đường dẫn `/shared/writing-essays/`; API lưu link vào `result_artifacts` rồi khóa Draft. Endpoint mở lại section yêu cầu Google ID token của giảng viên có quyền toàn hệ thống trong `mapping.reviewer_account` và ghi audit.
+`needs_revision` mới tăng `failStreak`; lần 3, 6, 9… trả `supportWarning`. `passed` khóa đúng section và đưa `failStreak` về 0. Riêng Draft chỉ được hoàn tất khi callback chứa link HTTPS đúng host `practice.izone.edu.vn` và đường dẫn `/shared/writing-essays/`; API lưu link vào `result_artifacts` rồi khóa Draft. Google ID token của giảng viên chỉ dùng một lần tại `POST /api/v1/auth/session`; các endpoint giảng viên sau đó dùng cookie phiên `HttpOnly` theo path `/writing-api`. Phiên được gia hạn khi sử dụng, hết hạn sau 90 ngày không hoạt động hoặc tối đa 365 ngày, và bị thu hồi khi đăng xuất. Request ghi bằng cookie phải có origin hợp lệ cùng header `x-izone-csrf: 1`.
 
 ## Contract Lesson 13
 
@@ -35,7 +35,7 @@ Nguồn quyết định là [SYSTEM_CONTRACT.md](../docs/SYSTEM_CONTRACT.md). C�
 - `PUT /api/v1/lesson-sessions/:sessionRef/responses` lưu bản nháp với `baseVersion` và `requestId`; bản cũ bị từ chối bằng `409`.
 - `PUT /api/v1/lesson-sessions/:sessionRef/live` chỉ cập nhật thời điểm hoạt động và ô đang viết, không lưu từng phím bấm.
 - `POST /api/v1/lesson-sessions/:sessionRef/checks` tạo đúng một Comment cho section và từ chối section trống hoặc đã đạt.
-- `GET /api/v1/admin/live/activities/:slug` yêu cầu Google ID token và trả một bản tổng hợp cả lớp cho dashboard chỉ đọc.
+- `GET /api/v1/admin/live/activities/:slug` yêu cầu phiên giảng viên hợp lệ và trả một bản tổng hợp cả lớp cho dashboard chỉ đọc.
 - Claim n8n có thêm `workerPool`. Workflow Task 1 mặc định chỉ lấy `task1`; workflow Lesson 13 chỉ lấy `lesson13`. API tách đúng hàng đợi nhưng không áp trần concurrency; từng workflow n8n tự điều tiết số lượt chạy.
 
 Seed [Lesson 13 draft](../docs/migrations/2026-08-14-seed-lesson13-young-leaders-draft.sql) cố ý để activity ở trạng thái `draft` và chưa gán lớp. Không đổi thành `active` trước khi test PostgreSQL staging và xác nhận đúng lớp/ngày kết thúc.

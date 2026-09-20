@@ -232,7 +232,7 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
         const handoff = await client.query(`
           INSERT INTO writing_flow.handoff
             (pair_id, from_stage, to_stage, source_result_sha256, next_send_at)
-          VALUES ($1,'intake','precheck',$2,now())
+          VALUES ($1,'intake','precheck',$2,now()+interval '6 hours')
           RETURNING handoff_id`,
         [pairId, pair.resultSha256]);
         receipts.push({ essaySlot: pair.essaySlot, pairId, status: 'received',

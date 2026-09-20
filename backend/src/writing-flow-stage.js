@@ -333,7 +333,7 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
         const handoff = await client.query(`
           INSERT INTO writing_flow.handoff
             (pair_id,from_stage,to_stage,source_result_sha256,next_send_at)
-          VALUES ($1,$2,$3,$4,now())
+          VALUES ($1,$2,$3,$4,now()+interval '6 hours')
           RETURNING handoff_id`, [pairId, stageKey, nextStage, resultSha]);
         handoffId = handoff.rows[0].handoff_id;
       }
@@ -378,7 +378,7 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
           WHERE pair_id=$1 AND stage_key=$2`, [pairId, stageKey, errorCode]);
         const handoff = await client.query(`INSERT INTO writing_flow.handoff
           (pair_id,from_stage,to_stage,source_result_sha256,next_send_at)
-          VALUES ($1,'retry',$2,$3,now()) RETURNING handoff_id`,
+          VALUES ($1,'retry',$2,$3,now()+interval '6 hours') RETURNING handoff_id`,
         [pairId, stageKey, sha256(attemptId)]);
         return { status: 'retry_requested', pairId, stageKey,
           handoffId: handoff.rows[0].handoff_id };

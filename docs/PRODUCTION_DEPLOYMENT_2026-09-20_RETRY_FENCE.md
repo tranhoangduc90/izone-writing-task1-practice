@@ -15,14 +15,15 @@ Khi chạy lại từ một bước trước, một execution cũ của bước 
 - Một nguồn đã giao cho n8n chỉ được gửi lại sau sáu giờ nếu chưa có xác nhận. Khoảng chờ này là đường cứu cuối, không phải lịch gửi lặp.
 - Backend chỉ giao thêm nguồn khi số nguồn vừa giao nhưng chưa được xác nhận còn dưới 100. Workflow theo phút có thể nhận phần sức chứa còn trống, tối đa 100 nguồn trong một lượt; đây là điều tiết đầu vào Google Classroom, không giới hạn số bài AI được chấm đồng thời.
 - Hàng đọc file cũng giữ tối đa 100 link chưa có biên nhận. Một link đã gửi chỉ được gửi lại sau sáu giờ; khóa giao dịch ngăn hai lịch chạy cùng lúc cùng lấy vượt ngưỡng.
+- Bàn giao mà workflow đang gọi trực tiếp được đặt mốc cứu hộ sau sáu giờ ngay khi tạo. Vì vậy workflow nhận việc một lần; bộ cứu hộ chỉ phát lại nếu lệnh trực tiếp thật sự mất.
 - Khi hàng n8n đang đầy, nguồn mới vẫn được giữ nguyên ở trạng thái chờ trong database. Workflow theo phút tự nhận tiếp khi có chỗ, nên người vận hành không cần bấm lại.
 - `FETCH_FAILED` và thiếu metadata do lỗi kỹ thuật được đưa lại vào hàng sau 30 rồi 60 giây; chỉ sau lần đọc thứ ba vẫn lỗi mới chuyển sang **Cần kiểm tra**. Lỗi đề, bảng và định dạng thật không lặp vô ích.
 - Khi một lượt đọc sau đã thành công hoặc xác nhận lỗi nguồn thật, cảnh báo kỹ thuật cũ được đóng lại để dashboard không tiếp tục báo một lỗi đã hết.
 
 ## Kiểm thử và đọc lại production
 
-- Toàn bộ 156 test backend đạt; có ca riêng cho lệnh cũ đã đóng, đầu vào mới sau retry, chống gửi lặp nguồn, ngưỡng sức chứa của hàng n8n, ngưỡng 100 link đọc file và ba lượt đọc nguồn kỹ thuật.
-- Image production: `izone-writing-practice-api:20260920.10-scan-backpressure`.
+- Toàn bộ 157 test backend đạt; có ca riêng cho lệnh cũ đã đóng, đầu vào mới sau retry, chống gửi lặp nguồn, ngưỡng sức chứa của hàng n8n, ngưỡng 100 link đọc file, bàn giao trực tiếp không bị bộ cứu hộ phát trùng và ba lượt đọc nguồn kỹ thuật.
+- Image production: `izone-writing-practice-api:20260920.11-handoff-delay`.
 - Container `writing-task1-practice-api` healthy, restart count 0; `/health` và `/ready` đều trả `ok=true`.
 - Bản phát hành cuối được dựng từ source đã qua bộ test nêu trên; readback container xác nhận đúng image và không có lần restart.
 - Các mốc backup trước phát hành gồm bản trước khóa retry, trước dấu đầu vào mới, trước chống gửi lặp nguồn, trước ngưỡng sức chứa và trước bản điều tiết hàng đọc file. Đường dẫn chi tiết nằm trong nhật ký triển khai riêng tư, không đưa vào hướng dẫn thao tác hằng ngày.

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { classCodeFromName, createWritingFlowService, documentIdFromSearch,
   mappingClassState, markMappingConflicts, mergeClassCoverage } from '../src/writing-flow-service.js';
+import { seal } from '../src/writing-flow-crypto.js';
 
 const reviewId = '11111111-1111-4111-8111-111111111111';
 const requestId = '22222222-2222-4222-8222-222222222222';
@@ -229,6 +230,23 @@ test('dashboard không còn phụ thuộc view phân công Lark', async () => {
   assert.equal(calls.length, 2);
   assert.equal(calls.every(call => call.sql.includes('mapping.reviewer_class_access')), true);
   assert.equal(calls.every(call => !call.sql.includes('lark_export_teacher_assignments')), true);
+});
+
+test('mọi tab dashboard đọc được danh sách bài có nội dung mã hóa', async () => {
+  const encryptionKey = Buffer.alloc(32, 7);
+  const sourceCiphertext = seal(JSON.stringify([
+    'Bài viết thử', 'Đề bài thử', 'https://example.invalid/chart.png', null, true,
+  ]), encryptionKey);
+  const pool = { query: async () => ({ rows: [{
+    pair_id: '11111111-1111-4111-8111-111111111111',
+    source_ciphertext: sourceCiphertext,
+  }] }) };
+  const rows = await createWritingFlowService({ pool, encryptionKey }).listPairs({ limit: 1 });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].topic, 'Đề bài thử');
+  assert.equal(rows[0].image_url, 'https://example.invalid/chart.png');
+  assert.equal(rows[0].tr_cc_check, true);
+  assert.equal(Object.hasOwn(rows[0], 'source_ciphertext'), false);
 });
 
 test('số đếm dashboard ghi rõ bảng lớp khi pair và source cùng có class_code', async () => {

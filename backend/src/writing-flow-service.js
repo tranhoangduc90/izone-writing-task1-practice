@@ -3,6 +3,7 @@ import { withTransaction } from './db.js';
 import { ApiError } from './service.js';
 import { createWritingFlowIntake } from './writing-flow-intake.js';
 import { createWritingFlowOperations, STAGES } from './writing-flow-operations.js';
+import { open } from './writing-flow-crypto.js';
 
 // Nguồn vào: mapping lớp và phân công giảng viên đã có sẵn trong PostgreSQL.
 // Việc chính: chuẩn hóa tên lớp thành mã lớp và gom các giảng viên đang hoạt động.
@@ -600,9 +601,9 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
         cursorAt, cursorId, limit, offset]);
       return result.rows.map(row => {
         let topic = null; let imageUrl = null; let trCcCheck = null;
-        if (key && row.source_ciphertext) {
+        if (encryptionKey && row.source_ciphertext) {
           try {
-            const decoded = JSON.parse(open(row.source_ciphertext, key));
+            const decoded = JSON.parse(open(row.source_ciphertext, encryptionKey));
             topic = decoded[1] || null; imageUrl = decoded[2] || null;
             trCcCheck = typeof decoded[4] === 'boolean' ? decoded[4] : null;
           } catch { /* Chi tiết vẫn báo lỗi giải mã khi người dùng mở dòng. */ }

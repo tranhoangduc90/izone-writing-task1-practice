@@ -211,6 +211,7 @@ test('thống kê giảng viên đọc trực tiếp database mapping và lọc 
   assert.equal(calls.every(call => call.sql.includes("account.status='active'")), true);
   assert.equal(calls.every(call => !call.sql.includes('lark_export_teacher_assignments')), true);
   assert.equal(calls.every(call => !/\b(?:INSERT|UPDATE|DELETE)\b/iu.test(call.sql)), true);
+  assert.equal(calls.every(call => !/USING \(class_code\)/u.test(call.sql)), true);
   assert.deepEqual(calls[1].values, ['IC2200', 'Giảng viên thử',
     ['intake', 'precheck', 'main', 'critic', 'arbiter', 'render', 'deliver'],
     null, null, null, false, null, null, null, null, null, null, null, 50, 10]);
@@ -250,4 +251,24 @@ test('số đếm dashboard ghi rõ bảng lớp khi pair và source cùng có c
   assert.equal(calls.every(call => !/USING \(class_code\)/u.test(call.sql)), true);
   assert.match(calls[1].sql,
     /teacher_assignments AS teachers ON teachers\.class_code=pair\.class_code/u);
+});
+
+test('mọi bảng dashboard nối lớp bằng tên bảng rõ ràng để PostgreSQL không hiểu mơ hồ', async () => {
+  const calls = [];
+  const pool = { query: async (sql, values = []) => {
+    calls.push({ sql, values });
+    if (/USING \(class_code\)/u.test(sql)) {
+      const error = new Error('common column name "class_code" appears more than once');
+      error.code = '42702';
+      throw error;
+    }
+    return { rows: [] };
+  } };
+  const service = createWritingFlowService({ pool });
+  await service.dailyStats();
+  await service.listReviews();
+  assert.equal(calls.length, 2);
+  assert.equal(calls.every(call => !/USING \(class_code\)/u.test(call.sql)), true);
+  assert.match(calls[1].sql,
+    /class_registry AS registry ON registry\.class_code=p\.class_code/u);
 });

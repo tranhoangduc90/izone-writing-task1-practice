@@ -390,8 +390,8 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
         SELECT p.class_code,p.status,count(*)::integer AS pair_count,
                coalesce(t.teacher_names,ARRAY[]::text[]) AS teacher_names
           FROM writing_flow.pair AS p
-          LEFT JOIN teacher_assignments AS t USING (class_code)
-          LEFT JOIN writing_flow.class_registry AS registry USING (class_code)
+          LEFT JOIN teacher_assignments AS t ON t.class_code=p.class_code
+          LEFT JOIN writing_flow.class_registry AS registry ON registry.class_code=p.class_code
          WHERE registry.class_status IS DISTINCT FROM 'completed'
          GROUP BY p.class_code,p.status,t.teacher_names
          ORDER BY p.class_code,p.status`);
@@ -520,7 +520,7 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
           ON deliver.pair_id=p.pair_id AND deliver.stage_key='deliver'
          AND deliver.status='succeeded' AND deliver.completed_at IS NOT NULL
         LEFT JOIN writing_flow.source_record AS source ON source.source_id=p.source_id
-        LEFT JOIN teacher_assignments AS teachers USING (class_code)
+        LEFT JOIN teacher_assignments AS teachers ON teachers.class_code=p.class_code
         WHERE p.status='delivered' AND p.skipped_at IS NULL
           AND ($1::text IS NULL OR p.class_code=$1)
           AND ($2::text IS NULL OR $2=ANY(coalesce(nullif(source.teacher_names,ARRAY[]::text[]),
@@ -675,9 +675,9 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
                source.student_name,source.classroom_url,source.file_url,source.source_status
           FROM writing_flow.manual_review AS r
           JOIN writing_flow.pair AS p ON p.pair_id = r.pair_id
-          LEFT JOIN teacher_assignments AS t USING (class_code)
+          LEFT JOIN teacher_assignments AS t ON t.class_code=p.class_code
           LEFT JOIN writing_flow.source_record AS source ON source.source_id=p.source_id
-          LEFT JOIN writing_flow.class_registry AS registry USING (class_code)
+          LEFT JOIN writing_flow.class_registry AS registry ON registry.class_code=p.class_code
           JOIN writing_flow.stage_result AS s
             ON s.pair_id = r.pair_id AND s.stage_key = r.stage_key
          WHERE r.status <> 'resolved'

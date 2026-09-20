@@ -180,6 +180,22 @@ test('dịch vụ chỉ đọc sổ lớp của hệ thống mới và mốc qu�
   assert.equal(calls.every(call => !/student|essay|ciphertext|token/iu.test(call.sql)), true);
 });
 
+test('nhật ký thao tác toàn hệ thống lọc theo lớp và không đọc nội dung bài', async () => {
+  let seen;
+  const pool = { query: async (sql, params) => {
+    seen = { sql, params };
+    return { rows: [{ event_id: 'event-demo', event_type: 'class_mapping_changed',
+      class_code: 'IC2200', reason: 'Đồng bộ trạng thái lớp' }] };
+  } };
+  const rows = await createWritingFlowService({ pool }).listOperatorEvents({
+    classCode: 'IC2200', eventType: 'class_mapping_changed', limit: 25, offset: 0,
+  });
+  assert.equal(rows[0].class_code, 'IC2200');
+  assert.deepEqual(seen.params, ['IC2200', 'class_mapping_changed', 25, 0]);
+  assert.match(seen.sql, /writing_flow\.operator_event/u);
+  assert.doesNotMatch(seen.sql, /source_ciphertext|result_ciphertext|essay_text/iu);
+});
+
 test('thống kê giảng viên đọc trực tiếp database mapping và lọc ngay trong database', async () => {
   const calls = [];
   const pool = { query: async (sql, values = []) => {

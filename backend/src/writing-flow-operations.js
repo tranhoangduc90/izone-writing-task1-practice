@@ -114,7 +114,12 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
                   ELSE (((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date + 1) + time '05:00')
                       AT TIME ZONE 'Asia/Ho_Chi_Minh' - now() END
                 WHEN scan_attempt_count>=3 THEN interval '100 years'
-                ELSE make_interval(mins => power(2, greatest(scan_attempt_count-1,0))::integer)
+                -- Chờ 1, 2 hoặc 4 phút rồi cộng 0-30 giây ngẫu nhiên.
+                -- Độ lệch nhỏ này tránh nhiều lớp lỗi cùng lúc cùng gọi lại Google.
+                ELSE make_interval(secs => (
+                  60 * power(2, greatest(scan_attempt_count-1,0))
+                  + floor(random() * 31)
+                )::integer)
               END,
             scan_attempt_count=CASE WHEN $2='succeeded' THEN 0 ELSE scan_attempt_count END,
             updated_at=now() WHERE class_code=$1

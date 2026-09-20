@@ -148,6 +148,8 @@ test('lớp lỗi lần ba vào Cần kiểm tra, lớp thành công về đúng
   assert.equal((await operations.acknowledgeClassScan({ classCode: 'IC2200',
     outcome: 'succeeded' })).scan_status, 'succeeded');
   assert.match(statements[0].sql, /scan_attempt_count>=3 THEN 'needs_review'/u);
+  assert.match(statements[0].sql, /floor\(random\(\) \* 31\)/u);
+  assert.match(statements[0].sql, /60 \* power\(2,/u);
   for (const time of ['05:00', '12:00', '17:00']) assert.equal(statements[1].sql.includes(time), true);
   assert.match(statements[1].sql, /Asia\/Ho_Chi_Minh/u);
 });
@@ -206,5 +208,14 @@ test('migration trạng thái lớp và tìm kiếm không cấp quyền ghi dat
   assert.match(sql, /mapping\.classroom_course_mapping/u);
   assert.match(sql, /GRANT SELECT ON TABLE %s TO writing_practice_api/u);
   assert.doesNotMatch(sql, /GRANT\s+(?:INSERT|UPDATE|DELETE)[\s\S]*mapping\./iu);
+  assert.doesNotMatch(sql, /\bDELETE\s+FROM\b/iu);
+});
+
+test('migration nhật ký cho phép ghi thay đổi mapping và có chỉ mục theo lớp', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const sql = await readFile(new URL('../../docs/migrations/2026-09-20-writing-flow-operations-v4.sql',
+    import.meta.url), 'utf8');
+  assert.match(sql, /class_mapping_changed/u);
+  assert.match(sql, /writing_operator_event_class_idx/u);
   assert.doesNotMatch(sql, /\bDELETE\s+FROM\b/iu);
 });

@@ -19,6 +19,8 @@ function makeApp(role, overrides = {}, stageOverrides = {}, aiOverrides = {}, sc
     recordWorkflowFailure: async input => ({ workflowId: input.workflowId,
       executionId: input.executionId, seenCount: 1 }),
     listWorkflowFailures: async () => [{ workflow_id: 'workflow-demo', execution_id: '123' }],
+    listOperatorEvents: async () => [{ event_id: reviewId, event_type: 'class_mapping_changed',
+      class_code: 'IC2200', actor_ref: 'system:mapping-sync' }],
     listReviews: async () => [{ review_id: reviewId, status: 'open' }],
     listSourceIssues: async () => [{ issue_key: 'a'.repeat(64), reason_code: 'FETCH_FAILED' }],
     listClassCoverage: async () => [{ class_code: 'IC2200', status: 'covered' }],
@@ -273,6 +275,23 @@ test('danh sách bài chuyển bộ lọc lớp và giảng viên vào truy vấ
     search: null, dateFrom: null, dateTo: null,
     limit: 50, offset: 10, cursorAt: null, cursorId: null,
   });
+});
+
+test('nhật ký thao tác toàn hệ thống chỉ mở cho quản trị viên và nhận bộ lọc lớp', async () => {
+  let received;
+  const app = makeApp('admin', { listOperatorEvents: async input => {
+    received = input;
+    return [{ event_id: reviewId, event_type: 'class_mapping_changed', class_code: 'IC2200' }];
+  } });
+  const url = '/api/v1/admin/writing-flow/operator-events';
+  assert.equal((await request(makeApp(null)).get(url)).status, 401);
+  assert.equal((await request(makeApp('teacher')).get(url)).status, 403);
+  const response = await request(app).get(url)
+    .query({ classCode: 'IC2200', eventType: 'class_mapping_changed', limit: 50, offset: 0 });
+  assert.equal(response.status, 200);
+  assert.equal(response.body.events[0].class_code, 'IC2200');
+  assert.deepEqual(received, { classCode: 'IC2200', eventType: 'class_mapping_changed',
+    limit: 50, offset: 0 });
 });
 
 test('API lớp, bộ lọc và biểu đồ chỉ mở cho quản trị viên', async () => {

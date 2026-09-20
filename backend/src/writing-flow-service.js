@@ -201,6 +201,10 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
           && row.operational_state !== 'mapping_conflict');
         const registered = [];
         for (const item of registryClasses) {
+          const previousResult = await client.query(`SELECT class_code,classroom_course_id,
+              enabled,mapping_status,class_status,eligibility_reason
+            FROM writing_flow.class_registry WHERE class_code=$1 FOR UPDATE`, [item.class_code]);
+          const previous = previousResult.rows[0] || null;
           const result = await client.query(`INSERT INTO writing_flow.class_registry
             (class_code,classroom_course_id,classroom_name,teacher_names,enabled,source_ref,
              scan_status,next_scan_at,erp_course_class_id,mapping_status,class_status,
@@ -234,18 +238,59 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
           [item.class_code, item.classroom_course_id, item.classroom_name,
             item.teacher_names, item.enabled, item.erp_course_class_id,
             item.mapping_status, item.class_status, item.operational_state]);
-          registered.push(result.rows[0]);
+          const current = result.rows[0];
+          registered.push(current);
+          const before = previous ? {
+            classroomCourseId: previous.classroom_course_id,
+            enabled: previous.enabled,
+            mappingStatus: previous.mapping_status,
+            classStatus: previous.class_status,
+            eligibilityReason: previous.eligibility_reason,
+          } : {};
+          const after = {
+            classroomCourseId: item.classroom_course_id,
+            enabled: item.enabled,
+            mappingStatus: item.mapping_status,
+            classStatus: item.class_status,
+            eligibilityReason: item.operational_state,
+          };
+          if (!previous || JSON.stringify(before) !== JSON.stringify(after)) {
+            await client.query(`INSERT INTO writing_flow.operator_event
+              (class_code,event_type,actor_ref,request_id,reason,before_state,after_state)
+              VALUES ($1,'class_mapping_changed','system:mapping-sync',gen_random_uuid(),
+                'Đồng bộ trạng thái lớp từ database mapping',$2::jsonb,$3::jsonb)`,
+            [item.class_code, JSON.stringify(before), JSON.stringify(after)]);
+          }
         }
         const codes = registryClasses.map(row => row.class_code);
         if (!codes.length) {
           throw new ApiError(503, 'MAPPING_CLASSES_INVALID',
             'Chưa có lớp mapping nào đủ mã lớp và Classroom ID.');
         }
+        const staleResult = await client.query(`SELECT class_code,classroom_course_id,
+            enabled,mapping_status,class_status,eligibility_reason
+          FROM writing_flow.class_registry WHERE NOT (class_code=ANY($1::text[])) FOR UPDATE`, [codes]);
         await client.query(`UPDATE writing_flow.class_registry
           SET enabled=false,scan_status='paused',scan_attempt_count=0,
               eligibility_reason='not_in_mapping',next_scan_at=now()+interval '100 years',
               last_mapping_sync_at=now(),updated_at=now()
           WHERE NOT (class_code=ANY($1::text[]))`, [codes]);
+        for (const previous of staleResult.rows) {
+          if (!previous.enabled && previous.eligibility_reason === 'not_in_mapping') continue;
+          const before = {
+            classroomCourseId: previous.classroom_course_id,
+            enabled: previous.enabled,
+            mappingStatus: previous.mapping_status,
+            classStatus: previous.class_status,
+            eligibilityReason: previous.eligibility_reason,
+          };
+          const after = { ...before, enabled: false, eligibilityReason: 'not_in_mapping' };
+          await client.query(`INSERT INTO writing_flow.operator_event
+            (class_code,event_type,actor_ref,request_id,reason,before_state,after_state)
+            VALUES ($1,'class_mapping_changed','system:mapping-sync',gen_random_uuid(),
+              'Lớp không còn trong database mapping',$2::jsonb,$3::jsonb)`,
+          [previous.class_code, JSON.stringify(before), JSON.stringify(after)]);
+        }
         return { received: classes.length, registered: registered.length,
           active: registered.filter(row => row.enabled).length,
           completed: classes.filter(row => row.operational_state === 'completed').length,
@@ -417,6 +462,26 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
       const expected = mapping.map(item => ({ ...item, expected: item.enabled,
         erp_source_found: true, classroom_source_found: Boolean(item.classroom_course_id) }));
       return mergeClassCoverage(expected, seen.rows);
+    },
+
+    // Nhận vào: bộ lọc nhẹ từ dashboard quản trị.
+    // Việc chính: đọc dấu vết thao tác người dùng và thay đổi mapping theo thứ tự mới nhất.
+    // Trả ra: mã đối tượng, lớp, lý do và trạng thái trước/sau; không trả bài viết hay kết quả AI.
+    // Khi lỗi: API trả mã truy vết chung để đối chiếu log server.
+    async listOperatorEvents({ classCode = null, eventType = null,
+      limit = 100, offset = 0 } = {}) {
+      const result = await pool.query(`SELECT event.event_id,event.pair_id,event.source_id,
+          coalesce(event.class_code,pair.class_code,source.class_code) AS class_code,
+          event.event_type,event.actor_ref,event.reason,event.before_state,event.after_state,
+          event.created_at
+        FROM writing_flow.operator_event AS event
+        LEFT JOIN writing_flow.pair AS pair ON pair.pair_id=event.pair_id
+        LEFT JOIN writing_flow.source_record AS source ON source.source_id=event.source_id
+        WHERE ($1::text IS NULL OR coalesce(event.class_code,pair.class_code,source.class_code)=$1)
+          AND ($2::text IS NULL OR event.event_type=$2)
+        ORDER BY event.created_at DESC,event.event_id DESC
+        LIMIT $3 OFFSET $4`, [classCode, eventType, limit, offset]);
+      return result.rows;
     },
 
     async listClasses({ view = 'active' } = {}) {

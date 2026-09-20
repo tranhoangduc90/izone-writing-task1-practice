@@ -582,6 +582,13 @@ export function createApp({config,pool,service,lessonService=service,provisional
    const offset=parse(z.coerce.number().int().min(0).max(100000),q.query.offset??0);
    r.json({ok:true,failures:await writingFlowService.listWorkflowFailures({limit,offset})});
  }));
+ app.get('/api/v1/admin/writing-flow/operator-events',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
+   const limit=parse(z.coerce.number().int().min(1).max(200),q.query.limit??100);
+   const offset=parse(z.coerce.number().int().min(0).max(100000),q.query.offset??0);
+   const classCode=q.query.classCode?parse(z.string().trim().min(1).max(80),q.query.classCode):null;
+   const eventType=q.query.eventType?parse(z.string().trim().min(1).max(80),q.query.eventType):null;
+   r.json({ok:true,events:await writingFlowService.listOperatorEvents({classCode,eventType,limit,offset})});
+ }));
  // Bấm chạy lại chỉ ghi yêu cầu bền; workflow retry phải nhận và xác nhận sau đó.
  app.post('/api/v1/admin/writing-flow/reviews/:reviewId/retry',writes,adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
    const reviewId=parse(uuid,q.params.reviewId);

@@ -13,7 +13,7 @@ Khi chạy lại từ một bước trước, một execution cũ của bước 
 - Thành quả mới đầu tiên cập nhật dấu đầu vào; các lượt tiếp theo lại bị khóa để chống ghép nhầm bài.
 - Giới hạn ba lượt chỉ tính lỗi thật của đúng bước, không bị tiêu hao bởi execution cũ.
 - Một nguồn đã giao cho n8n chỉ được gửi lại sau sáu giờ nếu chưa có xác nhận. Khoảng chờ này là đường cứu cuối, không phải lịch gửi lặp.
-- Backend chỉ giao thêm nguồn khi số nguồn vừa giao nhưng chưa được xác nhận còn dưới 100. Mỗi workflow nhận tối đa 20 nguồn trong một lượt; đây là điều tiết đầu vào Google Classroom, không giới hạn số bài AI được chấm đồng thời.
+- Backend chỉ giao thêm nguồn khi số nguồn vừa giao nhưng chưa được xác nhận còn dưới 100. Workflow theo phút có thể nhận phần sức chứa còn trống, tối đa 100 nguồn trong một lượt; đây là điều tiết đầu vào Google Classroom, không giới hạn số bài AI được chấm đồng thời.
 - Khi hàng n8n đang đầy, nguồn mới vẫn được giữ nguyên ở trạng thái chờ trong database. Workflow theo phút tự nhận tiếp khi có chỗ, nên người vận hành không cần bấm lại.
 - `FETCH_FAILED` và thiếu metadata do lỗi kỹ thuật được đưa lại vào hàng sau 30 rồi 60 giây; chỉ sau lần đọc thứ ba vẫn lỗi mới chuyển sang **Cần kiểm tra**. Lỗi đề, bảng và định dạng thật không lặp vô ích.
 - Khi một lượt đọc sau đã thành công hoặc xác nhận lỗi nguồn thật, cảnh báo kỹ thuật cũ được đóng lại để dashboard không tiếp tục báo một lỗi đã hết.

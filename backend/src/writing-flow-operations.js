@@ -412,10 +412,11 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
         await client.query(`UPDATE writing_flow.stage_result
           SET status='pending',cycle_no=cycle_no+1,attempt_count=0,result_sha256=NULL,
               result_ciphertext=NULL,selected_attempt_no=NULL,error_code=NULL,
+              input_sha256=CASE WHEN stage_key=$4 THEN input_sha256 ELSE NULL END,
               n8n_execution_id=NULL,started_at=NULL,lease_expires_at=NULL,
               completed_at=NULL,updated_at=now()
           WHERE pair_id=$1 AND array_position($2::text[],stage_key) >= $3`,
-        [pairId, STAGES, stageIndex + 1]);
+        [pairId, STAGES, stageIndex + 1, stageKey]);
         await client.query(`UPDATE writing_flow.manual_review SET status='resolved',resolved_at=now()
           WHERE pair_id=$1 AND status<>'resolved'`, [pairId]);
         await client.query(`UPDATE writing_flow.handoff SET status='acknowledged',acknowledged_at=now(),

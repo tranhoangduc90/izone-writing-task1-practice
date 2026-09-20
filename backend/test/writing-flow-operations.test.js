@@ -175,7 +175,9 @@ test('retry không nhận intake, không nhận bài đã bỏ qua và làm mớ
   assert.deepEqual(result.invalidatedStages, ['critic', 'arbiter', 'render', 'deliver']);
   const reset = statements.find(item => item.sql.includes("SET status='pending'"));
   assert.equal(reset.params[2], 4);
+  assert.equal(reset.params[3], 'critic');
   assert.deepEqual(reset.params[1], STAGES);
+  assert.match(reset.sql, /input_sha256=CASE WHEN stage_key=\$4 THEN input_sha256 ELSE NULL END/u);
   assert.equal(statements.some(item => item.sql.includes("'SUPERSEDED_BY_OPERATOR_RETRY'")), true);
 });
 

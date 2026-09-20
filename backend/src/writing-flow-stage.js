@@ -60,6 +60,11 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
         throw new ApiError(409, 'HANDOFF_MISMATCH', 'Yêu cầu bàn giao không khớp bài và bước.');
       }
       const handoff = handoffResult.rows[0];
+      // Một lệnh đã đóng có thể vẫn nằm trong hàng đợi n8n. Không cho lệnh cũ
+      // nhận lượt thử mới sau khi người vận hành đã retry từ bước trước.
+      if (!['pending', 'sent'].includes(handoff.status)) {
+        return { status: 'superseded', pairId, stageKey };
+      }
       if (pair.status === 'superseded') {
         await client.query(`UPDATE writing_flow.handoff SET status='acknowledged',
           acknowledged_at=now() WHERE handoff_id=$1`, [handoffId]);
@@ -126,7 +131,13 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
         && stage.status === 'pending'
         && Number(stage.attempt_count) === 0
         && stage.error_code === 'REPUBLISH_REQUESTED';
-      if (acceptsRepublishedRender
+      // Retry từ một bước trước xóa khóa đầu vào của các bước sau. Lần bàn giao
+      // mới đầu tiên được phép nhận hash mới; từ lượt thứ hai trở đi vẫn khóa chặt.
+      const acceptsResetInput = handoff.from_stage !== 'retry'
+        && stage.status === 'pending'
+        && Number(stage.attempt_count) === 0
+        && !stage.input_sha256;
+      if ((acceptsRepublishedRender || acceptsResetInput)
         && stage.input_sha256 !== handoff.source_result_sha256) {
         await client.query(`UPDATE writing_flow.stage_result
           SET input_sha256=$3,updated_at=now()

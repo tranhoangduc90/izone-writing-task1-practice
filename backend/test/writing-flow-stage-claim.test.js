@@ -119,3 +119,82 @@ test('bước giao link nhận phiên bản trang mới chỉ khi đã đánh d�
   assert.equal(updates.length, 1);
   assert.deepEqual(updates[0], [pairId, 'deliver', newHash]);
 });
+
+test('bàn giao đã đóng trong hàng n8n không được tạo lượt thử mới', async () => {
+  const encryptionKey = '11'.repeat(32);
+  const pairId = '51111111-1111-4111-8111-111111111111';
+  let queriedStage = false;
+  let insertedAttempt = false;
+  const client = {
+    async query(sql) {
+      if (sql.includes('SELECT pair_id, submission_revision')) return {
+        rowCount: 1, rows: [{ pair_id: pairId, submission_revision: 'revision-demo',
+          status: 'running' }],
+      };
+      if (sql.includes('SELECT handoff_id, from_stage')) return {
+        rowCount: 1, rows: [{ handoff_id: '52222222-2222-4222-8222-222222222222',
+          from_stage: 'render', to_stage: 'deliver', source_result_sha256: 'a'.repeat(64),
+          status: 'acknowledged' }],
+      };
+      if (sql.includes('SELECT pair_id, stage_key, status')) queriedStage = true;
+      if (sql.includes('INSERT INTO writing_flow.stage_attempt')) insertedAttempt = true;
+      return { rowCount: 1, rows: [] };
+    },
+    release() {},
+  };
+  const result = await createWritingFlowStage({
+    pool: { connect: async () => client }, encryptionKey,
+  }).claim({ pairId, revision: 'revision-demo', stageKey: 'deliver',
+    handoffId: '52222222-2222-4222-8222-222222222222', executionId: 'stale-execution' });
+  assert.equal(result.status, 'superseded');
+  assert.equal(queriedStage, false);
+  assert.equal(insertedAttempt, false);
+});
+
+test('bước sau retry nhận đúng hash mới một lần khi khóa đầu vào đã được xóa', async () => {
+  const encryptionKey = '11'.repeat(32);
+  const key = Buffer.from(encryptionKey, 'hex');
+  const source = ['task_2', 'Đề giả', '', 'Bài giả', false];
+  const revision = sha256(JSON.stringify(source));
+  const pairId = '61111111-1111-4111-8111-111111111111';
+  const newHash = 'c'.repeat(64);
+  const updates = [];
+  const client = {
+    async query(sql, params = []) {
+      if (sql.includes('SELECT pair_id, submission_revision')) return {
+        rowCount: 1, rows: [{ pair_id: pairId, submission_revision: revision,
+          status: 'running', source_ciphertext: seal(JSON.stringify(source), key),
+          source_link_index: 1, essay_slot: 1, document_kind: 'google_docs',
+          source_modified_at: '2026-09-20T05:00:00Z' }],
+      };
+      if (sql.includes('SELECT handoff_id, from_stage')) return {
+        rowCount: 1, rows: [{ handoff_id: '62222222-2222-4222-8222-222222222222',
+          from_stage: 'critic', to_stage: 'render', source_result_sha256: newHash,
+          status: 'sent' }],
+      };
+      if (sql.includes('SELECT pair_id, stage_key, status')) return {
+        rowCount: 1, rows: [{ pair_id: pairId, stage_key: 'render', status: 'pending',
+          cycle_no: 2, attempt_count: 0, input_sha256: null, error_code: null }],
+      };
+      if (sql.includes('SET input_sha256=$3')) {
+        updates.push(params);
+        return { rowCount: 1, rows: [] };
+      }
+      if (sql.includes('INSERT INTO writing_flow.stage_attempt')) return {
+        rowCount: 1, rows: [{ attempt_id: '63333333-3333-4333-8333-333333333333' }],
+      };
+      if (sql.includes('SELECT stage_key,result_ciphertext')) return {
+        rowCount: 1, rows: [{ stage_key: 'critic',
+          result_ciphertext: seal(JSON.stringify({ findings: [] }), key) }],
+      };
+      return { rowCount: 1, rows: [] };
+    },
+    release() {},
+  };
+  const result = await createWritingFlowStage({
+    pool: { connect: async () => client }, encryptionKey,
+  }).claim({ pairId, revision, stageKey: 'render',
+    handoffId: '62222222-2222-4222-8222-222222222222', executionId: 'fresh-execution' });
+  assert.equal(result.status, 'started');
+  assert.deepEqual(updates[0], [pairId, 'render', newHash]);
+});

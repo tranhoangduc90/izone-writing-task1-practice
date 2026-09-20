@@ -73,10 +73,17 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
               next_scan_at=now()+interval '100 years',updated_at=now()
           WHERE enabled AND scan_status='scanning' AND next_scan_at<=now()
             AND scan_attempt_count>=3`);
-        const due = await client.query(`SELECT class_code FROM writing_flow.class_registry
+        // Google mặc định cho 20 query/giây trên mỗi người dùng. Mỗi lớp gọi tối đa
+        // một request/giây, nên chỉ giữ tám lớp đang quét để còn dư tải cho thao tác tay.
+        const due = await client.query(`WITH capacity AS (
+          SELECT greatest(0,8-count(*) FILTER (WHERE scan_status='scanning'
+            AND next_scan_at>now()))::integer AS slots
+          FROM writing_flow.class_registry
+        ) SELECT class_code FROM writing_flow.class_registry
           WHERE enabled AND mapping_status='approved' AND class_status='on_going'
             AND scan_status IN ('pending','scanning','succeeded','failed') AND next_scan_at<=now()
-          ORDER BY next_scan_at,class_code FOR UPDATE SKIP LOCKED LIMIT $1`, [limit]);
+          ORDER BY next_scan_at,class_code FOR UPDATE SKIP LOCKED
+          LIMIT least($1,(SELECT slots FROM capacity))`, [limit]);
         if (!due.rowCount) return [];
         const codes = due.rows.map(row => row.class_code);
         const result = await client.query(`UPDATE writing_flow.class_registry

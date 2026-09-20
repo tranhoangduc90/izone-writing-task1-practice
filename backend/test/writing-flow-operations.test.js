@@ -127,7 +127,8 @@ test('chỉ cấp lớp đã duyệt đang học và giới hạn theo tham số
   assert.equal(statements[1].params[0], 8);
   assert.match(statements[1].sql, /mapping_status='approved'/u);
   assert.match(statements[1].sql, /class_status='on_going'/u);
-  assert.match(statements[1].sql, /FOR UPDATE SKIP LOCKED LIMIT \$1/u);
+  assert.match(statements[1].sql, /8-count\(\*\).*scan_status='scanning'/su);
+  assert.match(statements[1].sql, /FOR UPDATE SKIP LOCKED[\s\S]*LIMIT least\(\$1/u);
 });
 
 test('lớp lỗi lần ba vào Cần kiểm tra, lớp thành công về đúng ba mốc quét', async () => {

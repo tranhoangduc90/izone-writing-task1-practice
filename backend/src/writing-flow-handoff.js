@@ -14,6 +14,12 @@ export function createWritingFlowHandoff({ pool }) {
         FROM writing_flow.pair p
         WHERE h.pair_id=p.pair_id AND h.status IN ('pending','sent')
           AND p.status IN ('delivered','superseded')`);
+      await client.query(`
+        UPDATE writing_flow.handoff h SET status='acknowledged', acknowledged_at=now()
+        FROM writing_flow.stage_result s
+        WHERE h.pair_id=s.pair_id AND h.to_stage=s.stage_key
+          AND h.status IN ('pending','sent')
+          AND s.status IN ('succeeded','skipped','needs_review')`);
       const claimed = await client.query(`
         WITH ready AS (
           SELECT h.handoff_id
@@ -77,6 +83,9 @@ export function createWritingFlowHandoff({ pool }) {
            RETURNING attempt_id`,
         [candidate.pair_id, candidate.stage_key, stage.cycle_no, stage.attempt_count]);
         if (attempt.rowCount !== 1) return null;
+        await client.query(`UPDATE writing_flow.ai_call
+          SET status='failed',error_code='STAGE_TIMEOUT',finished_at=COALESCE(finished_at,now())
+          WHERE attempt_id=$1 AND status='sent'`, [attempt.rows[0].attempt_id]);
         if (stage.attempt_count < 3) {
           await client.query(`UPDATE writing_flow.stage_result
             SET status='pending',error_code='STAGE_TIMEOUT',lease_expires_at=NULL,updated_at=now()

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import test from 'node:test';
 import { createWritingFlowStage } from '../src/writing-flow-stage.js';
 import { seal, sha256 } from '../src/writing-flow-crypto.js';
@@ -166,4 +167,15 @@ test('bài bị sửa giữa luồng dừng trước khi cấp lượt chấm m�
   );
   assert.equal(queries.some(sql =>
     sql.includes('INSERT INTO writing_flow.stage_attempt')), false);
+});
+
+test('biên nhận AI không còn giả đang gửi sau khi lượt xử lý đã thất bại hoặc quá hạn', () => {
+  const stageSource = fs.readFileSync(new URL('../src/writing-flow-stage.js', import.meta.url), 'utf8');
+  const handoffSource = fs.readFileSync(new URL('../src/writing-flow-handoff.js', import.meta.url), 'utf8');
+  assert.match(stageSource,
+    /UPDATE writing_flow\.ai_call[\s\S]*WHERE attempt_id=\$1 AND status='sent'/u);
+  assert.match(stageSource,
+    /UPDATE writing_flow\.ai_call AS c[\s\S]*a\.cycle_no=\$3 AND a\.attempt_no=\$4/u);
+  assert.match(handoffSource,
+    /UPDATE writing_flow\.ai_call[\s\S]*error_code='STAGE_TIMEOUT'[\s\S]*status='sent'/u);
 });

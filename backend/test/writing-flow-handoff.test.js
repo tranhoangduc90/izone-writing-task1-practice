@@ -28,6 +28,12 @@ test('bàn giao đã được n8n nhận không bị phát lặp khi còn chờ 
   assert.match(claim.sql, /h\.last_sent_at<=now\(\)-interval '6 hours'/u);
   assert.match(claim.sql, /next_send_at=now\(\)\+interval '6 hours'/u);
   assert.doesNotMatch(claim.sql, /interval '30 seconds'/u);
+
+  const closeFinishedStage = queries.find(row =>
+    row.sql.includes('FROM writing_flow.stage_result s'));
+  assert.ok(closeFinishedStage, 'phải đóng bàn giao khi bước đích đã có kết quả cuối');
+  assert.match(closeFinishedStage.sql, /h\.to_stage=s\.stage_key/u);
+  assert.match(closeFinishedStage.sql, /'succeeded','skipped','needs_review'/u);
 });
 
 test('bàn giao được workflow gọi trực tiếp chỉ mở cứu hộ sau sáu giờ', () => {

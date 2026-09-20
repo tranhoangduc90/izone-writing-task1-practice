@@ -164,6 +164,12 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
            WHERE pair_id=$1 AND stage_key=$2 AND cycle_no=$3
              AND attempt_no=$4 AND status='sent'`,
         [pairId, stageKey, stage.cycle_no, stage.attempt_count]);
+        await client.query(`UPDATE writing_flow.ai_call AS c
+          SET status='failed',error_code='STAGE_TIMEOUT',finished_at=COALESCE(finished_at,now())
+          FROM writing_flow.stage_attempt AS a
+          WHERE c.attempt_id=a.attempt_id AND c.status='sent'
+            AND a.pair_id=$1 AND a.stage_key=$2 AND a.cycle_no=$3 AND a.attempt_no=$4`,
+        [pairId, stageKey, stage.cycle_no, stage.attempt_count]);
       }
       if (stage.attempt_count >= 3) {
         await client.query(`UPDATE writing_flow.stage_result
@@ -371,6 +377,9 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
       await client.query(`UPDATE writing_flow.stage_attempt
         SET status=$2,error_code=$3,finished_at=now() WHERE attempt_id=$1`,
       [attemptId, stale ? 'late' : unknown ? 'unknown' : 'failed', errorCode]);
+      await client.query(`UPDATE writing_flow.ai_call
+        SET status='failed',error_code=$2,finished_at=COALESCE(finished_at,now())
+        WHERE attempt_id=$1 AND status='sent'`, [attemptId, errorCode]);
       if (stale) return { status: 'late', pairId, stageKey };
       if (stage.attempt_count < 3) {
         await client.query(`UPDATE writing_flow.stage_result

@@ -33,7 +33,37 @@ test('bàn giao đã được n8n nhận không bị phát lặp khi còn chờ 
     row.sql.includes('FROM writing_flow.stage_result s'));
   assert.ok(closeFinishedStage, 'phải đóng bàn giao khi bước đích đã có kết quả cuối');
   assert.match(closeFinishedStage.sql, /h\.to_stage=s\.stage_key/u);
-  assert.match(closeFinishedStage.sql, /'succeeded','skipped','needs_review'/u);
+  assert.match(closeFinishedStage.sql, /s\.status IN \('succeeded','skipped'\)/u);
+  assert.match(closeFinishedStage.sql,
+    /s\.status='needs_review' AND h\.from_stage<>'review'/u);
+  assert.doesNotMatch(closeFinishedStage.sql,
+    /s\.status IN \('succeeded','skipped','needs_review'\)/u);
+});
+
+test('bàn giao retry từ danh sách cần kiểm tra không bị đóng trước khi workflow nhận', async () => {
+  const queries = [];
+  const client = {
+    async query(sql, params = []) {
+      queries.push({ sql, params });
+      if (sql.includes('RETURNING h.handoff_id')) {
+        return { rowCount: 1, rows: [{
+          handoff_id: 'handoff-review', pair_id: 'pair-review',
+          to_stage: 'precheck', send_count: 1, submission_revision: 'a'.repeat(64),
+        }] };
+      }
+      return { rows: [], rowCount: 0 };
+    },
+    release() {},
+  };
+  const pool = { async connect() { return client; } };
+
+  const [result] = await createWritingFlowHandoff({ pool }).due(1);
+  assert.equal(result.handoffId, 'handoff-review');
+  assert.equal(result.stageKey, 'precheck');
+  const closeFinishedStage = queries.find(row =>
+    row.sql.includes('FROM writing_flow.stage_result s'));
+  assert.match(closeFinishedStage.sql,
+    /s\.status='needs_review' AND h\.from_stage<>'review'/u);
 });
 
 test('bàn giao được workflow gọi trực tiếp chỉ mở cứu hộ sau sáu giờ', () => {

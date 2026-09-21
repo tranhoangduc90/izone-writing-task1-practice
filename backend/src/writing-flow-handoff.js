@@ -19,7 +19,8 @@ export function createWritingFlowHandoff({ pool }) {
         FROM writing_flow.stage_result s
         WHERE h.pair_id=s.pair_id AND h.to_stage=s.stage_key
           AND h.status IN ('pending','sent')
-          AND s.status IN ('succeeded','skipped','needs_review')`);
+          AND (s.status IN ('succeeded','skipped')
+            OR (s.status='needs_review' AND h.from_stage<>'review'))`);
       const claimed = await client.query(`
         WITH ready AS (
           SELECT h.handoff_id

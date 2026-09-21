@@ -17,6 +17,10 @@ test('lỗi quota Google ở bước ghi link chờ ngắn rồi mới phát l�
     retryImmediately: false,
     handoffDelaySeconds: 90,
   });
+  assert.deepEqual(stageRetryPolicy('deliver', 'GOOGLE_DOC_REVISION_CHANGED'), {
+    retryImmediately: false,
+    handoffDelaySeconds: 30,
+  });
   assert.deepEqual(stageRetryPolicy('deliver', 'LINK_WRITE_PERMISSION_DENIED'), {
     retryImmediately: true,
     handoffDelaySeconds: 6 * 60 * 60,

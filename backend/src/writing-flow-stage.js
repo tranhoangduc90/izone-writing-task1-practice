@@ -13,9 +13,11 @@ const NEXT = { precheck: ['main'], main: ['critic'], critic: ['arbiter', 'render
 // thử ngay như trước và giữ mốc cứu hộ sáu giờ nếu bàn giao trực tiếp bị mất.
 export function stageRetryPolicy(stageKey, errorCode) {
   const googleRateLimited = stageKey === 'deliver' && errorCode === 'GOOGLE_API_RATE_LIMIT';
+  const googleRevisionChanged = stageKey === 'deliver'
+    && errorCode === 'GOOGLE_DOC_REVISION_CHANGED';
   return {
-    retryImmediately: !googleRateLimited,
-    handoffDelaySeconds: googleRateLimited ? 90 : 6 * 60 * 60,
+    retryImmediately: !(googleRateLimited || googleRevisionChanged),
+    handoffDelaySeconds: googleRateLimited ? 90 : googleRevisionChanged ? 30 : 6 * 60 * 60,
   };
 }
 

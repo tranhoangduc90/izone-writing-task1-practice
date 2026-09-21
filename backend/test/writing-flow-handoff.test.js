@@ -97,7 +97,12 @@ test('mỗi lượt dành tối đa hai mươi chỗ cho bước ghi Google và 
   assert.equal(claims.length, 2);
   assert.deepEqual(claims.map(row => row.params), [[20], [80]]);
   assert.match(claims[0].sql, /h\.to_stage='deliver'/u);
+  assert.match(claims[0].sql, /sibling_pair\.homework_file_id=p\.homework_file_id/u);
+  assert.match(claims[0].sql, /sibling\.last_sent_at>now\(\)-interval '15 minutes'/u);
+  assert.match(claims[0].sql,
+    /sibling\.next_send_at,sibling\.created_at,sibling\.handoff_id/u);
   assert.match(claims[1].sql, /h\.to_stage<>'deliver'/u);
+  assert.doesNotMatch(claims[1].sql, /sibling_pair\.homework_file_id/u);
 });
 
 test('bàn giao trực tiếp giữ cứu hộ sáu giờ, retry quota dùng mốc do chính sách cấp', () => {

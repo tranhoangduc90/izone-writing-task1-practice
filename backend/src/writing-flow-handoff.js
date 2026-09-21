@@ -25,6 +25,23 @@ export function createWritingFlowHandoff({ pool }) {
       async function claimBatch({ delivery, capacity }) {
         if (capacity <= 0) return [];
         const stageFilter = delivery ? "h.to_stage='deliver'" : "h.to_stage<>'deliver'";
+        // Google khóa ghi theo phiên bản tài liệu. Chỉ phát một bài của cùng homework
+        // trong một lượt và đợi bàn giao trước được nhận, tránh hai bài cùng sửa một
+        // revision rồi một bài thất bại vì revision vừa trở thành cũ.
+        const documentGuard = delivery ? `AND NOT EXISTS (
+          SELECT 1 FROM writing_flow.handoff sibling
+          JOIN writing_flow.pair sibling_pair ON sibling_pair.pair_id=sibling.pair_id
+          WHERE sibling.handoff_id<>h.handoff_id
+            AND sibling.to_stage='deliver'
+            AND sibling_pair.homework_file_id=p.homework_file_id
+            AND ((sibling.status='sent'
+                  AND sibling.last_sent_at>now()-interval '15 minutes')
+              OR ((((sibling.status='pending' AND sibling.next_send_at<=now())
+                    OR (sibling.status='sent' AND sibling.next_send_at<=now()
+                      AND sibling.last_sent_at<=now()-interval '6 hours')))
+                  AND (sibling.next_send_at,sibling.created_at,sibling.handoff_id)
+                    < (h.next_send_at,h.created_at,h.handoff_id))))
+        )` : '';
         const claimed = await client.query(`
         WITH ready AS (
           SELECT h.handoff_id
@@ -36,6 +53,7 @@ export function createWritingFlowHandoff({ pool }) {
              AND p.status<>'superseded'
              AND (p.status<>'delivered' OR h.to_stage='trcc_repair')
              AND ${stageFilter}
+             ${documentGuard}
            ORDER BY h.next_send_at,h.created_at,h.handoff_id
            LIMIT $1 FOR UPDATE OF h SKIP LOCKED
         )

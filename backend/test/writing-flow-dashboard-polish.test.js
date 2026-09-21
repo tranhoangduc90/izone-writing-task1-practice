@@ -11,6 +11,28 @@ test('thống kê ngày trả hợp đồng YYYY-MM-DD thay vì timestamp phụ 
   assert.match(observedSql, /to_char\([\s\S]*'YYYY-MM-DD'\)[\s\S]*AS day/iu);
 });
 
+test('lọc tab Đã giao dùng cùng thời điểm giao bài với biểu đồ theo ngày', async () => {
+  let observedSql = '';
+  let observedValues = [];
+  const pool = { query: async (sql, values = []) => {
+    observedSql = sql;
+    observedValues = values;
+    return { rows: [] };
+  } };
+
+  await createWritingFlowService({ pool }).listPairs({
+    view: 'delivered', dateFrom: '2026-09-22', dateTo: '2026-09-22',
+  });
+
+  assert.equal(observedValues[5], 'delivered');
+  assert.match(observedSql,
+    /CASE WHEN \$6::text='delivered' THEN deliver\.completed_at[\s\S]*ELSE coalesce\(s\.source_created_at,p\.created_at\) END/iu);
+  assert.match(observedSql,
+    /\$14::date::timestamp AT TIME ZONE 'Asia\/Ho_Chi_Minh'/u);
+  assert.match(observedSql,
+    /\(\$15::date\+1\)::timestamp AT TIME ZONE 'Asia\/Ho_Chi_Minh'/u);
+});
+
 test('độ phủ lớp bỏ mapping không thuộc phạm vi Writing trước khi lên dashboard', async () => {
   const pool = { query: async sql => {
     if (sql.includes('FROM mapping.classroom_course_mapping AS course')) return { rows: [

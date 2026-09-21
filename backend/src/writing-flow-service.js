@@ -816,10 +816,14 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
                OR writing_flow.normalize_search(s.student_name)
                  LIKE '%' || writing_flow.normalize_search($9) || '%'))
              OR ($12::boolean AND p.pair_id=ANY($13::uuid[])))
-           AND ($14::date IS NULL OR coalesce(s.source_created_at,p.created_at)
-             >= ($14::date AT TIME ZONE 'Asia/Ho_Chi_Minh'))
-           AND ($15::date IS NULL OR coalesce(s.source_created_at,p.created_at)
-             < (($15::date+1) AT TIME ZONE 'Asia/Ho_Chi_Minh'))
+           AND ($14::date IS NULL OR
+             (CASE WHEN $6::text='delivered' THEN deliver.completed_at
+               ELSE coalesce(s.source_created_at,p.created_at) END)
+             >= ($14::date::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh'))
+           AND ($15::date IS NULL OR
+             (CASE WHEN $6::text='delivered' THEN deliver.completed_at
+               ELSE coalesce(s.source_created_at,p.created_at) END)
+             < (($15::date+1)::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh'))
            AND ($4::text IS NULL OR coalesce(current_stage.stage_key,
                  CASE WHEN p.status='delivered' THEN 'deliver' ELSE 'intake' END)=$4)
            AND ($5::text IS NULL OR coalesce(current_stage.stage_status,

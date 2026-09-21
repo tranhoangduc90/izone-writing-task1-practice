@@ -3,6 +3,26 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createWritingFlowHandoff } from '../src/writing-flow-handoff.js';
 
+// Hồi quy cho lỗi production 42601: SQL động có thể thừa dấu ngoặc dù test mock
+// vẫn chạy. Bộ đếm bỏ qua chuỗi SQL và yêu cầu mọi ngoặc đóng đúng thứ tự.
+function assertSqlParenthesesBalanced(sql) {
+  let depth = 0;
+  let inString = false;
+  for (let index = 0; index < sql.length; index += 1) {
+    const char = sql[index];
+    if (char === "'") {
+      if (inString && sql[index + 1] === "'") index += 1;
+      else inString = !inString;
+    } else if (!inString && char === '(') depth += 1;
+    else if (!inString && char === ')') {
+      depth -= 1;
+      assert.ok(depth >= 0, 'SQL không được có ngoặc đóng thừa');
+    }
+  }
+  assert.equal(inString, false, 'SQL phải đóng chuỗi ký tự');
+  assert.equal(depth, 0, 'SQL phải cân bằng dấu ngoặc');
+}
+
 test('bàn giao đã được n8n nhận không bị phát lặp khi còn chờ suất chạy', async () => {
   const queries = [];
   const client = {
@@ -101,6 +121,8 @@ test('mỗi lượt dành tối đa hai mươi chỗ cho bước ghi Google và 
   assert.match(claims[0].sql, /sibling\.last_sent_at>now\(\)-interval '15 minutes'/u);
   assert.match(claims[0].sql,
     /sibling\.next_send_at,sibling\.created_at,sibling\.handoff_id/u);
+  assertSqlParenthesesBalanced(claims[0].sql);
+  assertSqlParenthesesBalanced(claims[1].sql);
   assert.match(claims[1].sql, /h\.to_stage<>'deliver'/u);
   assert.doesNotMatch(claims[1].sql, /sibling_pair\.homework_file_id/u);
 });

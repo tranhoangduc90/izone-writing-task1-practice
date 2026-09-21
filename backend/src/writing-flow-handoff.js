@@ -34,13 +34,17 @@ export function createWritingFlowHandoff({ pool }) {
           WHERE sibling.handoff_id<>h.handoff_id
             AND sibling.to_stage='deliver'
             AND sibling_pair.homework_file_id=p.homework_file_id
-            AND ((sibling.status='sent'
-                  AND sibling.last_sent_at>now()-interval '15 minutes')
-              OR ((((sibling.status='pending' AND sibling.next_send_at<=now())
-                    OR (sibling.status='sent' AND sibling.next_send_at<=now()
-                      AND sibling.last_sent_at<=now()-interval '6 hours')))
-                  AND (sibling.next_send_at,sibling.created_at,sibling.handoff_id)
-                    < (h.next_send_at,h.created_at,h.handoff_id))))
+            AND (
+              (sibling.status='sent'
+                AND sibling.last_sent_at>now()-interval '15 minutes')
+              OR (
+                ((sibling.status='pending' AND sibling.next_send_at<=now())
+                  OR (sibling.status='sent' AND sibling.next_send_at<=now()
+                    AND sibling.last_sent_at<=now()-interval '6 hours'))
+                AND (sibling.next_send_at,sibling.created_at,sibling.handoff_id)
+                  < (h.next_send_at,h.created_at,h.handoff_id)
+              )
+            )
         )` : '';
         const claimed = await client.query(`
         WITH ready AS (

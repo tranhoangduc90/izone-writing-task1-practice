@@ -119,7 +119,8 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
                  error_code=NULL, started_at=NULL, lease_expires_at=NULL,
                  updated_at=now()
            WHERE pair_id=$1 AND stage_key=$2`, [pairId, stageKey]);
-        stage = { ...stage, status: 'pending', cycle_no: stage.cycle_no + 1, attempt_count: 0 };
+        stage = { ...stage, status: 'pending', cycle_no: stage.cycle_no + 1,
+          attempt_count: 0, error_code: null };
         await client.query(`UPDATE writing_flow.pair SET status='running',updated_at=now()
           WHERE pair_id=$1`, [pairId]);
       }
@@ -144,7 +145,7 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
           WHERE pair_id=$1 AND stage_key=$2`,
         [pairId, stageKey, handoff.source_result_sha256]);
         stage = { ...stage, input_sha256: handoff.source_result_sha256 };
-      } else if (handoff.from_stage !== 'retry'
+      } else if (!['retry', 'review'].includes(handoff.from_stage)
         && stage.input_sha256 !== handoff.source_result_sha256) {
         throw new ApiError(409, 'STAGE_INPUT_CHANGED', 'Đầu vào bước chấm không khớp bản đã lưu.');
       }

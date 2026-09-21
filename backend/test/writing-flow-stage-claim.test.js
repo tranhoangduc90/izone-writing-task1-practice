@@ -64,6 +64,66 @@ test('bàn giao bước chấm giữ đúng file, link và ô homework', async (
   assert.deepEqual(result.previous.intake, { operationKey: 'scan-demo' });
 });
 
+test('retry sau kiểm tra dùng khóa lệnh riêng mà không làm đổi hash đầu vào bước chấm', async () => {
+  const encryptionKey = '11'.repeat(32);
+  const key = Buffer.from(encryptionKey, 'hex');
+  const source = ['task_1', 'Đề giả', 'https://example.test/chart', 'Bài giả', true];
+  const revision = sha256(JSON.stringify(source));
+  const pairId = '31111111-1111-4111-8111-111111111111';
+  const handoffId = '32222222-2222-4222-8222-222222222222';
+  const reviewId = '33333333-3333-4333-8333-333333333333';
+  const requestId = '34444444-4444-4444-8444-444444444444';
+  const commandHash = sha256(requestId);
+  let attemptInserted = false;
+  let reviewAccepted = false;
+  const client = {
+    async query(sql) {
+      if (sql.includes('SELECT pair_id, submission_revision')) return {
+        rowCount: 1, rows: [{
+          pair_id: pairId, submission_revision: revision, status: 'needs_review',
+          source_ciphertext: seal(JSON.stringify(source), key),
+          source_app_id: 'app-demo', source_table_id: 'table-demo',
+          source_record_id: 'record-demo', homework_file_id: 'doc-demo',
+          source_link_index: 1, essay_slot: 1, class_code: 'IC2200',
+          document_kind: 'google_docs', source_modified_at: '2026-09-21T01:00:00Z',
+        }],
+      };
+      if (sql.includes('SELECT handoff_id, from_stage')) return {
+        rowCount: 1, rows: [{ handoff_id: handoffId, from_stage: 'review',
+          to_stage: 'precheck', source_result_sha256: commandHash, status: 'sent' }],
+      };
+      if (sql.includes('SELECT pair_id, stage_key, status')) return {
+        rowCount: 1, rows: [{ pair_id: pairId, stage_key: 'precheck',
+          status: 'needs_review', cycle_no: 1, attempt_count: 3,
+          input_sha256: 'a'.repeat(64), error_code: 'PRECHECK_FAILED' }],
+      };
+      if (sql.includes('SELECT review_id, cycle_no')) return {
+        rowCount: 1, rows: [{ review_id: reviewId, cycle_no: 1,
+          status: 'retry_requested', retry_command_key: requestId }],
+      };
+      if (sql.includes("SET status='retry_accepted'")) reviewAccepted = true;
+      if (sql.includes('INSERT INTO writing_flow.stage_attempt')) {
+        attemptInserted = true;
+        return { rowCount: 1, rows: [{ attempt_id: '35555555-5555-4555-8555-555555555555' }] };
+      }
+      if (sql.includes('SELECT stage_key,result_ciphertext')) return {
+        rowCount: 1, rows: [{ stage_key: 'intake',
+          result_ciphertext: seal(JSON.stringify({ operationKey: 'scan-review' }), key) }],
+      };
+      return { rowCount: 1, rows: [] };
+    },
+    release() {},
+  };
+  const result = await createWritingFlowStage({
+    pool: { connect: async () => client }, encryptionKey,
+  }).claim({ pairId, revision, stageKey: 'precheck', handoffId,
+    executionId: 'review-retry-execution' });
+  assert.equal(result.status, 'started');
+  assert.equal(reviewAccepted, true);
+  assert.equal(attemptInserted, true);
+  assert.deepEqual(result.previous.intake, { operationKey: 'scan-review' });
+});
+
 test('bước giao link nhận phiên bản trang mới chỉ khi đã đánh dấu xuất lại', async () => {
   const encryptionKey = '11'.repeat(32);
   const key = Buffer.from(encryptionKey, 'hex');

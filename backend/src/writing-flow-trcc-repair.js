@@ -59,7 +59,7 @@ export function createWritingFlowTrccRepair({ pool, encryptionKey }) {
         await client.query(`INSERT INTO writing_flow.operator_event
           (pair_id,event_type,actor_ref,request_id,reason,before_state,after_state)
           VALUES ($1,'trcc_repair_seeded',$2,$3,'Bổ sung TR/CC bị thiếu do lỗi luồng nguồn',
-                  jsonb_build_object('pairStatus',$4,'trCcCheck',false),
+                  jsonb_build_object('pairStatus',$4::text,'trCcCheck',false),
                   jsonb_build_object('repairStatus','pending','batchRequestId',$5::text))`,
         [row.pair_id, actorRef, crypto.randomUUID(), row.status, batchRequestId]);
         seeded += 1;

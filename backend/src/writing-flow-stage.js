@@ -8,6 +8,17 @@ export const LEASE_SECONDS = { precheck: 600, main: 600, critic: 600, arbiter: 6
 const NEXT = { precheck: ['main'], main: ['critic'], critic: ['arbiter', 'render'],
   arbiter: ['render'], render: ['deliver'], deliver: [null] };
 
+// Google có thể yêu cầu giảm nhịp khi nhiều homework được ghi cùng lúc.
+// Lỗi quota được giữ trong hàng đợi 90 giây rồi scheduler phát lại; lỗi khác vẫn
+// thử ngay như trước và giữ mốc cứu hộ sáu giờ nếu bàn giao trực tiếp bị mất.
+export function stageRetryPolicy(stageKey, errorCode) {
+  const googleRateLimited = stageKey === 'deliver' && errorCode === 'GOOGLE_API_RATE_LIMIT';
+  return {
+    retryImmediately: !googleRateLimited,
+    handoffDelaySeconds: googleRateLimited ? 90 : 6 * 60 * 60,
+  };
+}
+
 function decode(value, key) {
   return JSON.parse(open(value, key));
 }
@@ -383,15 +394,17 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
         WHERE attempt_id=$1 AND status='sent'`, [attemptId, errorCode]);
       if (stale) return { status: 'late', pairId, stageKey };
       if (stage.attempt_count < 3) {
+        const retryPolicy = stageRetryPolicy(stageKey, errorCode);
         await client.query(`UPDATE writing_flow.stage_result
           SET status='pending',error_code=$3,lease_expires_at=NULL,updated_at=now()
           WHERE pair_id=$1 AND stage_key=$2`, [pairId, stageKey, errorCode]);
         const handoff = await client.query(`INSERT INTO writing_flow.handoff
           (pair_id,from_stage,to_stage,source_result_sha256,next_send_at)
-          VALUES ($1,'retry',$2,$3,now()+interval '6 hours') RETURNING handoff_id`,
-        [pairId, stageKey, sha256(attemptId)]);
+          VALUES ($1,'retry',$2,$3,now()+($4::text||' seconds')::interval) RETURNING handoff_id`,
+        [pairId, stageKey, sha256(attemptId), retryPolicy.handoffDelaySeconds]);
         return { status: 'retry_requested', pairId, stageKey,
-          handoffId: handoff.rows[0].handoff_id };
+          handoffId: handoff.rows[0].handoff_id,
+          retryImmediately: retryPolicy.retryImmediately };
       }
       await client.query(`UPDATE writing_flow.stage_result
         SET status='needs_review',error_code=$3,lease_expires_at=NULL,updated_at=now()

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import { createWritingFlowStage } from '../src/writing-flow-stage.js';
+import { createWritingFlowStage, stageRetryPolicy } from '../src/writing-flow-stage.js';
 import { seal, sha256 } from '../src/writing-flow-crypto.js';
 
 const encryptionKey = '22'.repeat(32);
@@ -11,6 +11,21 @@ const handoffId = '22222222-2222-4222-8222-222222222222';
 const attemptId = '33333333-3333-4333-8333-333333333333';
 const source = ['task_2', 'Đề giả', '', 'Bài giả', false];
 const revision = sha256(JSON.stringify(source));
+
+test('lỗi quota Google ở bước ghi link chờ ngắn rồi mới phát lại', () => {
+  assert.deepEqual(stageRetryPolicy('deliver', 'GOOGLE_API_RATE_LIMIT'), {
+    retryImmediately: false,
+    handoffDelaySeconds: 90,
+  });
+  assert.deepEqual(stageRetryPolicy('deliver', 'LINK_WRITE_PERMISSION_DENIED'), {
+    retryImmediately: true,
+    handoffDelaySeconds: 6 * 60 * 60,
+  });
+  assert.deepEqual(stageRetryPolicy('main', 'GOOGLE_API_RATE_LIMIT'), {
+    retryImmediately: true,
+    handoffDelaySeconds: 6 * 60 * 60,
+  });
+});
 
 function pairRow(status = 'running', savedRevision = revision) {
   return {

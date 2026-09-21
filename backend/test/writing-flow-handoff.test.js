@@ -66,7 +66,7 @@ test('bàn giao retry từ danh sách cần kiểm tra không bị đóng trư�
     /s\.status='needs_review' AND h\.from_stage<>'review'/u);
 });
 
-test('bàn giao được workflow gọi trực tiếp chỉ mở cứu hộ sau sáu giờ', () => {
+test('bàn giao trực tiếp giữ cứu hộ sáu giờ, retry quota dùng mốc do chính sách cấp', () => {
   const intakeSource = fs.readFileSync(new URL('../src/writing-flow-intake.js', import.meta.url), 'utf8');
   const stageSource = fs.readFileSync(new URL('../src/writing-flow-stage.js', import.meta.url), 'utf8');
   const serviceSource = fs.readFileSync(new URL('../src/writing-flow-service.js', import.meta.url), 'utf8');
@@ -76,7 +76,7 @@ test('bàn giao được workflow gọi trực tiếp chỉ mở cứu hộ sau 
   assert.match(stageSource,
     /VALUES \(\$1,\$2,\$3,\$4,now\(\)\+interval '6 hours'\)/u);
   assert.match(stageSource,
-    /VALUES \(\$1,'retry',\$2,\$3,now\(\)\+interval '6 hours'\)/u);
+    /VALUES \(\$1,'retry',\$2,\$3,now\(\)\+\(\$4::text\|\|' seconds'\)::interval\)/u);
   assert.match(serviceSource,
     /VALUES \(\$1, 'review', \$2, \$3, 'pending', now\(\)\)/u);
 });

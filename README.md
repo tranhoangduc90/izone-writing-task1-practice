@@ -42,3 +42,5 @@ Comment trực tiếp của giảng viên là một lớp riêng: giảng viên 
 ## Trạng thái phát hành
 
 Push lên `main` chỉ chạy kiểm thử; bước xuất bản Pages phải được chạy thủ công sau release gate. Credential production, prompt chấm và dữ liệu học viên không nằm trong kho mã.
+
+Mốc source và bộ regression của bản backend kết hợp ngày 21/09/2026 được ghi tại [Mốc regression Writing ngày 21/09/2026](docs/REGRESSION_BASELINE_2026-09-21.md). Trước lần sửa tiếp theo, chạy đủ backend và web theo tài liệu này sau khi đã cập nhật từ `origin/main`.

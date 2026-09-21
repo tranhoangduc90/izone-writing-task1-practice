@@ -749,7 +749,8 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
           'Danh sách đã sắp xếp dùng số trang thay vì con trỏ mặc định.');
       }
       const cursorSql = sortRules.length
-        ? 'TRUE' : '($16::timestamptz IS NULL OR (p.updated_at,p.pair_id)<($16::timestamptz,$17::uuid))';
+        ? '$16::timestamptz IS NULL AND $17::uuid IS NULL'
+        : '($16::timestamptz IS NULL OR (p.updated_at,p.pair_id)<($16::timestamptz,$17::uuid))';
       const orderSql = pairOrderSql(sortRules);
       let contentPairIds = [];
       if (search && ['all', 'content'].includes(searchScope) && key) {

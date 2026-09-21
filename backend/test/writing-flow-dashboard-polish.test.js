@@ -68,6 +68,7 @@ test('sắp xếp dashboard chỉ dùng các biểu thức allowlist và thêm p
   assert.match(listSql, /ORDER BY coalesce\(p\.finished_at,deliver\.completed_at\) DESC NULLS LAST/iu);
   assert.match(listSql, /writing_flow\.normalize_search\(coalesce\(nullif\(s\.student_name,''\),s\.display_name,''\)\) ASC NULLS LAST/iu);
   assert.match(listSql, /p\.pair_id DESC/iu);
+  assert.match(listSql, /\$16::timestamptz IS NULL AND \$17::uuid IS NULL/iu);
   assert.doesNotMatch(listSql, /finished:desc|student:asc/iu);
 });
 

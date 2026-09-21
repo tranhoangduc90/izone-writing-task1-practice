@@ -276,8 +276,8 @@ export function createWritingFlowTrccRepair({ pool, encryptionKey }) {
       await client.query(`INSERT INTO writing_flow.operator_event
         (pair_id,event_type,actor_ref,request_id,reason,before_state,after_state)
         VALUES ($1,'trcc_repair_failed','trcc_incident_repair',$2,$3,
-                jsonb_build_object('attemptCount',$4),
-                jsonb_build_object('repairStatus','needs_review','errorCode',$3))`,
+                jsonb_build_object('attemptCount',$4::integer),
+                jsonb_build_object('repairStatus','needs_review','errorCode',$3::text))`,
       [pairId, crypto.randomUUID(), errorCode, repair.attempt_count]);
       return { status: 'needs_review', pairId };
     });

@@ -58,3 +58,14 @@ test('hàng cứu chỉ nhận danh sách bài đã đối chiếu, không tự 
   assert.match(repair, /p\.pair_id=ANY\(\$1::uuid\[\]\)/u);
   assert.doesNotMatch(repair, /LIMIT \$1 FOR UPDATE OF p SKIP LOCKED/u);
 });
+
+test('bài cứu quá hạn lần ba ép kiểu tham số trước khi ghi JSON log', async () => {
+  // Regression production 21/09: PostgreSQL 42P08 làm workflow điều phối lỗi mỗi phút
+  // vì attemptCount chỉ xuất hiện trong hàm jsonb_build_object đa hình.
+  const repair = await readFile(new URL('../src/writing-flow-trcc-repair.js', import.meta.url),
+    'utf8');
+  assert.match(repair,
+    /jsonb_build_object\('attemptCount',\$4::integer\)/u);
+  assert.match(repair,
+    /jsonb_build_object\('repairStatus','needs_review','errorCode',\$3::text\)/u);
+});

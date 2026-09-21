@@ -12,13 +12,19 @@ const MAX_COMMENTS_PER_ESSAY = 20;
 const MAX_COMMENT_TEXT = 20_000;
 const ALLOWED_NODE_TYPES = new Set(['doc', 'paragraph', 'heading', 'text', 'hardBreak', 'bulletList', 'orderedList', 'listItem']);
 
-function groupIdFromLmsUrl(value) {
+function resultSourceFromLmsUrl(value) {
   if (typeof value !== 'string' || value.length > 2048) return null;
   try {
     const url = new URL(value);
-    if (url.protocol !== 'https:' || url.hostname.toLowerCase() !== LMS_APP_HOST) return null;
+    if (url.protocol !== 'https:' || url.username || url.password || url.port) return null;
+    // Link đã lưu quyết định nguồn đọc cố định; không nhận URL tải tùy ý từ trình duyệt.
+    if (url.origin === 'https://ducizone.ddns.net' && !url.search && !url.hash) {
+      const match = url.pathname.match(/^\/writing\/shared\/writing-essays\/([a-f0-9]{48})\/edit$/u);
+      return match ? { url: new URL(`/writing/writing-data/${match[1]}/current.json`, url.origin), viewer: true } : null;
+    }
+    if (url.hostname.toLowerCase() !== LMS_APP_HOST) return null;
     const match = url.pathname.match(/^\/shared\/writing-essays\/([a-z0-9_-]{8,100})\/(?:edit|view)\/?$/iu);
-    return match?.[1] || null;
+    return match ? { url: new URL(`${LMS_API_PATH}${encodeURIComponent(match[1])}`, LMS_API_ORIGIN), viewer: false } : null;
   } catch {
     return null;
   }
@@ -98,19 +104,19 @@ export function createLmsResultService({ pool, fetchImpl = globalThis.fetch, tim
       ORDER BY attempt.completed_at DESC NULLS LAST, attempt.id DESC
       LIMIT 1`, [sessionRef]);
     if (!stored.rowCount) throw new ApiError(404, 'DRAFT_RESULT_NOT_FOUND', 'Chưa có kết quả chấm Draft.');
-    const groupId = groupIdFromLmsUrl(stored.rows[0].lmsUrl);
-    if (!groupId) throw new ApiError(502, 'LMS_URL_INVALID', 'Link LMS đã lưu không hợp lệ.');
+    const source = resultSourceFromLmsUrl(stored.rows[0].lmsUrl);
+    if (!source) throw new ApiError(502, 'LMS_URL_INVALID', 'Link LMS đã lưu không hợp lệ.');
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     let response;
     let bytes;
     try {
-      const url = new URL(`${LMS_API_PATH}${encodeURIComponent(groupId)}`, LMS_API_ORIGIN);
-      response = await fetchImpl(url, {
+      response = await fetchImpl(source.url, {
         method: 'GET',
         headers: { accept: 'application/json' },
         redirect: 'error',
+        cache: 'no-store',
         signal: controller.signal
       });
       if (!response.ok) throw new ApiError(502, 'LMS_UNAVAILABLE', 'Tạm thời chưa tải được kết quả LMS.');
@@ -130,7 +136,11 @@ export function createLmsResultService({ pool, fetchImpl = globalThis.fetch, tim
     } catch {
       throw new ApiError(502, 'LMS_RESULT_INVALID', 'Kết quả LMS chưa đúng định dạng.');
     }
-    return { ...normalizeLmsResult(payload), updatedAt: stored.rows[0].updatedAt };
+    // Viewer cho phép giáo viên sửa bản hiện hành; chỉ dùng timestamp có múi giờ hợp lệ.
+    const snapshotTime = source.viewer && typeof payload?.meta?.updatedAt === 'string'
+      && /(?:Z|[+-]\d{2}:\d{2})$/u.test(payload.meta.updatedAt) && Number.isFinite(Date.parse(payload.meta.updatedAt))
+      ? new Date(payload.meta.updatedAt).toISOString() : null;
+    return { ...normalizeLmsResult(payload), updatedAt: snapshotTime || stored.rows[0].updatedAt };
   }
 
   return { getDraftResult };

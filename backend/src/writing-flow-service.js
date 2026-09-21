@@ -85,6 +85,46 @@ const visibleRegistrySql = alias => `(${alias}.class_code IS NULL
   OR coalesce(${alias}.eligibility_reason,'') <> ALL($VISIBLE_CLASS_REASONS$::text[]))`
   .replace('$VISIBLE_CLASS_REASONS$', `ARRAY[${HIDDEN_CLASS_REASONS.map(value => `'${value}'`).join(',')}]`);
 
+// Nhận vào: tối đa ba quy tắc sort từ dashboard, ví dụ finished:desc,student:asc.
+// Việc chính: chỉ đổi các khóa đã duyệt thành biểu thức SQL cố định; không đưa text người dùng vào SQL.
+// Kết quả: bảng được sắp ổn định và luôn dùng pair_id làm khóa cuối để tránh thứ tự mơ hồ.
+// Khi sai: API trả lỗi rõ, không âm thầm dùng một câu ORDER BY ngoài allowlist.
+const pairSortExpressions = {
+  updated: 'p.updated_at',
+  finished: 'coalesce(p.finished_at,deliver.completed_at)',
+  created: 'coalesce(s.source_created_at,p.created_at)',
+  student: "writing_flow.normalize_search(coalesce(nullif(s.student_name,''),s.display_name,''))",
+  class: 'p.class_code',
+  teacher: "writing_flow.normalize_search(array_to_string(coalesce(nullif(s.teacher_names,ARRAY[]::text[]),t.teacher_names,ARRAY[]::text[]),','))",
+  status: 'p.status',
+  attempts: 'coalesce(current_stage.attempt_count,0)',
+};
+
+export function normalizeWritingSort(value) {
+  if (!value) return [];
+  const rules = String(value).split(',').map(item => item.trim()).filter(Boolean);
+  if (!rules.length || rules.length > 3) {
+    throw new ApiError(400, 'WRITING_SORT_INVALID', 'Chỉ được sắp xếp tối đa ba điều kiện.');
+  }
+  const seen = new Set();
+  return rules.map(rule => {
+    const [key, direction, extra] = rule.split(':');
+    if (extra || !pairSortExpressions[key] || !['asc', 'desc'].includes(direction)
+      || seen.has(key)) {
+      throw new ApiError(400, 'WRITING_SORT_INVALID', 'Điều kiện sắp xếp không hợp lệ.');
+    }
+    seen.add(key);
+    return { key, direction };
+  });
+}
+
+function pairOrderSql(rules) {
+  if (!rules.length) return 'p.updated_at DESC, p.pair_id DESC';
+  const clauses = rules.map(({ key, direction }) =>
+    `${pairSortExpressions[key]} ${direction.toUpperCase()} NULLS LAST`);
+  return [...clauses, 'p.pair_id DESC'].join(', ');
+}
+
 // Nhận vào: tên lớp từ nguồn mapping hoặc mã lớp trong bảng homework.
 // Việc chính: nhận cả IC2269 và dạng CS.070626, rồi đưa về một cách viết ổn định.
 // Trả ra: mã lớp để đối chiếu; chuỗi rỗng nếu tên không có mã lớp nhận biết được.
@@ -582,10 +622,17 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
                 teachers.teacher_names,ARRAY[]::text[])))) AS source_issues,
           (SELECT count(*)::integer FROM writing_flow.manual_review AS review
             JOIN writing_flow.pair AS pair ON pair.pair_id=review.pair_id
+            JOIN writing_flow.stage_result AS review_stage
+              ON review_stage.pair_id=review.pair_id
+             AND review_stage.stage_key=review.stage_key
+             AND review_stage.cycle_no=review.cycle_no
             LEFT JOIN writing_flow.source_record AS source ON source.source_id=pair.source_id
             LEFT JOIN teacher_assignments AS teachers ON teachers.class_code=pair.class_code
             LEFT JOIN writing_flow.class_registry AS registry ON registry.class_code=pair.class_code
             WHERE review.status<>'resolved'
+              AND review_stage.status='needs_review'
+              AND pair.skipped_at IS NULL
+              AND pair.status<>'superseded'
               AND ${visibleRegistrySql('registry')}
               AND ($1::text IS NULL OR pair.class_code=$1)
               AND ($2::text IS NULL OR $2=ANY(coalesce(nullif(source.teacher_names,ARRAY[]::text[]),
@@ -603,7 +650,8 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
           FROM writing_flow.class_registry AS registry
           WHERE last_scan_at IS NOT NULL AND ${visibleRegistrySql('registry')}`),
       ]);
-      const expected = mapping.filter(item => item.operational_state !== 'excluded')
+      const expected = mapping.filter(item => item.class_code
+          && item.operational_state !== 'excluded')
         .map(item => ({ ...item, expected: item.enabled,
         erp_source_found: true, classroom_source_found: Boolean(item.classroom_course_id) }));
       return mergeClassCoverage(expected, seen.rows);
@@ -664,7 +712,8 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
       dateFrom = null, dateTo = null } = {}) {
       const assignments = await teacherAssignmentsForDatabase();
       const result = await pool.query(`WITH ${assignments}
-        SELECT (deliver.completed_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date AS day,
+        SELECT to_char((deliver.completed_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date,
+          'YYYY-MM-DD') AS day,
           count(DISTINCT p.pair_id)::integer AS completed_count
         FROM writing_flow.pair AS p
         JOIN writing_flow.stage_result AS deliver
@@ -688,12 +737,20 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
     async listPairs({ classCode = null, teacherName = null, stageKey = null,
       stageStatus = null, view = null, includeCompleted = false, taskType = null,
       search = null, searchScope = 'all', dateFrom = null, dateTo = null, limit = 50, offset = 0,
-      cursorAt = null, cursorId = null } = {}) {
+      cursorAt = null, cursorId = null, sort = null } = {}) {
       if (encryptionKey && !key) throw new ApiError(503, 'WRITING_FLOW_ENCRYPTION_NOT_READY',
         'Khóa đọc dữ liệu Writing không hợp lệ.');
       const assignments = await teacherAssignmentsForDatabase();
       const searchDocId = documentIdFromSearch(search);
       const normalizedSearch = normalizeWritingSearch(search);
+      const sortRules = normalizeWritingSort(sort);
+      if (sortRules.length && (cursorAt || cursorId)) {
+        throw new ApiError(400, 'WRITING_SORT_CURSOR_UNSUPPORTED',
+          'Danh sách đã sắp xếp dùng số trang thay vì con trỏ mặc định.');
+      }
+      const cursorSql = sortRules.length
+        ? 'TRUE' : '($16::timestamptz IS NULL OR (p.updated_at,p.pair_id)<($16::timestamptz,$17::uuid))';
+      const orderSql = pairOrderSql(sortRules);
       let contentPairIds = [];
       if (search && ['all', 'content'].includes(searchScope) && key) {
         const tokens = writingSearchTokens(search, key);
@@ -772,8 +829,8 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
              OR ($6::text='delivered' AND p.status='delivered' AND p.skipped_at IS NULL)
              OR ($6::text='unfinished' AND p.status<>'delivered' AND p.skipped_at IS NULL)
              OR ($6::text IS NULL AND p.skipped_at IS NULL))
-           AND ($16::timestamptz IS NULL OR (p.updated_at,p.pair_id)<($16::timestamptz,$17::uuid))
-         ORDER BY p.updated_at DESC, p.pair_id DESC
+           AND ${cursorSql}
+         ORDER BY ${orderSql}
          LIMIT $18 OFFSET $19`, [classCode, teacherName, STAGES, stageKey, stageStatus, view,
         includeCompleted, taskType, search, ['all', 'identity', 'docs'].includes(searchScope),
         searchDocId, ['all', 'content'].includes(searchScope), contentPairIds,
@@ -872,6 +929,10 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
           JOIN writing_flow.stage_result AS s
             ON s.pair_id = r.pair_id AND s.stage_key = r.stage_key
          WHERE r.status <> 'resolved'
+           AND s.status='needs_review'
+           AND s.cycle_no=r.cycle_no
+           AND p.skipped_at IS NULL
+           AND p.status<>'superseded'
            AND registry.class_status IS DISTINCT FROM 'completed'
            AND ${visibleRegistrySql('registry')}
            AND ($1::text IS NULL OR p.class_code=$1)

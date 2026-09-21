@@ -391,17 +391,22 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
           p.status,p.source_type,p.source_app_id,p.source_table_id,p.source_record_id,
           p.homework_file_id,p.source_link_index,p.source_modified_at,p.created_at,p.updated_at,
           p.skipped_at,p.skipped_by,p.skip_reason,p.finished_at,p.source_ciphertext,
+          p.trcc_required_override,repair.status AS trcc_repair_status,
           s.source_id,s.display_name,s.student_name,s.teacher_names,s.classroom_url,
           s.file_url,s.source_status,s.source_created_at
         FROM writing_flow.pair AS p
         LEFT JOIN writing_flow.source_record AS s ON s.source_id=p.source_id
+        LEFT JOIN writing_flow.trcc_repair AS repair ON repair.pair_id=p.pair_id
         WHERE p.pair_id=$1`, [pairId]);
       if (!pair.rowCount) throw new ApiError(404, 'WRITING_PAIR_NOT_FOUND', 'Không tìm thấy bài này.');
       let source;
       try {
         const decoded = JSON.parse(open(pair.rows[0].source_ciphertext, key));
+        const rescued = pair.rows[0].trcc_required_override === true;
         source = { taskType: decoded[0], topic: decoded[1], image: decoded[2],
-          essay: decoded[3], trCcCheck: decoded[4] };
+          essay: decoded[3], trCcCheck: rescued ? true : decoded[4],
+          trCcSource: rescued ? 'repair_override' : 'source',
+          trCcRepairStatus: pair.rows[0].trcc_repair_status || null };
       } catch {
         throw new ApiError(500, 'WRITING_SOURCE_DECRYPT_FAILED', 'Chưa đọc được nội dung bài đã lưu.');
       }

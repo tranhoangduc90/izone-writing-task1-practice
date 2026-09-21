@@ -526,12 +526,15 @@ export function createApp({config,pool,service,lessonService=service,provisional
    const dateTo=q.query.dateTo?parse(z.string().date(),q.query.dateTo):null;
    const cursorAt=q.query.cursorAt?parse(z.string().datetime({offset:true}),q.query.cursorAt):null;
    const cursorId=q.query.cursorId?parse(uuid,q.query.cursorId):null;
+   const sort=q.query.sort?parse(z.string().trim().min(1).max(300),q.query.sort):null;
    if(Boolean(cursorAt)!==Boolean(cursorId))throw new ApiError(400,'CURSOR_INCOMPLETE','Thiếu một phần con trỏ trang.');
+   if(sort&&(cursorAt||cursorId))throw new ApiError(400,'WRITING_SORT_CURSOR_UNSUPPORTED','Danh sách đã sắp xếp dùng số trang.');
    const pairs=await writingFlowService.listPairs({classCode,teacherName,stageKey,stageStatus,
-     view,includeCompleted,taskType,search,searchScope,dateFrom,dateTo,limit,offset,cursorAt,cursorId});
+     view,includeCompleted,taskType,search,searchScope,dateFrom,dateTo,limit,offset,cursorAt,cursorId,sort});
    const last=pairs.at(-1);
-   r.json({ok:true,pairs,nextCursor:last&&pairs.length===limit
-     ?{cursorAt:last.updated_at,cursorId:last.pair_id}:null});
+   r.json({ok:true,pairs,nextCursor:!sort&&last&&pairs.length===limit
+     ?{cursorAt:last.updated_at,cursorId:last.pair_id}:null,
+     nextOffset:sort&&pairs.length===limit?offset+limit:null});
  }));
  app.get('/api/v1/admin/writing-flow/pairs/:pairId/detail',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
    r.json({ok:true,detail:await writingFlowService.pairDetail({pairId:parse(uuid,q.params.pairId)})});

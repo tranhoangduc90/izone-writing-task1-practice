@@ -275,7 +275,7 @@ test('danh sách bài chuyển bộ lọc lớp và giảng viên vào truy vấ
     classCode: 'IC2200', teacherName: 'Giảng viên thử', stageKey: null,
     stageStatus: null, view: null, includeCompleted: false, taskType: null,
     search: null, searchScope: 'all', dateFrom: null, dateTo: null,
-    limit: 50, offset: 10, cursorAt: null, cursorId: null,
+    limit: 50, offset: 10, cursorAt: null, cursorId: null, sort: null,
   });
   const review = await request(app).get('/api/v1/admin/writing-flow/pairs')
     .query({ view: 'review' });
@@ -285,6 +285,13 @@ test('danh sách bài chuyển bộ lọc lớp và giảng viên vào truy vấ
     .query({ stageKey: 'intake', searchScope: 'all', limit: 50 });
   assert.equal(intake.status, 200);
   assert.equal(received.stageKey, 'intake');
+  const sorted = await request(app).get('/api/v1/admin/writing-flow/pairs')
+    .query({ sort: 'finished:desc,student:asc', offset: 50, limit: 50 });
+  assert.equal(sorted.status, 200);
+  assert.equal(received.sort, 'finished:desc,student:asc');
+  assert.equal(received.offset, 50);
+  assert.equal((await request(app).get('/api/v1/admin/writing-flow/pairs')
+    .query({ sort: 'finished:desc', cursorAt: new Date().toISOString(), cursorId: reviewId })).status, 400);
 });
 
 test('nhật ký thao tác toàn hệ thống chỉ mở cho quản trị viên và nhận bộ lọc lớp', async () => {

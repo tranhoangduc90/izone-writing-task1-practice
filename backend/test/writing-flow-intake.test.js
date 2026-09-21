@@ -145,6 +145,28 @@ test('cờ khác nhưng cùng mốc sửa Lark bị chặn thay vì ghi đè', a
   assert.equal(pairs.length, 3);
 });
 
+test('bài Classroom đã cứu TR/CC không tạo cặp mới khi lượt quét mới chỉ đổi cờ chính sách', async () => {
+  const { pool, pairs } = fakePool();
+  const intake = createWritingFlowIntake({ pool, encryptionKey: '11'.repeat(32) });
+  const source = input();
+  source.sourceType = 'google_classroom';
+  delete source.larkMeta;
+  delete source.larkModifiedMs;
+  source.expectedCount = 1;
+  source.pairs = [{ essaySlot: 1, taskType: 'task_2', topic: 'Đề Classroom', image: '',
+    essay: 'Bài Classroom', trCcCheck: false }];
+  const first = await intake(source);
+  assert.equal(first.receipts[0].status, 'received');
+  pairs[0].trcc_required_override = true;
+  const afterFix = structuredClone(source);
+  afterFix.sourceModifiedAt = '2026-09-17T08:10:00.000Z';
+  afterFix.pairs[0].trCcCheck = true;
+  const second = await intake(afterFix);
+  assert.equal(second.receipts[0].status, 'existing');
+  assert.equal(second.receipts[0].pairId, first.receipts[0].pairId);
+  assert.equal(pairs.length, 1);
+});
+
 test('MIME sai hoặc thiếu khóa mã hóa dừng trước khi mở transaction', async () => {
   const { pool, writes } = fakePool();
   const withoutKey = createWritingFlowIntake({ pool, encryptionKey: null });

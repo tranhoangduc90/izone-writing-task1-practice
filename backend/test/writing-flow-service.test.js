@@ -337,7 +337,7 @@ test('mọi tab dashboard giải mã đúng khóa hex như production và trả 
   const encryptionKey = Buffer.alloc(32, 7).toString('hex');
   const binaryKey = Buffer.from(encryptionKey, 'hex');
   const sourceCiphertext = seal(JSON.stringify([
-    'Bài viết thử', 'Đề bài thử', 'https://example.invalid/chart.png', null, true,
+    'task_1', 'Đề bài thử', 'https://example.invalid/chart.png', 'Bài viết thử', true,
   ]), binaryKey);
   const resultUrl = `https://ducizone.ddns.net/writing/shared/writing-essays/${'a'.repeat(48)}/view?v=2`;
   const renderCiphertext = seal(JSON.stringify({ resultUrl }), binaryKey);

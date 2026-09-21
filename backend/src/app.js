@@ -175,6 +175,18 @@ const writingComplete=z.object({pairId:uuid,revision:z.string().regex(/^[0-9a-f]
 const writingFail=z.object({pairId:uuid,revision:z.string().regex(/^[0-9a-f]{64}$/),
  stageKey:writingStage,attemptId:uuid,errorCode:z.string().trim().min(1).max(100),
  unknown:z.boolean().default(false)});
+const writingTrccRepairClaim=z.object({pairId:uuid,
+ revision:z.string().regex(/^[0-9a-f]{64}$/),handoffId:uuid,
+ executionId:z.string().trim().min(1).max(80)});
+const writingTrccRepairComplete=z.object({pairId:uuid,
+ revision:z.string().regex(/^[0-9a-f]{64}$/),repairAttemptId:uuid,
+ operationKey:z.string().trim().min(1).max(160),
+ result:z.object({text:z.string().trim().min(1).max(80000),
+   promptKey:z.string().trim().min(1).max(160),provider:z.string().trim().max(100).nullable().optional(),
+   route:z.string().trim().max(100).nullable().optional()})});
+const writingTrccRepairFail=z.object({pairId:uuid,
+ revision:z.string().regex(/^[0-9a-f]{64}$/),repairAttemptId:uuid,
+ errorCode:z.string().trim().min(1).max(100),unknown:z.boolean().default(false)});
 const writingAiStage=z.enum(['precheck','main','critic','arbiter']);
 const writingAiBase={pairId:uuid,revision:z.string().regex(/^[0-9a-f]{64}$/),
  stageKey:writingAiStage,attemptId:uuid,batchIndex:z.number().int().min(0).max(100)};
@@ -260,7 +272,7 @@ export function writingWriteRateLimit(req) {
 function cors(config){return(req,res,next)=>{const origin=req.get('origin');if(origin&&!config.allowedOrigins.has(origin))return res.status(403).json({ok:false,error:'ORIGIN_NOT_ALLOWED'});if(origin){res.set('Access-Control-Allow-Origin',origin);res.set('Vary','Origin');}res.set('Access-Control-Allow-Credentials','true');res.set('Access-Control-Allow-Methods','GET, POST, PUT, DELETE, OPTIONS');res.set('Access-Control-Allow-Headers','Authorization, Content-Type, If-None-Match, If-Match, x-izone-csrf');res.set('Access-Control-Expose-Headers','ETag, Retry-After, X-Writing-Request-Id');res.set('Cache-Control','no-store');return req.method==='OPTIONS'?res.status(204).end():next();};}
 function csvCell(value){const text=String(value??'');return /[",\r\n]/.test(text)?`"${text.replaceAll('"','""')}"`:text;}
 
-export function createApp({config,pool,service,lessonService=service,provisionalService=null,lmsResultService=null,teacherCommentService=null,teacherClassAccess=null,writingFlowService=null,writingFlowStage=null,writingFlowHandoff=null,writingFlowAiCall=null,writingFlowScan=null,teacherAuth=null,adminAuth=(_q,r)=>r.status(503).json({ok:false,error:'ADMIN_AUTH_NOT_CONFIGURED'})}){
+export function createApp({config,pool,service,lessonService=service,provisionalService=null,lmsResultService=null,teacherCommentService=null,teacherClassAccess=null,writingFlowService=null,writingFlowStage=null,writingFlowHandoff=null,writingFlowAiCall=null,writingFlowScan=null,writingFlowTrccRepair=null,teacherAuth=null,adminAuth=(_q,r)=>r.status(503).json({ok:false,error:'ADMIN_AUTH_NOT_CONFIGURED'})}){
  const app=express();app.disable('x-powered-by');app.set('trust proxy',config.trustProxyHops);
  // Ghi mã truy vết trước khi CORS hoặc giới hạn tốc độ chặn yêu cầu Writing.
  app.use('/api/v1/internal/writing-flow',writingFlowRequestLog());
@@ -274,6 +286,7 @@ export function createApp({config,pool,service,lessonService=service,provisional
  const writingHandoffReady=(q,r,next)=>writingFlowHandoff?next():r.status(503).json({ok:false,error:'WRITING_HANDOFF_NOT_READY'});
  const writingAiReady=(q,r,next)=>writingFlowAiCall?next():r.status(503).json({ok:false,error:'WRITING_AI_CALL_NOT_READY'});
  const writingScanReady=(q,r,next)=>writingFlowScan?next():r.status(503).json({ok:false,error:'WRITING_SCAN_NOT_READY'});
+ const writingTrccRepairReady=(q,r,next)=>writingFlowTrccRepair?next():r.status(503).json({ok:false,error:'WRITING_TRCC_REPAIR_NOT_READY'});
  const dashboardScope=q=>({reviewerEmail:q.reviewer.email,canAccessAllClasses:reviewerIsAdmin(q.reviewer)});
  // Một lớp có thể dùng chung một địa chỉ mạng. Ngưỡng đọc này vẫn chịu được 40 học viên polling 2 giây/lần.
  app.use(rateLimit({windowMs:60_000,limit:2400,standardHeaders:'draft-8',legacyHeaders:false,message:{ok:false,error:'RATE_LIMITED'}}));
@@ -413,6 +426,24 @@ export function createApp({config,pool,service,lessonService=service,provisional
  app.post('/api/v1/internal/writing-flow/stages/fail',internal,writingStageReady,asyncRoute(async(q,r)=>{
    r.json({ok:true,failure:await writingFlowStage.fail(parse(writingFail,q.body))});
  }));
+ app.post('/api/v1/internal/writing-flow/trcc-repairs/seed',internal,writingTrccRepairReady,asyncRoute(async(q,r)=>{
+   const input=parse(z.object({batchRequestId:uuid,
+     limit:z.number().int().min(1).max(5000).default(5000)}),q.body);
+   r.status(202).json({ok:true,result:await writingFlowTrccRepair.seed(input)});
+ }));
+ app.post('/api/v1/internal/writing-flow/trcc-repairs/claim',internal,writingTrccRepairReady,asyncRoute(async(q,r)=>{
+   r.json({ok:true,claim:await writingFlowTrccRepair.claim(parse(writingTrccRepairClaim,q.body))});
+ }));
+ app.post('/api/v1/internal/writing-flow/trcc-repairs/complete',internal,writingTrccRepairReady,asyncRoute(async(q,r)=>{
+   r.json({ok:true,completion:await writingFlowTrccRepair.complete(
+     parse(writingTrccRepairComplete,q.body))});
+ }));
+ app.post('/api/v1/internal/writing-flow/trcc-repairs/fail',internal,writingTrccRepairReady,asyncRoute(async(q,r)=>{
+   r.json({ok:true,failure:await writingFlowTrccRepair.fail(parse(writingTrccRepairFail,q.body))});
+ }));
+ app.get('/api/v1/internal/writing-flow/trcc-repairs/summary',internal,writingTrccRepairReady,asyncRoute(async(_q,r)=>{
+   r.json({ok:true,summary:await writingFlowTrccRepair.summary()});
+ }));
  app.post('/api/v1/internal/writing-flow/ai-calls/start',internal,writingAiReady,asyncRoute(async(q,r)=>{
    r.json({ok:true,call:await writingFlowAiCall.start(parse(writingAiStart,q.body))});
  }));
@@ -425,7 +456,9 @@ export function createApp({config,pool,service,lessonService=service,provisional
  }));
  app.post('/api/v1/internal/writing-flow/handoffs/recover',internal,writingHandoffReady,asyncRoute(async(q,r)=>{
    const limit=parse(z.object({limit:z.number().int().min(1).max(100).default(20)}),q.body).limit;
-   r.json({ok:true,recovered:await writingFlowHandoff.recoverExpired(limit)});
+   const stages=await writingFlowHandoff.recoverExpired(limit);
+   const trcc=writingFlowTrccRepair?await writingFlowTrccRepair.recoverExpired(limit):[];
+   r.json({ok:true,recovered:[...stages,...trcc]});
  }));
  app.post('/api/v1/internal/grading-jobs/claim',internal,asyncRoute(async(q,r)=>r.json({ok:true,jobs:await service.claimJobs(parse(claim,q.body))})));
  app.post('/api/v1/internal/grading-jobs/:jobRef/complete',internal,asyncRoute(async(q,r)=>r.json({ok:true,job:await service.completeJob({jobRef:parse(uuid,q.params.jobRef),...parse(complete,q.body)})})));

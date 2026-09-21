@@ -712,7 +712,7 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
         SELECT p.pair_id, p.class_code, p.source_app_id, p.source_table_id,
                p.source_record_id, p.homework_file_id,
                p.source_link_index, p.essay_slot, p.task_type, p.status,
-               p.source_type,p.created_at,p.updated_at,
+               p.source_type,p.created_at,p.updated_at,p.trcc_required_override,
                coalesce(p.finished_at,deliver.completed_at) AS finished_at,p.skipped_at,
                p.skipped_by,p.skip_reason,
                coalesce(s.display_name,'') AS display_name,
@@ -726,6 +726,7 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
                coalesce(current_stage.attempt_count,0) AS attempt_count,
                current_stage.error_code AS last_error_code,p.source_ciphertext,
                render.result_ciphertext AS render_result_ciphertext,
+               repair.status AS trcc_repair_status,
                EXISTS (SELECT 1 FROM writing_flow.stage_result AS graded
                  WHERE graded.pair_id=p.pair_id AND graded.stage_key IN ('main','render')
                    AND graded.status='succeeded') AS grading_text_available
@@ -737,6 +738,7 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
             ON deliver.pair_id=p.pair_id AND deliver.stage_key='deliver'
           LEFT JOIN writing_flow.stage_result AS render
             ON render.pair_id=p.pair_id AND render.stage_key='render' AND render.status='succeeded'
+          LEFT JOIN writing_flow.trcc_repair AS repair ON repair.pair_id=p.pair_id
           LEFT JOIN LATERAL (
             SELECT s.stage_key, s.status AS stage_status, s.attempt_count,s.error_code
              FROM writing_flow.stage_result AS s
@@ -783,8 +785,9 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
           try {
             const decoded = JSON.parse(open(row.source_ciphertext, key));
             topic = decoded[1] || null; imageUrl = decoded[2] || null;
-            trCcCheck = typeof decoded[4] === 'boolean' ? decoded[4] : null;
-            essayPreview = writingSearchPreview(decoded[0]);
+            trCcCheck = row.trcc_required_override === true
+              ? true : typeof decoded[4] === 'boolean' ? decoded[4] : null;
+            essayPreview = writingSearchPreview(decoded[3]);
           } catch { dataIssueCode = 'SOURCE_DECRYPT_FAILED'; }
         }
         if (key && row.render_result_ciphertext) {

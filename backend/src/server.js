@@ -12,6 +12,7 @@ import { createWritingFlowStage } from './writing-flow-stage.js';
 import { createWritingFlowHandoff } from './writing-flow-handoff.js';
 import { createWritingFlowAiCall } from './writing-flow-ai-call.js';
 import { createWritingFlowScan } from './writing-flow-scan.js';
+import { createWritingFlowTrccRepair } from './writing-flow-trcc-repair.js';
 
 const config = loadConfig();
 const pool = createDatabasePool(config);
@@ -29,6 +30,8 @@ const app = createApp({
   writingFlowHandoff: createWritingFlowHandoff({ pool }),
   writingFlowAiCall: createWritingFlowAiCall({ pool, encryptionKey: config.writingFlowEncryptionKey }),
   writingFlowScan: createWritingFlowScan({ pool }),
+  writingFlowTrccRepair: createWritingFlowTrccRepair({
+    pool, encryptionKey: config.writingFlowEncryptionKey }),
   teacherCommentService: createTeacherCommentService({ pool }),
   teacherAuth,
   adminAuth: teacherAuth.authenticate

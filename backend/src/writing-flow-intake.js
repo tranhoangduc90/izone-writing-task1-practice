@@ -144,7 +144,7 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
         await client.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', [JSON.stringify(scope)]);
         const current = await client.query(`
           SELECT pair_id, submission_revision, content_sha256, source_modified_at,
-                 lark_modified_ms, status
+                 lark_modified_ms, status, trcc_required_override
             FROM writing_flow.pair
            WHERE source_app_id = $1 AND source_table_id = $2
              AND source_record_id = $3 AND homework_file_id = $4
@@ -161,6 +161,20 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
         if (sameFileTime && newest.content_sha256 !== pair.contentSha256) {
           throw new ApiError(409, 'SOURCE_VERSION_CONFLICT',
             'Hai nội dung khác nhau có cùng phiên bản file.');
+        }
+        // Bài Classroom cũ có thể đã được cứu TR/CC bằng cờ vận hành riêng.
+        // Khi file chỉ đổi vì hệ thống ghi lại link kết quả, nội dung đề–bài vẫn giữ nguyên:
+        // nhận lượt quét mới là cùng bài, không tạo cặp mới và không chấm lại toàn bộ.
+        const directTrccRepairEquivalent = newest && !isLark
+          && newest.trcc_required_override === true
+          && newest.content_sha256 === pair.contentSha256
+          && pair.trCcCheck === true;
+        if (directTrccRepairEquivalent) {
+          await client.query(`UPDATE writing_flow.pair
+            SET source_modified_at=GREATEST(source_modified_at,$2),updated_at=now()
+            WHERE pair_id=$1`, [newest.pair_id, sourceModifiedAt]);
+          receipts.push({ essaySlot: pair.essaySlot, pairId: newest.pair_id, status: 'existing' });
+          continue;
         }
         if (sameFileTime && newest.submission_revision !== pair.revision && !isLark) {
           throw new ApiError(409, 'SOURCE_VERSION_CONFLICT',

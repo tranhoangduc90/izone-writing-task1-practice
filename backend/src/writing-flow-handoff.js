@@ -13,7 +13,8 @@ export function createWritingFlowHandoff({ pool }) {
         UPDATE writing_flow.handoff h SET status='acknowledged', acknowledged_at=now()
         FROM writing_flow.pair p
         WHERE h.pair_id=p.pair_id AND h.status IN ('pending','sent')
-          AND p.status IN ('delivered','superseded')`);
+          AND (p.status='superseded'
+            OR (p.status='delivered' AND h.to_stage<>'trcc_repair'))`);
       await client.query(`
         UPDATE writing_flow.handoff h SET status='acknowledged', acknowledged_at=now()
         FROM writing_flow.stage_result s
@@ -29,7 +30,8 @@ export function createWritingFlowHandoff({ pool }) {
            WHERE ((h.status='pending' AND h.next_send_at<=now())
                OR (h.status='sent' AND h.next_send_at<=now()
                  AND h.last_sent_at<=now()-interval '6 hours'))
-             AND p.status NOT IN ('delivered','superseded')
+             AND p.status<>'superseded'
+             AND (p.status<>'delivered' OR h.to_stage='trcc_repair')
            ORDER BY h.next_send_at,h.created_at,h.handoff_id
            LIMIT $1 FOR UPDATE OF h SKIP LOCKED
         )

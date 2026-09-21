@@ -54,7 +54,7 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
                source_app_id, source_table_id, source_record_id,
                homework_file_id, source_link_index,
                essay_slot, class_code, document_kind, source_modified_at,
-               source_type, source_id,
+               source_type, source_id, trcc_required_override,
                (SELECT s.display_name FROM writing_flow.source_record AS s
                  WHERE s.source_id=p.source_id) AS source_display_name
           FROM writing_flow.pair AS p WHERE pair_id = $1 FOR UPDATE`, [pairId]);
@@ -226,13 +226,32 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
          ORDER BY CASE stage_key
            WHEN 'intake' THEN 1 WHEN 'precheck' THEN 2 WHEN 'main' THEN 3
            WHEN 'critic' THEN 4 WHEN 'arbiter' THEN 5 WHEN 'render' THEN 6 ELSE 7 END`, [pairId]);
+      const previous = Object.fromEntries(results.rows.map(row =>
+        [row.stage_key, decode(row.result_ciphertext, key)]));
+      if (stageKey === 'render' && pair.trcc_required_override === true) {
+        const repairResult = await client.query(`SELECT status,result_ciphertext
+          FROM writing_flow.trcc_repair WHERE pair_id=$1`, [pairId]);
+        if (repairResult.rowCount !== 1 || repairResult.rows[0].status !== 'succeeded'
+          || !repairResult.rows[0].result_ciphertext) {
+          throw new ApiError(409, 'TRCC_REPAIR_RESULT_MISSING',
+            'Bài cần cứu TR/CC nhưng chưa có kết quả đã lưu.');
+        }
+        const repair = decode(repairResult.rows[0].result_ciphertext, key);
+        const repairedText = String(repair?.text ?? '').trim();
+        if (!repairedText || !previous.precheck) {
+          throw new ApiError(409, 'TRCC_REPAIR_RESULT_INVALID', 'Kết quả cứu TR/CC không hợp lệ.');
+        }
+        previous.precheck = { ...previous.precheck, tr_cc: repairedText,
+          trcc_mode: 'repair', trcc_prompt_key: repair.promptKey || 'repair' };
+      }
       return {
         status: 'started', pairId, revision, stageKey,
         attemptId: attemptResult.rows[0].attempt_id, attemptNo,
         requestKey, cycleNo: stage.cycle_no,
         source: (() => {
           const [taskType, topic, image, essay, trCcCheck] = decode(pair.source_ciphertext, key);
-          return { taskType, topic, image, essay, trCcCheck,
+          return { taskType, topic, image, essay,
+            trCcCheck: trCcCheck === true || pair.trcc_required_override === true,
             appId: pair.source_app_id,
             tableId: pair.source_table_id,
             recordId: pair.source_record_id,
@@ -246,7 +265,7 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
             sourceDisplayName: pair.source_display_name || null,
             sourceModifiedAt: new Date(pair.source_modified_at).toISOString() };
         })(),
-        previous: Object.fromEntries(results.rows.map(row => [row.stage_key, decode(row.result_ciphertext, key)])),
+        previous,
       };
     });
   }

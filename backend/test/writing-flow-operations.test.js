@@ -160,7 +160,7 @@ test('lịch sử chỉ trả bản mới nhất mỗi ô và giải mã các fi
   assert.equal(Object.hasOwn(row, 'snapshot_ciphertext'), false);
 });
 
-test('chỉ cấp lớp đã duyệt đang học và giới hạn theo tham số thay vì cap ba lớp', async () => {
+test('chỉ cấp lớp đã duyệt hợp lệ, gồm CS thiếu trạng thái nguồn, và giới hạn theo tham số', async () => {
   const classCodes = Array.from({ length: 8 }, (_, index) => `IC22${String(index).padStart(2, '0')}`);
   const statements = [];
   const pool = poolWith(async (sql, params) => {
@@ -179,7 +179,8 @@ test('chỉ cấp lớp đã duyệt đang học và giới hạn theo tham số
   assert.equal(rows.length, 8);
   assert.equal(statements[1].params[0], 8);
   assert.match(statements[1].sql, /mapping_status='approved'/u);
-  assert.match(statements[1].sql, /class_status='on_going'/u);
+  assert.match(statements[1].sql, /eligibility_reason='active'/u);
+  assert.doesNotMatch(statements[1].sql, /class_status='on_going'/u);
   assert.match(statements[1].sql, /8-count\(\*\).*scan_status='scanning'/su);
   assert.match(statements[1].sql, /FOR UPDATE SKIP LOCKED[\s\S]*LIMIT least\(\$1/u);
 });
@@ -278,6 +279,27 @@ test('migration dashboard tạo chỉ mục HMAC và không lưu nội dung rõ'
   assert.match(sql, /writing_pair_search_token_lookup_idx/u);
   assert.match(sql, /display_name=coalesce/u);
   assert.doesNotMatch(sql, /essay_text|content_text|GRANT\s+DELETE/iu);
+});
+
+test('retry lớp dùng cùng eligibility đã duyệt nên nhận được lớp CS thiếu trạng thái nguồn', async () => {
+  const statements = [];
+  const pool = poolWith(async (sql, params) => {
+    statements.push({ sql, params });
+    if (sql.includes('FROM writing_flow.operator_event')) return { rowCount: 0, rows: [] };
+    if (sql.includes('UPDATE writing_flow.class_registry')) {
+      return { rowCount: 1, rows: [{ class_code: 'CS.070626' }] };
+    }
+    if (sql.includes('INSERT INTO writing_flow.operator_event')) return { rowCount: 1, rows: [] };
+    throw new Error(`UNEXPECTED_SQL:${sql}`);
+  });
+  const result = await createWritingFlowOperations({ pool }).requestClassScan({
+    classCode: 'CS.070626', requestId: 'request-cs-retry',
+    actorRef: 'operator', reason: 'Kiểm tra lại lớp CS hợp lệ',
+  });
+  assert.equal(result.classCode, 'CS.070626');
+  const update = statements.find(item => item.sql.includes('UPDATE writing_flow.class_registry'));
+  assert.match(update.sql, /eligibility_reason='active'/u);
+  assert.doesNotMatch(update.sql, /class_status='on_going'/u);
 });
 
 test('migration v6 tạo thùng rác mềm cho lỗi nguồn và nhật ký khôi phục', async () => {

@@ -80,7 +80,7 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
             AND next_scan_at>now()))::integer AS slots
           FROM writing_flow.class_registry
         ) SELECT class_code FROM writing_flow.class_registry
-          WHERE enabled AND mapping_status='approved' AND class_status='on_going'
+          WHERE enabled AND mapping_status='approved' AND eligibility_reason='active'
             AND scan_status IN ('pending','scanning','succeeded','failed') AND next_scan_at<=now()
           ORDER BY next_scan_at,class_code FOR UPDATE SKIP LOCKED
           LIMIT least($1,(SELECT slots FROM capacity))`, [limit]);
@@ -137,7 +137,7 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
           SET scan_status='pending',scan_attempt_count=0,next_scan_at=now(),
               last_error_code=NULL,updated_at=now()
           WHERE class_code=$1 AND enabled AND mapping_status='approved'
-            AND class_status='on_going' RETURNING class_code`, [classCode]);
+            AND eligibility_reason='active' RETURNING class_code`, [classCode]);
         if (!result.rowCount) throw new ApiError(404, 'CLASS_NOT_FOUND', 'Không tìm thấy lớp đang vận hành.');
         await client.query(`INSERT INTO writing_flow.operator_event
           (class_code,event_type,actor_ref,request_id,reason,after_state)

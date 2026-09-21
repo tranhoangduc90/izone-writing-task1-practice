@@ -47,3 +47,14 @@ test('source và stage chỉ dùng cờ override để cứu TR/CC, không xóa 
   assert.doesNotMatch(repair, /stage_key IN \('main','critic','arbiter'/u);
   assert.doesNotMatch(repair, /DELETE FROM/u);
 });
+
+test('hàng cứu chỉ nhận danh sách bài đã đối chiếu, không tự quét rộng toàn lịch sử', async () => {
+  const [app, repair] = await Promise.all([
+    readFile(new URL('../src/app.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/writing-flow-trcc-repair.js', import.meta.url), 'utf8'),
+  ]);
+  assert.match(app, /pairIds:z\.array\(uuid\)\.min\(1\)\.max\(5000\)/u);
+  assert.match(repair, /async function seed\(\{ batchRequestId, pairIds,/u);
+  assert.match(repair, /p\.pair_id=ANY\(\$1::uuid\[\]\)/u);
+  assert.doesNotMatch(repair, /LIMIT \$1 FOR UPDATE OF p SKIP LOCKED/u);
+});

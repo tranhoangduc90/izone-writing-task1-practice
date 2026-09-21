@@ -20,7 +20,7 @@ function operationKey(pairId, cycleNo) {
 export function createWritingFlowTrccRepair({ pool, encryptionKey }) {
   const key = keyFromHex(encryptionKey);
 
-  async function seed({ batchRequestId, limit = 5000, actorRef = 'trcc_incident_repair' }) {
+  async function seed({ batchRequestId, pairIds, actorRef = 'trcc_incident_repair' }) {
     if (!key) throw new ApiError(503, 'WRITING_FLOW_ENCRYPTION_NOT_READY', 'Chưa cấu hình nơi lưu bài chấm.');
     return withTransaction(pool, async client => {
       const candidates = await client.query(`
@@ -32,11 +32,12 @@ export function createWritingFlowTrccRepair({ pool, encryptionKey }) {
           JOIN writing_flow.stage_result AS render
             ON render.pair_id=p.pair_id AND render.stage_key='render' AND render.status='succeeded'
          WHERE p.source_type='google_classroom'
+           AND p.pair_id=ANY($1::uuid[])
            AND p.status IN ('delivered','needs_review')
            AND p.skipped_at IS NULL
            AND COALESCE(p.trcc_required_override,false)=false
          ORDER BY p.created_at,p.pair_id
-         LIMIT $1 FOR UPDATE OF p SKIP LOCKED`, [limit]);
+         FOR UPDATE OF p SKIP LOCKED`, [pairIds]);
       let seeded = 0;
       for (const row of candidates.rows) {
         const source = decode(row.source_ciphertext, key);

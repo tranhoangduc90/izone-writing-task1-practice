@@ -428,7 +428,7 @@ export function createApp({config,pool,service,lessonService=service,provisional
  }));
  app.post('/api/v1/internal/writing-flow/trcc-repairs/seed',internal,writingTrccRepairReady,asyncRoute(async(q,r)=>{
    const input=parse(z.object({batchRequestId:uuid,
-     limit:z.number().int().min(1).max(5000).default(5000)}),q.body);
+     pairIds:z.array(uuid).min(1).max(5000)}),q.body);
    r.status(202).json({ok:true,result:await writingFlowTrccRepair.seed(input)});
  }));
  app.post('/api/v1/internal/writing-flow/trcc-repairs/claim',internal,writingTrccRepairReady,asyncRoute(async(q,r)=>{

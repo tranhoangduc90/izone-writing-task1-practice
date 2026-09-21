@@ -381,7 +381,7 @@ export function createWritingFlowScan({ pool }) {
           issues = await client.query(`SELECT issue_key,essay_slot,reason_code FROM writing_flow.source_issue
             WHERE issue_key=ANY($1::text[]) AND source_app_id=$2 AND source_table_id=$3
               AND source_record_id=$4 AND homework_file_id IS NOT DISTINCT FROM $5
-              AND source_link_index=$6 AND status='open'`,
+              AND source_link_index=$6 AND status IN ('open','skipped')`,
           [issueKeys, item.source_app_id, item.source_table_id, item.source_record_id,
             item.homework_file_id, item.source_link_index]);
           if (issues.rowCount !== issueKeys.length) {

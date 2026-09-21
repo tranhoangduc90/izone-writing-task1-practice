@@ -166,7 +166,7 @@ const writingScanPrepare=z.object({
  detectedSlotCount:z.number().int().min(0).max(4).nullable(),
  receiptRequest:writingScanReceipts
 });
-const writingStage=z.enum(['precheck','main','critic','arbiter','render','deliver']);
+const writingStage=z.enum(['intake','precheck','main','critic','arbiter','render','deliver']);
 const writingClaim=z.object({pairId:uuid,revision:z.string().regex(/^[0-9a-f]{64}$/),
  stageKey:writingStage,handoffId:uuid,executionId:z.string().trim().min(1).max(80)});
 const writingComplete=z.object({pairId:uuid,revision:z.string().regex(/^[0-9a-f]{64}$/),
@@ -484,7 +484,7 @@ export function createApp({config,pool,service,lessonService=service,provisional
      ?parse(z.string().trim().min(1).max(120),q.query.teacherName):null;
    const stageKey=q.query.stageKey?parse(writingStage,q.query.stageKey):null;
    const stageStatus=q.query.stageStatus?parse(z.enum(['pending','running','needs_review','succeeded','skipped']),q.query.stageStatus):null;
-   const view=q.query.view?parse(z.enum(['unfinished','delivered','skipped']),q.query.view):null;
+   const view=q.query.view?parse(z.enum(['unfinished','delivered','skipped','review']),q.query.view):null;
    const includeCompleted=q.query.includeCompleted==='true';
    const taskType=q.query.taskType?parse(z.enum(['task_1','task_2']),q.query.taskType):null;
    const search=q.query.search?parse(z.string().trim().min(1).max(500),q.query.search):null;
@@ -524,8 +524,9 @@ export function createApp({config,pool,service,lessonService=service,provisional
     const teacherName=q.query.teacherName?parse(z.string().trim().min(1).max(120),q.query.teacherName):null;
     const search=q.query.search?parse(z.string().trim().min(1).max(500),q.query.search):null;
     const reasonCode=q.query.reasonCode?parse(z.string().trim().min(1).max(100),q.query.reasonCode):null;
+    const status=parse(z.enum(['open','skipped']),q.query.status??'open');
     r.json({ok:true,issues:await writingFlowService.listSourceIssues({classCode,teacherName,
-      search,reasonCode,limit,offset})});
+      search,reasonCode,status,limit,offset})});
   }));
  app.get('/api/v1/admin/writing-flow/sources',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
    const limit=parse(z.coerce.number().int().min(1).max(100),q.query.limit??50);
@@ -577,6 +578,20 @@ export function createApp({config,pool,service,lessonService=service,provisional
      const {requestId}=parse(z.object({requestId:uuid}),q.body);
      const scan=await writingFlowScan.retrySourceIssue({issueKey,requestId});
      r.status(202).json({ok:true,scan});
+   }));
+ app.post('/api/v1/admin/writing-flow/source-issues/:issueKey/skip',writes,adminAuth,
+   writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
+     const result=await writingFlowService.skipSourceIssue({
+       issueKey:parse(z.string().regex(/^[0-9a-f]{64}$/),q.params.issueKey),
+       ...parse(writingOperatorAction,q.body),actorRef:q.reviewer.email});
+     r.status(202).json({ok:true,result});
+   }));
+ app.post('/api/v1/admin/writing-flow/source-issues/:issueKey/restore',writes,adminAuth,
+   writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
+     const result=await writingFlowService.restoreSourceIssue({
+       issueKey:parse(z.string().regex(/^[0-9a-f]{64}$/),q.params.issueKey),
+       ...parse(writingOperatorAction,q.body),actorRef:q.reviewer.email});
+     r.status(202).json({ok:true,result});
    }));
  app.get('/api/v1/admin/writing-flow/workflow-failures',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
    const limit=parse(z.coerce.number().int().min(1).max(200),q.query.limit??100);

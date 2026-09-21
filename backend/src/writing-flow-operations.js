@@ -240,19 +240,26 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
       if (!key) throw new ApiError(503, 'WRITING_FLOW_ENCRYPTION_NOT_READY',
         'Chưa cấu hình nơi đọc lịch sử.');
       const result = await pool.query(`SELECT * FROM (
-          SELECT DISTINCT ON (source_app_id,source_table_id,source_record_id,essay_slot)
-            legacy_id,source_record_id,essay_slot,class_code,student_name,teacher_name,
-            source_status,created_at_source,finished_at_source,linked_pair_id,match_status,
-            imported_at,snapshot_ciphertext
-          FROM writing_flow.legacy_record
-          WHERE ($1::text IS NULL OR class_code=$1)
-            AND (essay_slot IS NOT NULL OR NOT EXISTS (
+          SELECT DISTINCT ON (legacy.source_app_id,legacy.source_table_id,
+              legacy.source_record_id,legacy.essay_slot)
+            legacy.legacy_id,legacy.source_record_id,legacy.essay_slot,legacy.class_code,
+            legacy.student_name,legacy.teacher_name,legacy.source_status,
+            legacy.created_at_source,legacy.finished_at_source,legacy.linked_pair_id,
+            legacy.match_status,legacy.imported_at,legacy.snapshot_ciphertext
+          FROM writing_flow.legacy_record AS legacy
+          LEFT JOIN writing_flow.class_registry AS registry
+            ON registry.class_code=legacy.class_code
+          WHERE ($1::text IS NULL OR legacy.class_code=$1)
+            AND (registry.class_code IS NULL OR coalesce(registry.eligibility_reason,'')
+              NOT IN ('excluded','excluded_ic_before_2065','excluded_ic_program'))
+            AND (legacy.essay_slot IS NOT NULL OR NOT EXISTS (
               SELECT 1 FROM writing_flow.legacy_record AS slotted
-              WHERE slotted.source_app_id=writing_flow.legacy_record.source_app_id
-                AND slotted.source_table_id=writing_flow.legacy_record.source_table_id
-                AND slotted.source_record_id=writing_flow.legacy_record.source_record_id
+              WHERE slotted.source_app_id=legacy.source_app_id
+                AND slotted.source_table_id=legacy.source_table_id
+                AND slotted.source_record_id=legacy.source_record_id
                 AND slotted.essay_slot IS NOT NULL))
-          ORDER BY source_app_id,source_table_id,source_record_id,essay_slot,imported_at DESC,legacy_id DESC
+          ORDER BY legacy.source_app_id,legacy.source_table_id,legacy.source_record_id,
+            legacy.essay_slot,legacy.imported_at DESC,legacy.legacy_id DESC
         ) AS latest
         ORDER BY coalesce(created_at_source,imported_at) DESC,legacy_id DESC LIMIT $2 OFFSET $3`,
       [classCode, limit, offset]);

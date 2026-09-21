@@ -30,6 +30,8 @@ function makeApp(role, overrides = {}, stageOverrides = {}, aiOverrides = {}, sc
     syncClassesFromMapping: async () => ({ active: 1, completed: 1 }),
     recordSourceIssue: async input => ({ issue_key: 'a'.repeat(64), reason_code: input.reasonCode }),
     requestRetry: async input => ({ reviewId: input.reviewId, status: 'retry_requested' }),
+    skipSourceIssue: async input => ({ issueKey: input.issueKey, status: 'skipped' }),
+    restoreSourceIssue: async input => ({ issueKey: input.issueKey, status: 'open' }),
     intakePairs: async () => ({ detectedCount: 1, registeredCount: 1, receipts: [] }),
     ...overrides,
   };
@@ -275,6 +277,14 @@ test('danh sách bài chuyển bộ lọc lớp và giảng viên vào truy vấ
     search: null, searchScope: 'all', dateFrom: null, dateTo: null,
     limit: 50, offset: 10, cursorAt: null, cursorId: null,
   });
+  const review = await request(app).get('/api/v1/admin/writing-flow/pairs')
+    .query({ view: 'review' });
+  assert.equal(review.status, 200);
+  assert.equal(received.view, 'review');
+  const intake = await request(app).get('/api/v1/admin/writing-flow/pairs')
+    .query({ stageKey: 'intake', searchScope: 'all', limit: 50 });
+  assert.equal(intake.status, 200);
+  assert.equal(received.stageKey, 'intake');
 });
 
 test('nhật ký thao tác toàn hệ thống chỉ mở cho quản trị viên và nhận bộ lọc lớp', async () => {
@@ -361,6 +371,20 @@ test('quản trị viên có thể yêu cầu đọc lại đúng một lỗi ng
   assert.equal((await request(app)
     .post('/api/v1/admin/writing-flow/source-issues/not-a-key/retry')
     .send({ requestId })).status, 400);
+});
+
+test('chỉ quản trị viên được bỏ qua và khôi phục lỗi nguồn', async () => {
+  const issueKey = 'a'.repeat(64);
+  const skipUrl = `/api/v1/admin/writing-flow/source-issues/${issueKey}/skip`;
+  const restoreUrl = `/api/v1/admin/writing-flow/source-issues/${issueKey}/restore`;
+  const body = { requestId, reason: 'Kiểm thử thùng rác mềm' };
+  assert.equal((await request(makeApp('teacher')).post(skipUrl).send(body)).status, 403);
+  const skipped = await request(makeApp('admin')).post(skipUrl).send(body);
+  assert.equal(skipped.status, 202);
+  assert.equal(skipped.body.result.status, 'skipped');
+  const restored = await request(makeApp('admin')).post(restoreUrl).send(body);
+  assert.equal(restored.status, 202);
+  assert.equal(restored.body.result.status, 'open');
 });
 
 test('nút chạy lại gửi mã yêu cầu tới dịch vụ, không tuyên bố bài đã chấm xong', async () => {

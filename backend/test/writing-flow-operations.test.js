@@ -144,9 +144,10 @@ test('lịch sử chỉ trả bản mới nhất mỗi ô và giải mã các fi
     trcc: true, lms: 'https://ducizone.ddns.net/writing/shared/writing-essays/'
       + `${'a'.repeat(48)}/view?v=1` };
   const pool = poolWith(async sql => {
-    assert.match(sql, /DISTINCT ON \(source_app_id,source_table_id,source_record_id,essay_slot\)/u);
+    assert.match(sql, /DISTINCT ON \(legacy\.source_app_id,legacy\.source_table_id,[\s\S]*legacy\.source_record_id,legacy\.essay_slot\)/u);
     assert.match(sql, /essay_slot IS NOT NULL OR NOT EXISTS/u);
-    assert.match(sql, /slotted\.source_record_id=writing_flow\.legacy_record\.source_record_id/u);
+    assert.match(sql, /slotted\.source_record_id=legacy\.source_record_id/u);
+    assert.match(sql, /excluded_ic_before_2065/u);
     return { rowCount: 1, rows: [{ legacy_id: 'legacy', essay_slot: 2,
       snapshot_ciphertext: seal(JSON.stringify(snapshot), Buffer.from(hexKey, 'hex')) }] };
   });
@@ -277,4 +278,29 @@ test('migration dashboard tạo chỉ mục HMAC và không lưu nội dung rõ'
   assert.match(sql, /writing_pair_search_token_lookup_idx/u);
   assert.match(sql, /display_name=coalesce/u);
   assert.doesNotMatch(sql, /essay_text|content_text|GRANT\s+DELETE/iu);
+});
+
+test('migration v6 tạo thùng rác mềm cho lỗi nguồn và nhật ký khôi phục', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const sql = await readFile(new URL('../../docs/migrations/2026-09-21-writing-flow-class-filter-and-source-skip-v6.sql',
+    import.meta.url), 'utf8');
+  for (const field of ['skipped_at', 'skipped_by', 'skip_reason', 'source_issue_key']) {
+    assert.match(sql, new RegExp(field, 'u'));
+  }
+  assert.match(sql, /source_issue_skipped/u);
+  assert.match(sql, /source_issue_restored/u);
+  assert.doesNotMatch(sql, /\bDELETE\s+FROM\b|GRANT\s+DELETE/iu);
+});
+
+test('migration v7 lưu lớp Classroom trực tiếp không cần ID ERP giả', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const sql = await readFile(new URL(
+    '../../docs/migrations/2026-09-21-writing-flow-direct-classroom-classes-v7.sql',
+    import.meta.url), 'utf8');
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS mapping\.classroom_direct_class/u);
+  assert.match(sql, /class_code text PRIMARY KEY/u);
+  assert.match(sql, /classroom_course_id text NOT NULL UNIQUE/u);
+  assert.match(sql, /GRANT SELECT,INSERT,UPDATE[^;]+n8n_erp_sync/su);
+  assert.match(sql, /GRANT SELECT[^;]+writing_practice_api/su);
+  assert.doesNotMatch(sql, /GRANT DELETE/u);
 });

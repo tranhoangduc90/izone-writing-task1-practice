@@ -10,6 +10,7 @@ const requestId = '22222222-2222-4222-8222-222222222222';
 test('trạng thái lớp chỉ active khi mapping đã duyệt và lớp đang học', () => {
   const base = { erp_course_class_id: 1, erp_class_name_snapshot: 'IELTS IC2269',
     classroom_course_id: 'course-1', classroom_course_name_snapshot: 'IELTS IC2269',
+    classroom_section_snapshot: 'Chuyên sâu (6.0 - 7.0)',
     mapping_status: 'approved', class_statuses: ['on_going'], teacher_names: ['GV thử'] };
   assert.equal(mappingClassState(base).operational_state, 'active');
   assert.equal(mappingClassState({ ...base, class_statuses: ['completed'] }).operational_state,
@@ -20,6 +21,64 @@ test('trạng thái lớp chỉ active khi mapping đã duyệt và lớp đang 
     'status_review');
   assert.equal(mappingClassState({ ...base, erp_class_name_snapshot: 'IC2288' }).operational_state,
     'excluded');
+});
+
+test('lọc lớp IC theo số hiệu, giữ hai hệ Writing, lớp 1-1 và mọi lớp CS', () => {
+  const base = { erp_course_class_id: 1, classroom_course_id: 'course-1',
+    classroom_course_name_snapshot: 'Classroom thử', mapping_status: 'approved',
+    class_statuses: ['on_going'], teacher_names: [] };
+  const beforeCutoff = mappingClassState({ ...base, erp_class_name_snapshot: 'IC2064',
+    classroom_section_snapshot: 'Chuyên sâu (6.0 - 7.0)' });
+  assert.equal(beforeCutoff.operational_state, 'excluded');
+  assert.equal(beforeCutoff.eligibility_reason, 'excluded_ic_before_2065');
+  for (const classInfo of ['Chuyên sâu (6.0 - 7.0)', 'Chiến lược (5.0 - 6.0)', 'Lớp 1-1']) {
+    const accepted = mappingClassState({ ...base, erp_class_name_snapshot: 'IC2065',
+      classroom_section_snapshot: `  ${classInfo}  ` });
+    assert.equal(accepted.operational_state, 'active');
+    assert.equal(accepted.class_info, classInfo);
+  }
+  const wrongProgram = mappingClassState({ ...base, erp_class_name_snapshot: 'IC2172',
+    classroom_section_snapshot: 'IELTS Foundation' });
+  assert.equal(wrongProgram.operational_state, 'excluded');
+  assert.equal(wrongProgram.eligibility_reason, 'excluded_ic_program');
+  const missingCourse = mappingClassState({ ...base, erp_class_name_snapshot: 'IC2172',
+    classroom_course_id: null, classroom_section_snapshot: 'Chuyên sâu (6.0 - 7.0)' });
+  assert.equal(missingCourse.operational_state, 'missing_classroom_course');
+  const nonIc = mappingClassState({ ...base, erp_class_name_snapshot: 'CS.070626',
+    classroom_section_snapshot: 'Hệ khác' });
+  assert.equal(nonIc.operational_state, 'active');
+  const csWithoutSourceStatus = mappingClassState({ ...base,
+    erp_class_name_snapshot: 'CS.160826', classroom_section_snapshot: 'SW chuyên sâu',
+    class_statuses: [] });
+  assert.equal(csWithoutSourceStatus.operational_state, 'active');
+  assert.equal(csWithoutSourceStatus.class_status, 'unknown');
+});
+
+test('bốn lớp Term test giữ nguyên tên làm mã và ghép Classroom không cần ID ERP', () => {
+  const classNames = [
+    'Term test 2 khóa Chuyên sâu',
+    'Term test 2 khóa Chiến lược',
+    'Term test 1 khóa Chuyên sâu',
+    'Term test 1 khóa Chiến lược',
+  ];
+  for (const className of classNames) {
+    assert.equal(classCodeFromName(`  ${className.toLocaleUpperCase('vi')}  `), className);
+    const state = mappingClassState({
+      erp_course_class_id: null,
+      erp_class_name_snapshot: className,
+      classroom_course_id: `course-${className}`,
+      classroom_course_name_snapshot: className,
+      classroom_section_snapshot: '',
+      mapping_status: 'approved',
+      class_statuses: ['on_going'],
+      teacher_names: [],
+      source_ref: `classroom_direct:${className}`,
+    });
+    assert.equal(state.operational_state, 'active');
+    assert.equal(state.class_code, className);
+    assert.equal(state.erp_course_class_id, null);
+    assert.equal(state.source_ref, `classroom_direct:${className}`);
+  }
 });
 
 test('mapping trùng mã lớp hoặc Classroom bị dừng để kiểm tra', () => {
@@ -100,6 +159,46 @@ test('lỗi nguồn của hai ô cùng file có khóa riêng', async () => {
   assert.notEqual(first.issue_key, otherTable.issue_key);
   assert.equal(writes[0].values[6], 1);
   assert.equal(writes[1].values[6], 2);
+  assert.match(writes[0].sql, /status='skipped'[\s\S]*THEN 'skipped'/u);
+});
+
+test('lỗi nguồn có thùng rác mềm idempotent và khôi phục được', async () => {
+  const issueKey = 'a'.repeat(64);
+  const state = { status: 'open', events: new Set(), updates: [] };
+  const client = { async query(sql, values = []) {
+    if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rowCount: 0, rows: [] };
+    if (sql.includes('SELECT event_type FROM writing_flow.operator_event')) {
+      return { rowCount: state.events.has(values[0]) ? 1 : 0,
+        rows: state.events.has(values[0]) ? [{ event_type: 'source_issue_skipped' }] : [] };
+    }
+    if (sql.includes('SELECT i.issue_key,i.status')) return { rowCount: 1,
+      rows: [{ issue_key: issueKey, status: state.status, class_code: 'IC2172', source_id: null }] };
+    if (sql.includes("SET status='skipped'")) { state.status = 'skipped'; state.updates.push('skipped'); }
+    if (sql.includes("SET status='open'")) { state.status = 'open'; state.updates.push('open'); }
+    if (sql.includes('INSERT INTO writing_flow.operator_event')) state.events.add(values[4]);
+    return { rowCount: 1, rows: [] };
+  }, release() {} };
+  const service = createWritingFlowService({ pool: { connect: async () => client } });
+  const first = await service.skipSourceIssue({ issueKey, requestId,
+    actorRef: 'admin@example.invalid', reason: 'Không phải bài Writing' });
+  assert.equal(first.status, 'skipped');
+  const duplicate = await service.skipSourceIssue({ issueKey, requestId,
+    actorRef: 'admin@example.invalid', reason: 'Không phải bài Writing' });
+  assert.equal(duplicate.status, 'skipped');
+  assert.deepEqual(state.updates, ['skipped']);
+  const restored = await service.restoreSourceIssue({ issueKey,
+    requestId: '44444444-4444-4444-8444-444444444444',
+    actorRef: 'admin@example.invalid', reason: 'Bỏ qua nhầm' });
+  assert.equal(restored.status, 'open');
+  assert.deepEqual(state.updates, ['skipped', 'open']);
+});
+
+test('danh sách lỗi nguồn tách trạng thái mở và đã bỏ qua', async () => {
+  let observed;
+  const pool = { query: async (sql, values) => { observed = { sql, values }; return { rows: [] }; } };
+  await createWritingFlowService({ pool }).listSourceIssues({ status: 'skipped', limit: 25, offset: 5 });
+  assert.match(observed.sql, /WHERE i\.status=\$6/u);
+  assert.deepEqual(observed.values.slice(5), ['skipped', 25, 5]);
 });
 
 test('nhật ký một bài chỉ đọc metadata và sắp theo thời gian', async () => {
@@ -167,6 +266,7 @@ test('dịch vụ chỉ đọc sổ lớp của hệ thống mới và mốc qu�
     if (sql.includes('FROM mapping.classroom_course_mapping AS course')) return { rows: [{
       erp_course_class_id: 'class:1', erp_class_name_snapshot: 'IELTS IC2269',
       classroom_course_id: 'course-1', classroom_course_name_snapshot: 'IELTS IC2269',
+      classroom_section_snapshot: 'Chiến lược (5.0 - 6.0)',
       mapping_status: 'approved', class_statuses: ['on_going'], teacher_names: [],
     }] };
     return { rows: [{ class_code: 'IC2269', last_scanned_at: '2026-09-19T08:00:00Z' }] };
@@ -176,6 +276,7 @@ test('dịch vụ chỉ đọc sổ lớp của hệ thống mới và mốc qu�
   assert.equal(calls.length, 2);
   assert.deepEqual(calls[1].values, []);
   assert.equal(calls[0].sql.includes('mapping.classroom_course_mapping'), true);
+  assert.equal(calls[0].sql.includes('mapping.classroom_direct_class'), true);
   assert.equal(calls[1].sql.includes('writing_flow.class_registry'), true);
   assert.equal(calls.every(call => !call.sql.includes('lark_export_teacher_assignments')), true);
   assert.equal(calls.every(call => !/student|essay|ciphertext|token/iu.test(call.sql)), true);

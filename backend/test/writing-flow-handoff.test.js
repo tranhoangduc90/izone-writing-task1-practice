@@ -20,14 +20,16 @@ test('bàn giao đã được n8n nhận không bị phát lặp khi còn chờ 
   const result = await createWritingFlowHandoff({ pool }).due(720);
   assert.deepEqual(result, []);
 
-  const claim = queries.find(row => row.sql.includes('WITH ready AS'));
-  assert.ok(claim, 'phải có truy vấn cấp bàn giao');
-  assert.deepEqual(claim.params, [720]);
-  assert.match(claim.sql, /h\.status='pending'/u);
-  assert.match(claim.sql, /h\.status='sent'/u);
-  assert.match(claim.sql, /h\.last_sent_at<=now\(\)-interval '6 hours'/u);
-  assert.match(claim.sql, /next_send_at=now\(\)\+interval '6 hours'/u);
-  assert.doesNotMatch(claim.sql, /interval '30 seconds'/u);
+  const claims = queries.filter(row => row.sql.includes('WITH ready AS'));
+  assert.equal(claims.length, 2, 'phải tách lượt ghi Google khỏi các bước còn lại');
+  assert.deepEqual(claims.map(row => row.params), [[20], [720]]);
+  for (const claim of claims) {
+    assert.match(claim.sql, /h\.status='pending'/u);
+    assert.match(claim.sql, /h\.status='sent'/u);
+    assert.match(claim.sql, /h\.last_sent_at<=now\(\)-interval '6 hours'/u);
+    assert.match(claim.sql, /next_send_at=now\(\)\+interval '6 hours'/u);
+    assert.doesNotMatch(claim.sql, /interval '30 seconds'/u);
+  }
 
   const closeFinishedStage = queries.find(row =>
     row.sql.includes('FROM writing_flow.stage_result s'));
@@ -64,6 +66,38 @@ test('bàn giao retry từ danh sách cần kiểm tra không bị đóng trư�
     row.sql.includes('FROM writing_flow.stage_result s'));
   assert.match(closeFinishedStage.sql,
     /s\.status='needs_review' AND h\.from_stage<>'review'/u);
+});
+
+test('mỗi lượt dành tối đa hai mươi chỗ cho bước ghi Google và giữ phần còn lại cho các bước AI', async () => {
+  const queries = [];
+  let claimNo = 0;
+  const client = {
+    async query(sql, params = []) {
+      queries.push({ sql, params });
+      if (sql.includes('RETURNING h.handoff_id')) {
+        claimNo += 1;
+        if (claimNo === 1) {
+          return { rows: Array.from({ length: 20 }, (_, index) => ({
+            handoff_id: `handoff-deliver-${index}`,
+            pair_id: `pair-deliver-${index}`,
+            to_stage: 'deliver',
+            send_count: 1,
+            submission_revision: 'a'.repeat(64),
+          })), rowCount: 20 };
+        }
+      }
+      return { rows: [], rowCount: 0 };
+    },
+    release() {},
+  };
+  const pool = { async connect() { return client; } };
+
+  await createWritingFlowHandoff({ pool }).due(100);
+  const claims = queries.filter(row => row.sql.includes('RETURNING h.handoff_id'));
+  assert.equal(claims.length, 2);
+  assert.deepEqual(claims.map(row => row.params), [[20], [80]]);
+  assert.match(claims[0].sql, /h\.to_stage='deliver'/u);
+  assert.match(claims[1].sql, /h\.to_stage<>'deliver'/u);
 });
 
 test('bàn giao trực tiếp giữ cứu hộ sáu giờ, retry quota dùng mốc do chính sách cấp', () => {

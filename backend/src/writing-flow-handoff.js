@@ -22,7 +22,10 @@ export function createWritingFlowHandoff({ pool }) {
           AND h.status IN ('pending','sent')
           AND (s.status IN ('succeeded','skipped')
             OR (s.status='needs_review' AND h.from_stage<>'review'))`);
-      const claimed = await client.query(`
+      async function claimBatch({ delivery, capacity }) {
+        if (capacity <= 0) return [];
+        const stageFilter = delivery ? "h.to_stage='deliver'" : "h.to_stage<>'deliver'";
+        const claimed = await client.query(`
         WITH ready AS (
           SELECT h.handoff_id
             FROM writing_flow.handoff h
@@ -32,6 +35,7 @@ export function createWritingFlowHandoff({ pool }) {
                  AND h.last_sent_at<=now()-interval '6 hours'))
              AND p.status<>'superseded'
              AND (p.status<>'delivered' OR h.to_stage='trcc_repair')
+             AND ${stageFilter}
            ORDER BY h.next_send_at,h.created_at,h.handoff_id
            LIMIT $1 FOR UPDATE OF h SKIP LOCKED
         )
@@ -41,8 +45,16 @@ export function createWritingFlowHandoff({ pool }) {
           FROM ready,writing_flow.pair p
          WHERE h.handoff_id=ready.handoff_id AND p.pair_id=h.pair_id
         RETURNING h.handoff_id,h.pair_id,h.to_stage,h.send_count,p.submission_revision`,
-      [limit]);
-      return claimed.rows.map(row => ({
+        [capacity]);
+        return claimed.rows;
+      }
+      // Ghi Google có quota riêng: tối đa 20 lượt mỗi phút. Phần dung lượng còn lại
+      // vẫn dành cho các bước AI và tạo trang, nên không khôi phục giới hạn ba bài.
+      const deliveryLimit = Math.min(20, Math.max(1, Math.floor(limit / 5)));
+      const deliveryRows = await claimBatch({ delivery: true, capacity: deliveryLimit });
+      const otherRows = await claimBatch({ delivery: false,
+        capacity: Math.max(0, limit - deliveryRows.length) });
+      return [...deliveryRows, ...otherRows].map(row => ({
         handoffId: row.handoff_id,
         pairId: row.pair_id,
         revision: row.submission_revision,

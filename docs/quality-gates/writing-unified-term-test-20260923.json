@@ -1,0 +1,301 @@
+{
+  "schema_version": 3,
+  "product": "Hệ thống chấm Writing 56/67 hợp nhất Homework và Term Test",
+  "change_id": "writing-unified-term-test-20260923",
+  "change_kind": "feature",
+  "escaped_user_defect": false,
+  "risk": "high",
+  "system_traits": [
+    "stateful",
+    "asynchronous",
+    "concurrent",
+    "external_side_effects",
+    "authentication"
+  ],
+  "experience": {
+    "planning_mode": "controlled",
+    "mode_reason": "Luồng có trạng thái bền, nhiều giai đoạn, gọi AI và ghi kết quả ra Google Docs.",
+    "user": "Quản trị viên hệ thống chấm Writing",
+    "problem": "Term Test còn phụ thuộc Lark Base và luồng Homework còn cần hai lịch quét rỗng mỗi phút để phục hồi.",
+    "outcome": "Homework và Term Test dùng chung bảy giai đoạn, phục hồi theo sự kiện và vẫn nhìn thấy, retry được từ dashboard.",
+    "out_of_scope": [
+      "Không ghi hoặc sửa dữ liệu Lark Base.",
+      "Không đổi hành vi của các webapp Writing và Term Test đang dùng backend dùng chung."
+    ],
+    "plain_language_summary": "Bài mới được giao từng bước bằng database; nếu tín hiệu bị mất, backend tự đánh thức lại đúng bước mà không cần quét rỗng mỗi phút."
+  },
+  "change_package": {
+    "proposal": "Bổ sung Term Test vào luồng Writing mới và chuyển hai lịch phục hồi rỗng sang tín hiệu từ backend.",
+    "behavior_baseline": "Homework đã có bảy giai đoạn nhưng còn hai lịch n8n chạy mỗi phút; Term Test cũ phụ thuộc Lark Base.",
+    "deltas": [
+      {
+        "id": "DELTA-1",
+        "operation": "ADDED",
+        "behavior": "Term Test được nhận diện, chấm, phản biện, tạo trang và giao kết quả qua cùng bảy giai đoạn.",
+        "test_ids": ["T-TEST-CONTRACT", "T-N8N-STATIC", "T-FULL"]
+      },
+      {
+        "id": "DELTA-2",
+        "operation": "MODIFIED",
+        "behavior": "Bài Test đã có bằng chứng kết quả được ghi nhận đã giao và không tạo bàn giao chấm lại.",
+        "test_ids": ["T-HISTORICAL", "T-IDEMPOTENT"]
+      },
+      {
+        "id": "DELTA-3",
+        "operation": "MODIFIED",
+        "behavior": "Database phát tín hiệu sau commit; backend gọi webhook n8n và tự phục hồi sau mất tín hiệu.",
+        "test_ids": ["T-NOTIFIER", "T-RECOVERY", "T-ROLLBACK"]
+      }
+    ],
+    "archive_status": "active"
+  },
+  "requirements": [
+    {
+      "id": "REQ-1",
+      "statement": "Mỗi Task của một bài Test chạy độc lập qua bảy giai đoạn và ghi được kết quả riêng.",
+      "test_ids": ["T-TEST-CONTRACT", "T-N8N-STATIC"]
+    },
+    {
+      "id": "REQ-2",
+      "statement": "Bài Test đã chấm trước đây không bị gọi AI hoặc ghi đè kết quả.",
+      "test_ids": ["T-HISTORICAL", "T-IDEMPOTENT"]
+    },
+    {
+      "id": "REQ-3",
+      "statement": "Mất tín hiệu hoặc n8n tạm lỗi không làm mất việc và không cần lịch chạy rỗng mỗi phút.",
+      "test_ids": ["T-NOTIFIER", "T-RECOVERY", "T-ROLLBACK"]
+    },
+    {
+      "id": "REQ-4",
+      "statement": "Dashboard có khu vực Term Test, thêm bài thủ công và đủ thao tác xem, retry, bỏ qua.",
+      "test_ids": ["T-DASHBOARD", "T-FULL"]
+    }
+  ],
+  "invariants": [
+    {
+      "id": "INV-1",
+      "statement": "Một file, ô bài và phiên bản chỉ tạo một cặp chấm; retry tiếp tục đúng bước.",
+      "test_ids": ["T-IDEMPOTENT", "T-RECOVERY", "T-FULL"]
+    },
+    {
+      "id": "INV-2",
+      "statement": "Backend tự tính điểm từ đúng bốn tiêu chí và đúng 9 hoặc 10 thành phần.",
+      "test_ids": ["T-SCORE", "T-TEST-CONTRACT"]
+    },
+    {
+      "id": "INV-3",
+      "statement": "Không có quyền DELETE và không ghi dữ liệu riêng tư vào log, thông báo hay Git.",
+      "test_ids": ["T-SECURITY", "T-FULL"]
+    }
+  ],
+  "tests": [
+    {"id": "T-TEST-CONTRACT", "category": "happy_path", "priority": "P0", "status": "passed", "evidence": "Staging đi qua tiếp nhận, kiểm trước, chấm chính và tạo bàn giao sang phản biện."},
+    {"id": "T-HISTORICAL", "category": "regression", "priority": "P0", "status": "passed", "evidence": "Fixture alreadyGraded trả existing, historicalEvidence=true và không tạo handoff."},
+    {"id": "T-IDEMPOTENT", "category": "concurrency_idempotency", "priority": "P0", "status": "passed", "evidence": "Gửi lại đúng operationKey và revision trả cùng pair, không tạo handoff thứ hai."},
+    {"id": "T-NOTIFIER", "category": "external_partial", "priority": "P0", "status": "passed", "evidence": "Unit test xác nhận chỉ phát sau commit, coalesce tín hiệu và không mang nội dung bài."},
+    {"id": "T-RECOVERY", "category": "lifecycle_time", "priority": "P0", "status": "passed", "evidence": "Unit test xác nhận webhook lỗi hẹn lại 30 giây và kỳ phục hồi năm phút giữ nguyên việc."},
+    {"id": "T-ROLLBACK", "category": "rollback_recovery", "priority": "P1", "status": "passed", "evidence": "Migration và backend staging có backup; transaction lỗi không phát thông báo."},
+    {"id": "T-SCORE", "category": "invalid_input", "priority": "P0", "status": "passed", "evidence": "Thiếu, thừa, trùng thành phần hoặc điểm AI cộng sai đều bị từ chối."},
+    {"id": "T-N8N-STATIC", "category": "regression", "priority": "P0", "status": "passed", "evidence": "Năm fixture cấu trúc Term Test đạt 5/5; bảy workflow candidate validate CI không có Critical/High."},
+    {"id": "T-DASHBOARD", "category": "happy_path", "priority": "P1", "status": "passed", "evidence": "Dashboard có nhóm tab Test, trạng thái, điểm, cấu hình thêm thủ công và điều khiển hiện hữu."},
+    {"id": "T-SECURITY", "category": "security_privacy", "priority": "P1", "status": "passed", "evidence": "API nội bộ cần Bearer, migration không cấp DELETE, log không chứa bài hoặc token."},
+    {"id": "T-FULL", "category": "regression", "priority": "P0", "status": "passed", "evidence": "Backend 217/217 và Pages 125/125 trên revision phát hành."}
+  ],
+  "task_graph": {
+    "plan_revision": "plan-approved-20260923",
+    "tasks": [
+      {
+        "id": "TASK-1",
+        "result": "Hợp đồng database và backend cho Test cùng bộ điều phối sự kiện đã có.",
+        "depends_on": [],
+        "consumes": ["Kế hoạch đã được người dùng duyệt"],
+        "produces": ["migration-v10", "backend-contract"],
+        "contract": "Giữ identity từng cặp, không chấm lại bằng chứng lịch sử.",
+        "test_ids": ["T-TEST-CONTRACT", "T-HISTORICAL", "T-IDEMPOTENT", "T-SCORE"],
+        "evidence_required": ["Full suite", "Staging readback"],
+        "decision_inputs": ["Bảy giai đoạn hiện hữu", "Term Test 1 và Term Test 2"],
+        "affected_future_tasks": ["TASK-2", "TASK-3"],
+        "status": "done",
+        "plan_revision": "plan-approved-20260923"
+      },
+      {
+        "id": "TASK-2",
+        "result": "Các workflow n8n tái sử dụng luồng hiện hữu và đọc đúng kết quả Test.",
+        "depends_on": ["TASK-1"],
+        "consumes": ["backend-contract"],
+        "produces": ["n8n-candidates"],
+        "contract": "Node người dùng nhìn thấy giữ tên tiếng Việt; code cần thiết có chú thích.",
+        "test_ids": ["T-N8N-STATIC", "T-RECOVERY"],
+        "evidence_required": ["Validate CI", "Webhook execution"],
+        "decision_inputs": ["Workflow Term Test khóa 67 hiện có"],
+        "affected_future_tasks": ["TASK-4"],
+        "status": "done",
+        "plan_revision": "plan-approved-20260923"
+      },
+      {
+        "id": "TASK-3",
+        "result": "Dashboard hiển thị và điều khiển được khu vực Term Test.",
+        "depends_on": ["TASK-1"],
+        "consumes": ["API dashboard"],
+        "produces": ["term-test-views"],
+        "contract": "Không làm mất các bộ lọc, cột và thao tác của Homework.",
+        "test_ids": ["T-DASHBOARD", "T-FULL"],
+        "evidence_required": ["Pages full suite", "Production visual readback"],
+        "decision_inputs": ["Bố cục dashboard Writing đã duyệt"],
+        "affected_future_tasks": ["TASK-4"],
+        "status": "done",
+        "plan_revision": "plan-approved-20260923"
+      },
+      {
+        "id": "TASK-4",
+        "result": "Gói phát hành có đủ thứ tự mutation, backup, readback và đường rollback.",
+        "depends_on": ["TASK-2", "TASK-3"],
+        "consumes": ["n8n-candidates", "term-test-views"],
+        "produces": ["release-runbook"],
+        "contract": "Backup trước từng mutation và có đường rollback riêng.",
+        "test_ids": ["T-FULL", "T-ROLLBACK", "T-NOTIFIER"],
+        "evidence_required": ["Staging health", "Staging API readback", "Workflow validation", "Dashboard full suite"],
+        "decision_inputs": ["Người dùng đã cho phép phát hành khi test đạt"],
+        "affected_future_tasks": [],
+        "status": "done",
+        "plan_revision": "plan-approved-20260923"
+      }
+    ]
+  },
+  "risk_register": {
+    "assessment": "PASS",
+    "risks": [
+      {
+        "id": "RISK-1",
+        "description": "Bằng chứng lịch sử quá rộng có thể khiến bài chưa chấm bị bỏ qua.",
+        "probability": 2,
+        "impact": 3,
+        "score": 6,
+        "severity": "P1",
+        "status": "mitigated",
+        "owner": "Hệ thống Writing",
+        "mitigation": "Chỉ tin bằng chứng link kết quả đã được reader kiểm đúng định dạng và gắn theo pair/revision.",
+        "test_ids": ["T-HISTORICAL", "T-IDEMPOTENT"]
+      },
+      {
+        "id": "RISK-2",
+        "description": "Mất tín hiệu giữa database và n8n có thể làm bài đứng yên.",
+        "probability": 2,
+        "impact": 3,
+        "score": 6,
+        "severity": "P1",
+        "status": "mitigated",
+        "owner": "Hệ thống Writing",
+        "mitigation": "Backend kiểm phục hồi năm phút, lúc khởi động và khi lease hết hạn.",
+        "test_ids": ["T-NOTIFIER", "T-RECOVERY"]
+      }
+    ],
+    "waivers": []
+  },
+  "coverage_exemptions": {},
+  "cross_constraints": [
+    {
+      "id": "RETRY-1",
+      "left": {"name": "automatic_attempt_limit", "value": 3},
+      "operator": "==",
+      "right": {"name": "approved_attempt_limit", "value": 3},
+      "status": "passed",
+      "evidence": "Bài lỗi được thử tối đa ba lần trước khi chuyển Cần kiểm tra."
+    },
+    {
+      "id": "CAP-1",
+      "left": {"name": "fixed_ai_concurrency_cap", "value": 0},
+      "operator": "==",
+      "right": {"name": "approved_fixed_cap", "value": 0},
+      "status": "passed",
+      "evidence": "Không còn giới hạn cố định ba bài; n8n và quota từng API điều tiết thực tế."
+    }
+  ],
+  "mutations": [
+    {
+      "id": "M-STAGING-DB",
+      "target": "writing-flow-staging-database",
+      "outcome": "success",
+      "readback": "verified",
+      "evidence": "Migration staging có backup và hợp đồng API đã đọc lại thành công."
+    },
+    {
+      "id": "M-STAGING-BACKEND",
+      "target": "writing-flow-staging-backend",
+      "outcome": "success",
+      "readback": "verified",
+      "evidence": "Container healthy, không restart; contract tiếp nhận và hai giai đoạn thành công."
+    }
+  ],
+  "verification_runs": [
+    {
+      "id": "V-BACKEND-FULL",
+      "scope": "full_suite",
+      "command": "npm test",
+      "tree_revision": "d3c83a8",
+      "captured_at": "2026-09-22T20:18:09Z",
+      "exit_code": 0,
+      "outcome": "passed",
+      "passed": 217,
+      "failed": 0,
+      "skipped": 0,
+      "evidence": "Backend full suite đạt 217/217."
+    },
+    {
+      "id": "V-PAGES-FULL",
+      "scope": "full_suite",
+      "command": "npm test",
+      "tree_revision": "d3c83a8",
+      "captured_at": "2026-09-22T20:18:15Z",
+      "exit_code": 0,
+      "outcome": "passed",
+      "passed": 125,
+      "failed": 0,
+      "skipped": 0,
+      "evidence": "Dashboard full suite đạt 125/125."
+    },
+    {
+      "id": "V-STAGING-CONTRACT",
+      "scope": "behavioral",
+      "command": "run_staging_contract.py",
+      "tree_revision": "d3c83a8",
+      "captured_at": "2026-09-22T20:17:45Z",
+      "exit_code": 0,
+      "outcome": "passed",
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "evidence": "Historical existing; fresh received; duplicate existing; precheck và main succeeded; next critic."
+    }
+  ],
+  "convergence": {
+    "status": "passed",
+    "tree_revision": "d3c83a8",
+    "gaps": [],
+    "unrequested_work": [],
+    "evidence": "Đã đối chiếu kế hoạch duyệt với backend, migration, bảy workflow, dashboard và đường phục hồi."
+  },
+  "context_handoff": {
+    "summary": "Gói hợp nhất Writing Homework và Term Test đã đạt test local và staging, sẵn sàng phát hành có backup.",
+    "decisions": [
+      "Database giữ trạng thái bền; backend chịu trách nhiệm đánh thức n8n.",
+      "Bằng chứng kết quả lịch sử hợp lệ ngăn chấm lại.",
+      "N8n vẫn xử lý từng giai đoạn độc lập."
+    ],
+    "completed": ["TASK-1", "TASK-2", "TASK-3"],
+    "next_step": "Phát hành production theo thứ tự database, backend, n8n, dashboard rồi readback.",
+    "open_risks": [],
+    "tree_revision": "d3c83a8"
+  },
+  "release": {
+    "target_environment": "production",
+    "decision": "ready",
+    "base_tree_revision": "production-before-20260923",
+    "current_tree_revision": "d3c83a8",
+    "production_authorized": true,
+    "rollback": "Mỗi database, backend và workflow được snapshot riêng trước mutation; rollback dùng đúng snapshot tương ứng.",
+    "deployment_readback": "pending",
+    "operational_observation": "Staging contract và full suite đã đạt; production sẽ được quan sát sau phát hành.",
+    "open_risks": []
+  }
+}

@@ -24,7 +24,7 @@ try {
   await pool.query(`INSERT INTO writing_flow.class_registry
     (class_code,classroom_course_id,classroom_name,enabled,mapping_status,class_status,
      eligibility_reason,scan_status,next_scan_at)
-    VALUES ($1,$2,$1,true,'approved','on_going','active','idle',now())`, [classCode, courseId]);
+    VALUES ($1,$2,$1,true,'approved','on_going','active','pending',now())`, [classCode, courseId]);
   const source = await pool.query(`INSERT INTO writing_flow.source_record
     (source_type,source_app_id,source_table_id,source_record_id,homework_file_id,
      source_link_index,display_name,class_code,file_url,source_updated_at,metadata,

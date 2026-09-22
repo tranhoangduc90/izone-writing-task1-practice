@@ -34,7 +34,7 @@ try {
     RETURNING source_id`, [courseId, submissionId, docId, classCode]);
   await pool.query(`INSERT INTO writing_flow.scan_run
     (run_id,request_key,source_app_id,source_table_id,scanned_through_at,page_count,
-     reached_end,status,item_count)
+     reached_end,status,expected_count)
     VALUES ($1,$2,'google_classroom',$3,now(),1,true,'open',1)`,
   [runId, `staging:${suffix}`, courseId]);
   await pool.query(`INSERT INTO writing_flow.scan_item

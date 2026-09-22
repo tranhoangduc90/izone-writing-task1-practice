@@ -255,4 +255,6 @@ test('bài Test đã có link kết quả được ghi nhận đã giao và khô
   assert.equal(writes.some(row => row.sql.includes('INSERT INTO writing_flow.handoff')), false);
   assert.equal(writes.some(row => row.sql.includes("SET status='delivered'")), true);
   assert.equal(writes.some(row => row.sql.includes('evidence_status=CASE')), true);
+  assert.equal(writes.some(row => row.sql.includes('$5::boolean')), true);
+  assert.equal(writes.some(row => row.sql.includes('$2::int>0')), true);
 });

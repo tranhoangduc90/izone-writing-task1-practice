@@ -295,8 +295,8 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
           const taskNumber = preparedPair?.taskType === 'task_1' ? 1 : 2;
           await client.query(`INSERT INTO writing_flow.test_pair
             (test_group_id,pair_id,task_number,status,delivered_at,historical_evidence)
-            VALUES ($1,$2,$3,$4,CASE WHEN $4='delivered' THEN now() END,
-              CASE WHEN $5 THEN jsonb_build_object('source','google_docs_result_link') ELSE '{}'::jsonb END)
+            VALUES ($1,$2,$3,$4::text,CASE WHEN $4::text='delivered' THEN now() END,
+              CASE WHEN $5::boolean THEN jsonb_build_object('source','google_docs_result_link') ELSE '{}'::jsonb END)
             ON CONFLICT (test_group_id,task_number) DO UPDATE SET pair_id=EXCLUDED.pair_id,
               status=EXCLUDED.status,delivered_at=EXCLUDED.delivered_at,
               historical_evidence=EXCLUDED.historical_evidence,updated_at=now()`,
@@ -309,9 +309,9 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
           FROM writing_flow.test_pair WHERE test_group_id=$1`, [testGroupId]);
         const { total, delivered } = groupState.rows[0];
         await client.query(`UPDATE writing_flow.test_group SET
-          evidence_status=CASE WHEN $2>0 THEN 'already_graded' ELSE evidence_status END,
-          status=CASE WHEN $1>0 AND $1=$2 THEN 'complete' ELSE status END,
-          completed_at=CASE WHEN $1>0 AND $1=$2 THEN now() ELSE completed_at END,
+          evidence_status=CASE WHEN $2::int>0 THEN 'already_graded' ELSE evidence_status END,
+          status=CASE WHEN $1::int>0 AND $1::int=$2::int THEN 'complete' ELSE status END,
+          completed_at=CASE WHEN $1::int>0 AND $1::int=$2::int THEN now() ELSE completed_at END,
           updated_at=now() WHERE test_group_id=$3`, [total, delivered, testGroupId]);
       }
       // Chỉ xóa lỗi đúng ô đã nhận; lỗi ô khác trong cùng file vẫn còn để xử lý.

@@ -1,5 +1,6 @@
 // Chỉ chạy trên database staging. Script tạo một nguồn Classroom giả, gọi API thật,
-// kiểm dấu vết loại nguồn và luôn xóa fixture sau khi xong.
+// kiểm dấu vết loại nguồn. Nếu role API không có quyền DELETE, runner phát hành
+// phải dọn fixture bằng role quản trị staging rồi đọc lại số fixture bằng 0.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import pg from 'pg';
@@ -57,9 +58,15 @@ try {
   assert.equal(pairs.rows[0].count, 0);
   process.stdout.write(`${JSON.stringify({ ok: true, sourceExcluded: true, pairCount: 0 })}\n`);
 } finally {
-  await pool.query('DELETE FROM writing_flow.scan_item WHERE run_id=$1', [runId]);
-  await pool.query('DELETE FROM writing_flow.scan_run WHERE run_id=$1', [runId]);
-  await pool.query('DELETE FROM writing_flow.source_record WHERE source_table_id=$1', [courseId]);
-  await pool.query('DELETE FROM writing_flow.class_registry WHERE class_code=$1', [classCode]);
+  try {
+    await pool.query('DELETE FROM writing_flow.scan_item WHERE run_id=$1', [runId]);
+    await pool.query('DELETE FROM writing_flow.scan_run WHERE run_id=$1', [runId]);
+    await pool.query('DELETE FROM writing_flow.source_record WHERE source_table_id=$1', [courseId]);
+    await pool.query('DELETE FROM writing_flow.class_registry WHERE class_code=$1', [classCode]);
+  } catch (error) {
+    if (error?.code !== '42501') throw error;
+    process.stdout.write(`${JSON.stringify({ cleanupRequired: true,
+      marker: 'TEST-/staging:', reason: 'API_ROLE_HAS_NO_DELETE' })}\n`);
+  }
   await pool.end();
 }

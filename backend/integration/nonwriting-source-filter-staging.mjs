@@ -18,8 +18,7 @@ const classCode = `TEST-${suffix.slice(0, 8)}`;
 const courseId = `course-${suffix}`;
 const submissionId = `submission-${suffix}`;
 const docId = `document-${suffix}`;
-const runId = crypto.randomUUID();
-const itemKey = crypto.createHash('sha256').update(JSON.stringify([submissionId, docId, 1])).digest('hex');
+let runId = null;
 try {
   await pool.query(`INSERT INTO writing_flow.class_registry
     (class_code,classroom_course_id,classroom_name,enabled,mapping_status,class_status,
@@ -32,15 +31,17 @@ try {
     VALUES ('google_classroom','google_classroom',$1,$2,$3,1,'Reading practice',$4,
       'https://docs.google.com/document/d/example-document-id-12345/edit',now(),'{}','sent',now())
     RETURNING source_id`, [courseId, submissionId, docId, classCode]);
-  await pool.query(`INSERT INTO writing_flow.scan_run
-    (run_id,request_key,source_app_id,source_table_id,scanned_through_at,page_count,
-     reached_end,status,expected_count)
-    VALUES ($1,$2,'google_classroom',$3,now(),1,true,'open',1)`,
-  [runId, `staging:${suffix}`, courseId]);
-  await pool.query(`INSERT INTO writing_flow.scan_item
-    (run_id,item_key,source_record_id,homework_file_id,source_link_index,class_code,status)
-    VALUES ($1,$2,$3,$4,1,$5,'pending')`,
-  [runId, itemKey, submissionId, docId, classCode]);
+  const beginResponse = await fetch(`${apiBase}/api/v1/internal/writing-flow/scans/begin`, {
+    method: 'POST', headers: { authorization: `Bearer ${token}`,
+      'content-type': 'application/json' },
+    body: JSON.stringify({ requestKey: `staging:${suffix}`, appId: 'google_classroom',
+      tableId: courseId, scannedThroughAt: new Date().toISOString(), pageCount: 1,
+      reachedEnd: true, items: [{ recordId: submissionId, docId, linkIndex: 1, classCode }] }),
+  });
+  assert.equal(beginResponse.status, 201);
+  const beginBody = await beginResponse.json();
+  runId = beginBody.scan.runId;
+  const itemKey = beginBody.scan.items[0].itemKey;
   const response = await fetch(`${apiBase}/api/v1/internal/writing-flow/scans/acknowledge`, {
     method: 'POST', headers: { authorization: `Bearer ${token}`,
       'content-type': 'application/json' },
@@ -59,8 +60,8 @@ try {
   process.stdout.write(`${JSON.stringify({ ok: true, sourceExcluded: true, pairCount: 0 })}\n`);
 } finally {
   try {
-    await pool.query('DELETE FROM writing_flow.scan_item WHERE run_id=$1', [runId]);
-    await pool.query('DELETE FROM writing_flow.scan_run WHERE run_id=$1', [runId]);
+    if (runId) await pool.query('DELETE FROM writing_flow.scan_item WHERE run_id=$1', [runId]);
+    if (runId) await pool.query('DELETE FROM writing_flow.scan_run WHERE run_id=$1', [runId]);
     await pool.query('DELETE FROM writing_flow.source_record WHERE source_table_id=$1', [courseId]);
     await pool.query('DELETE FROM writing_flow.class_registry WHERE class_code=$1', [classCode]);
   } catch (error) {

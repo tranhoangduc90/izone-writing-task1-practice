@@ -8,6 +8,7 @@ const sql = readFileSync(new URL(
 
 test('dọn lỗi nguồn giữ dữ liệu gốc, chặn nguồn đã có bài và không dùng DELETE', () => {
   assert.doesNotMatch(sql, /\bDELETE\b/iu);
+  assert.match(sql, /current_database\(\) <> 'mapping_db'/u);
   assert.match(sql, /source\.source_type='google_classroom'/u);
   assert.match(sql, /NOT EXISTS \(SELECT 1 FROM writing_flow\.pair/u);
   assert.match(sql, /dispatch_status='excluded'/u);

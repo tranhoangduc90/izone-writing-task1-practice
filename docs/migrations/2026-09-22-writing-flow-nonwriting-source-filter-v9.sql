@@ -5,6 +5,14 @@
 
 BEGIN;
 
+DO $migration$
+BEGIN
+  IF current_database() <> 'mapping_db' THEN
+    RAISE EXCEPTION 'WRITING_SOURCE_FILTER_PRODUCTION_DATABASE_REQUIRED';
+  END IF;
+END
+$migration$;
+
 WITH visible_open AS (
   SELECT source.source_id,source.display_name,issue.reason_code,
     lower(regexp_replace(trim(coalesce(source.display_name,'')),'[[:space:]]+',' ','g')) AS title

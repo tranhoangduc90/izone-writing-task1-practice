@@ -270,7 +270,7 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
         [pairId, `intake:${pairId}`, pair.resultSha256, pair.resultCiphertext]);
         if (pair.alreadyGraded) {
           await client.query(`UPDATE writing_flow.pair
-            SET status='delivered',delivered_at=now(),updated_at=now()
+            SET status='delivered',finished_at=now(),updated_at=now()
             WHERE pair_id=$1`, [pairId]);
           receipts.push({ essaySlot: pair.essaySlot, pairId, status: 'existing',
             revision: pair.revision, historicalEvidence: true });

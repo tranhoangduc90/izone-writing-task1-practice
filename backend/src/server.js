@@ -13,9 +13,16 @@ import { createWritingFlowHandoff } from './writing-flow-handoff.js';
 import { createWritingFlowAiCall } from './writing-flow-ai-call.js';
 import { createWritingFlowScan } from './writing-flow-scan.js';
 import { createWritingFlowTrccRepair } from './writing-flow-trcc-repair.js';
+import { createWritingFlowNotifier } from './writing-flow-notifier.js';
 
 const config = loadConfig();
 const pool = createDatabasePool(config);
+const writingFlowNotifier = createWritingFlowNotifier({
+  pool,
+  handoffUrl: config.writingFlowHandoffNotifyUrl,
+  sourceUrl: config.writingFlowSourceNotifyUrl,
+  secret: config.writingFlowNotifySecret
+});
 const provisionalService = createProvisionalStudentService({ pool, pepper: config.provisionalStudentPinPepper });
 const teacherAuth = createTeacherAuthService({ config, pool });
 const app = createApp({
@@ -36,12 +43,16 @@ const app = createApp({
   teacherAuth,
   adminAuth: teacherAuth.authenticate
 });
-const server = app.listen(config.port, '0.0.0.0', () => console.log(`Writing Task 1 API đang lắng nghe tại cổng ${config.port}.`));
+const server = app.listen(config.port, '0.0.0.0', () => {
+  console.log(`Writing Task 1 API đang lắng nghe tại cổng ${config.port}.`);
+  void writingFlowNotifier.start();
+});
 server.requestTimeout = 30_000;
 server.headersTimeout = 31_000;
 server.keepAliveTimeout = 5_000;
 
 async function shutdown(signal) {
+  await writingFlowNotifier.close();
   console.log(`Nhận ${signal}; đang đóng API an toàn.`);
   server.close(async () => { await pool.end(); process.exit(0); });
   setTimeout(() => process.exit(1), 10_000).unref();

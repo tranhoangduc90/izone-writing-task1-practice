@@ -575,7 +575,7 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
       return result.rows;
     },
 
-    async dashboardCounts({ classCode = null, teacherName = null } = {}) {
+    async dashboardCounts({ classCode = null, teacherName = null, sourceKind = null } = {}) {
       const assignments = await teacherAssignmentsForDatabase();
       const result = await pool.query(`WITH ${assignments}, current_pair AS (
           SELECT p.pair_id,p.class_code,p.status,p.skipped_at,
@@ -598,11 +598,13 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
             AND ${visibleRegistrySql('registry')}
             AND ($1::text IS NULL OR p.class_code=$1)
             AND ($2::text IS NULL OR $2=ANY(coalesce(nullif(s.teacher_names,ARRAY[]::text[]),t.teacher_names,ARRAY[]::text[])))
+            AND ($4::text IS NULL OR ($4='test' AND p.source_type='term_test')
+              OR ($4='homework' AND p.source_type<>'term_test'))
         )
         SELECT stage_key,stage_status,(skipped_at IS NOT NULL) AS skipped,count(*)::integer AS pair_count
         FROM current_pair GROUP BY stage_key,stage_status,(skipped_at IS NOT NULL)
         ORDER BY array_position($3::text[],stage_key),stage_status`,
-      [classCode, teacherName, STAGES]);
+      [classCode, teacherName, STAGES, sourceKind]);
       const support = await pool.query(`WITH ${assignments} SELECT
           (SELECT count(*)::integer FROM writing_flow.source_issue AS issue
             LEFT JOIN writing_flow.source_record AS source
@@ -620,7 +622,9 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
               AND ${visibleRegistrySql('registry')}
               AND ($1::text IS NULL OR coalesce(issue.class_code,source.class_code)=$1)
               AND ($2::text IS NULL OR $2=ANY(coalesce(nullif(source.teacher_names,ARRAY[]::text[]),
-                teachers.teacher_names,ARRAY[]::text[])))) AS source_issues,
+                teachers.teacher_names,ARRAY[]::text[])))
+              AND ($3::text IS NULL OR ($3='test' AND source.source_type='term_test')
+                OR ($3='homework' AND source.source_type<>'term_test'))) AS source_issues,
           (SELECT count(*)::integer FROM writing_flow.manual_review AS review
             JOIN writing_flow.pair AS pair ON pair.pair_id=review.pair_id
             JOIN writing_flow.stage_result AS review_stage
@@ -637,10 +641,12 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
               AND ${visibleRegistrySql('registry')}
               AND ($1::text IS NULL OR pair.class_code=$1)
               AND ($2::text IS NULL OR $2=ANY(coalesce(nullif(source.teacher_names,ARRAY[]::text[]),
-                teachers.teacher_names,ARRAY[]::text[])))) AS reviews,
+                teachers.teacher_names,ARRAY[]::text[])))
+              AND ($3::text IS NULL OR ($3='test' AND pair.source_type='term_test')
+                OR ($3='homework' AND pair.source_type<>'term_test'))) AS reviews,
           (SELECT count(*)::integer FROM writing_flow.workflow_failure
              WHERE last_seen_at>now()-interval '7 days') AS technical_errors`,
-      [classCode, teacherName]);
+      [classCode, teacherName, sourceKind]);
       return { stages: result.rows, support: support.rows[0] };
     },
 
@@ -710,7 +716,7 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
     },
 
     async dailyStats({ classCode = null, teacherName = null, taskType = null,
-      dateFrom = null, dateTo = null } = {}) {
+      dateFrom = null, dateTo = null, sourceKind = null } = {}) {
       const assignments = await teacherAssignmentsForDatabase();
       const result = await pool.query(`WITH ${assignments}
         SELECT to_char((deliver.completed_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date,
@@ -731,14 +737,16 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
           AND ($3::text IS NULL OR p.task_type=$3)
           AND ($4::date IS NULL OR (deliver.completed_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date >= $4)
           AND ($5::date IS NULL OR (deliver.completed_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date <= $5)
-        GROUP BY day ORDER BY day`, [classCode, teacherName, taskType, dateFrom, dateTo]);
+          AND ($6::text IS NULL OR ($6='test' AND p.source_type='term_test')
+            OR ($6='homework' AND p.source_type<>'term_test'))
+        GROUP BY day ORDER BY day`, [classCode, teacherName, taskType, dateFrom, dateTo, sourceKind]);
       return result.rows;
     },
 
     async listPairs({ classCode = null, teacherName = null, stageKey = null,
       stageStatus = null, view = null, includeCompleted = false, taskType = null,
       search = null, searchScope = 'all', dateFrom = null, dateTo = null, limit = 50, offset = 0,
-      cursorAt = null, cursorId = null, sort = null } = {}) {
+      cursorAt = null, cursorId = null, sort = null, sourceKind = null } = {}) {
       if (encryptionKey && !key) throw new ApiError(503, 'WRITING_FLOW_ENCRYPTION_NOT_READY',
         'Khóa đọc dữ liệu Writing không hợp lệ.');
       const assignments = await teacherAssignmentsForDatabase();
@@ -786,6 +794,9 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
                current_stage.error_code AS last_error_code,p.source_ciphertext,
                render.result_ciphertext AS render_result_ciphertext,
                repair.status AS trcc_repair_status,
+               test_group.test_config,test_group.topology,test_pair.task_number,
+               test_pair.component_count,test_pair.task_score,test_pair.status AS test_task_status,
+               test_final.writing_score,test_final.status AS test_final_status,
                EXISTS (SELECT 1 FROM writing_flow.stage_result AS graded
                  WHERE graded.pair_id=p.pair_id AND graded.stage_key IN ('main','render')
                    AND graded.status='succeeded') AS grading_text_available
@@ -798,6 +809,11 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
           LEFT JOIN writing_flow.stage_result AS render
             ON render.pair_id=p.pair_id AND render.stage_key='render' AND render.status='succeeded'
           LEFT JOIN writing_flow.trcc_repair AS repair ON repair.pair_id=p.pair_id
+          LEFT JOIN writing_flow.test_pair AS test_pair ON test_pair.pair_id=p.pair_id
+          LEFT JOIN writing_flow.test_group AS test_group
+            ON test_group.test_group_id=test_pair.test_group_id
+          LEFT JOIN writing_flow.test_final AS test_final
+            ON test_final.test_group_id=test_group.test_group_id
           LEFT JOIN LATERAL (
             SELECT s.stage_key, s.status AS stage_status, s.attempt_count,s.error_code
              FROM writing_flow.stage_result AS s
@@ -829,6 +845,8 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
                  CASE WHEN p.status='delivered' THEN 'deliver' ELSE 'intake' END)=$4)
            AND ($5::text IS NULL OR coalesce(current_stage.stage_status,
                  CASE WHEN p.status='delivered' THEN 'succeeded' ELSE 'pending' END)=$5)
+           AND ($20::text IS NULL OR ($20='test' AND p.source_type='term_test')
+             OR ($20='homework' AND p.source_type<>'term_test'))
            AND (($6::text='skipped' AND p.skipped_at IS NOT NULL)
              OR ($6::text='review' AND p.skipped_at IS NULL
                AND coalesce(current_stage.stage_status,'')='needs_review')
@@ -840,7 +858,7 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
          LIMIT $18 OFFSET $19`, [classCode, teacherName, STAGES, stageKey, stageStatus, view,
         includeCompleted, taskType, search, ['all', 'identity', 'docs'].includes(searchScope),
         searchDocId, ['all', 'content'].includes(searchScope), contentPairIds,
-        dateFrom, dateTo, cursorAt, cursorId, limit, offset]);
+        dateFrom, dateTo, cursorAt, cursorId, limit, offset, sourceKind]);
       return result.rows.map(row => {
         let topic = null; let imageUrl = null; let trCcCheck = null; let essayPreview = null;
         let lmsUrl = null; let dataIssueCode = null;

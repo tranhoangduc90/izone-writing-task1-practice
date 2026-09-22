@@ -90,6 +90,7 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
         revision,
       });
       return { ...pair, topic, image, essay, revision, contentSha256,
+        alreadyGraded: sourceType === 'term_test' && pair.alreadyGraded === true,
         sourceCiphertext: seal(sourceJson, key),
         resultCiphertext: seal(resultJson, key),
         resultSha256: sha256(resultJson),
@@ -136,6 +137,23 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
           sourceModifiedAt, isLark ? 'lark' : sourceType,
         ]);
         sourceId = source.rows[0].source_id;
+      }
+      let testGroupId = null;
+      if (sourceType === 'term_test') {
+        const topology = prepared.some(pair => pair.taskType === 'task_1')
+          ? 'task_1_and_task_2' : 'task_2_only';
+        const group = await client.query(`INSERT INTO writing_flow.test_group
+          (source_id,display_name,test_config,topology,note,created_by)
+          VALUES ($1,$2,$3,$4,$5,$6)
+          ON CONFLICT (source_id) DO UPDATE SET
+            display_name=EXCLUDED.display_name,
+            test_config=coalesce(writing_flow.test_group.test_config,EXCLUDED.test_config),
+            topology=EXCLUDED.topology,
+            note=coalesce(writing_flow.test_group.note,EXCLUDED.note),updated_at=now()
+          RETURNING test_group_id`, [sourceId, sourceMeta.displayName || 'Bài Test Writing',
+          sourceMeta.testConfig || null, topology, sourceMeta.note || null,
+          sourceMeta.createdBy || 'system']);
+        testGroupId = group.rows[0].test_group_id;
       }
       const receipts = [];
       for (const pair of prepared) {
@@ -250,17 +268,51 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
              status, result_sha256, result_ciphertext, finished_at)
           VALUES ($1,'intake',1,1,$2,'succeeded',$3,$4,now())`,
         [pairId, `intake:${pairId}`, pair.resultSha256, pair.resultCiphertext]);
-        const handoff = await client.query(`
-          INSERT INTO writing_flow.handoff
-            (pair_id, from_stage, to_stage, source_result_sha256, next_send_at)
-          VALUES ($1,'intake','precheck',$2,now()+interval '6 hours')
-          RETURNING handoff_id`,
-        [pairId, pair.resultSha256]);
-        receipts.push({ essaySlot: pair.essaySlot, pairId, status: 'received',
-          revision: pair.revision, handoffId: handoff.rows[0].handoff_id });
+        if (pair.alreadyGraded) {
+          await client.query(`UPDATE writing_flow.pair
+            SET status='delivered',delivered_at=now(),updated_at=now()
+            WHERE pair_id=$1`, [pairId]);
+          receipts.push({ essaySlot: pair.essaySlot, pairId, status: 'existing',
+            revision: pair.revision, historicalEvidence: true });
+        } else {
+          const handoff = await client.query(`
+            INSERT INTO writing_flow.handoff
+              (pair_id, from_stage, to_stage, source_result_sha256, next_send_at)
+            VALUES ($1,'intake','precheck',$2,now()+interval '6 hours')
+            RETURNING handoff_id`,
+          [pairId, pair.resultSha256]);
+          receipts.push({ essaySlot: pair.essaySlot, pairId, status: 'received',
+            revision: pair.revision, handoffId: handoff.rows[0].handoff_id });
+        }
       }
       if (receipts.length !== input.expectedCount) {
         throw new ApiError(500, 'INTAKE_READBACK_COUNT_MISMATCH', 'Chưa ghi đủ trạng thái các bài.');
+      }
+      if (testGroupId) {
+        for (const receipt of receipts) {
+          if (!receipt.pairId || !['received', 'existing'].includes(receipt.status)) continue;
+          const preparedPair = prepared.find(item => item.essaySlot === receipt.essaySlot);
+          const taskNumber = preparedPair?.taskType === 'task_1' ? 1 : 2;
+          await client.query(`INSERT INTO writing_flow.test_pair
+            (test_group_id,pair_id,task_number,status,delivered_at,historical_evidence)
+            VALUES ($1,$2,$3,$4,CASE WHEN $4='delivered' THEN now() END,
+              CASE WHEN $5 THEN jsonb_build_object('source','google_docs_result_link') ELSE '{}'::jsonb END)
+            ON CONFLICT (test_group_id,task_number) DO UPDATE SET pair_id=EXCLUDED.pair_id,
+              status=EXCLUDED.status,delivered_at=EXCLUDED.delivered_at,
+              historical_evidence=EXCLUDED.historical_evidence,updated_at=now()`,
+          [testGroupId, receipt.pairId, taskNumber,
+            receipt.historicalEvidence === true ? 'delivered' : 'pending',
+            receipt.historicalEvidence === true]);
+        }
+        const groupState = await client.query(`SELECT count(*)::int AS total,
+            count(*) FILTER (WHERE status='delivered')::int AS delivered
+          FROM writing_flow.test_pair WHERE test_group_id=$1`, [testGroupId]);
+        const { total, delivered } = groupState.rows[0];
+        await client.query(`UPDATE writing_flow.test_group SET
+          evidence_status=CASE WHEN $2>0 THEN 'already_graded' ELSE evidence_status END,
+          status=CASE WHEN $1>0 AND $1=$2 THEN 'complete' ELSE status END,
+          completed_at=CASE WHEN $1>0 AND $1=$2 THEN now() ELSE completed_at END,
+          updated_at=now() WHERE test_group_id=$3`, [total, delivered, testGroupId]);
       }
       // Chỉ xóa lỗi đúng ô đã nhận; lỗi ô khác trong cùng file vẫn còn để xử lý.
       for (const receipt of receipts) {

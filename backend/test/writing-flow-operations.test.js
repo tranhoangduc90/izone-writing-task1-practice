@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createWritingFlowOperations, documentIdFromUrl, STAGES }
+import { classifyWritingSourceType, createWritingFlowOperations, documentIdFromUrl, STAGES }
   from '../src/writing-flow-operations.js';
 import { seal } from '../src/writing-flow-crypto.js';
 
@@ -23,6 +23,13 @@ test('file thủ công chỉ nhận URL Google Docs thật', () => {
   assert.equal(documentIdFromUrl(`https://docs.google.com.evil.invalid/document/d/${id}/edit`), '');
   assert.equal(documentIdFromUrl(`http://docs.google.com/document/d/${id}/edit`), '');
   assert.equal(documentIdFromUrl('không-phải-link'), '');
+});
+
+test('phân loại Term Test theo tên bài tập nhưng giữ Writing homework thường', () => {
+  assert.equal(classifyWritingSourceType('Writing Term Test 2'), 'term_test');
+  assert.equal(classifyWritingSourceType('FINAL_TEST - Writing'), 'term_test');
+  assert.equal(classifyWritingSourceType('Thi cuối kỳ - Writing'), 'term_test');
+  assert.equal(classifyWritingSourceType('Writing 12 - Homework'), 'google_classroom');
 });
 
 test('thêm file thủ công lưu URL chuẩn, tên hiển thị và sự kiện chống bấm lặp', async () => {
@@ -48,8 +55,10 @@ test('thêm file thủ công lưu URL chuẩn, tên hiển thị và sự kiện
   assert.equal(insert.params[2], 'Bài chữa thêm');
   assert.equal(insert.params[3],
     'https://docs.google.com/document/d/AbCdEfGhIjKlMnOpQrStUvWxYz12/edit');
-  assert.match(insert.sql, /'manual','manual_dashboard','manual:' \|\| \$1/u);
-  assert.equal(queries.some(item => item.sql.includes("'manual_source_added'")), true);
+  assert.match(insert.sql, /VALUES \(\$6,'manual_dashboard','manual:' \|\| \$1/u);
+  assert.equal(insert.params[5], 'manual');
+  const event = queries.find(item => item.sql.includes('INSERT INTO writing_flow.operator_event'));
+  assert.equal(event.params[5], 'manual_source_added');
 });
 
 test('bấm lại cùng request ID trả đúng nguồn cũ và không chèn lần hai', async () => {

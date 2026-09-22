@@ -41,7 +41,7 @@ const teacherCommentCreate=z.object({sectionKey:lessonSection,fieldKey:lessonSec
  .superRefine((value,context)=>{if(value.end<=value.start||value.end-value.start>2000)context.addIssue({code:'custom',path:['end'],message:'Đoạn comment không hợp lệ.'});});
 const teacherCommentReply=z.object({body:teacherCommentBody,requestId:uuid});
 const teacherCommentStatus=z.object({status:z.enum(['open','addressed']),requestId:uuid});
-const writingSourceType=z.enum(['lark_homework','google_classroom','manual']);
+const writingSourceType=z.enum(['lark_homework','google_classroom','manual','term_test']);
 const writingPairIntake=z.object({
  sourceType:writingSourceType.default('lark_homework'),
  sourceId:uuid.nullable().optional(),
@@ -63,7 +63,10 @@ const writingPairIntake=z.object({
    classroomUrl:z.string().url().max(2000).nullable().optional(),
    fileUrl:z.string().url().max(2000).nullable().optional(),
    sourceStatus:z.string().trim().max(80).nullable().optional(),
-   sourceCreatedAt:z.string().datetime({offset:true}).nullable().optional()
+   sourceCreatedAt:z.string().datetime({offset:true}).nullable().optional(),
+   testConfig:z.string().trim().max(120).nullable().optional(),
+   note:z.string().trim().max(1000).nullable().optional(),
+   createdBy:z.string().trim().max(200).nullable().optional()
  }).default({teacherNames:[]}),
  sourceModifiedAt:z.string().trim().min(1).max(80),
  larkModifiedMs:z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullable().optional(),
@@ -74,7 +77,7 @@ const writingPairIntake=z.object({
    essaySlot:z.number().int().min(1).max(4),
    taskType:z.enum(['task_1','task_2']),
    topic:z.string().max(20000), image:z.string().max(20000),
-   essay:z.string().max(40000), trCcCheck:z.boolean(),
+   essay:z.string().max(40000), trCcCheck:z.boolean(), alreadyGraded:z.boolean().default(false),
    revision:z.string().regex(/^[0-9a-f]{64}$/).optional(),
    contentSha256:z.string().regex(/^[0-9a-f]{64}$/).optional()
  })).min(1).max(4)
@@ -207,7 +210,15 @@ const writingWorkflowFailure=z.object({
 const writingManualSource=z.object({
  displayName:z.string().trim().min(2).max(200),
  documentUrl:z.string().url().max(2000),
+ kind:z.enum(['homework','test']).default('homework'),
+ testConfig:z.string().trim().min(2).max(120).nullable().default(null),
+ topology:z.enum(['task_2_only','task_1_and_task_2']).nullable().default(null),
+ note:z.string().trim().max(1000).nullable().default(null),
  requestId:uuid
+}).superRefine((value,context)=>{
+ if(value.kind==='test'&&(!value.testConfig||!value.topology)){
+   context.addIssue({code:'custom',path:['testConfig'],message:'Bài Test cần cấu hình và số Task.'});
+ }
 });
 const writingSourceAck=z.object({
  sourceId:uuid,outcome:z.enum(['accepted','issue','excluded']),
@@ -345,8 +356,8 @@ export function createApp({config,pool,service,lessonService=service,provisional
      parse(writingSourceIssue,q.body))});
  }));
  app.post('/api/v1/internal/writing-flow/sources/due',internal,writingFlowReady,asyncRoute(async(q,r)=>{
-   const input=parse(z.object({sourceTypes:z.array(writingSourceType).min(1).max(3)
-     .default(['manual','google_classroom']),limit:z.number().int().min(1).max(100).default(50)}),q.body);
+   const input=parse(z.object({sourceTypes:z.array(writingSourceType).min(1).max(4)
+     .default(['manual','google_classroom','term_test']),limit:z.number().int().min(1).max(100).default(50)}),q.body);
    r.json({ok:true,sources:await writingFlowService.claimDueSources(input)});
  }));
  app.post('/api/v1/internal/writing-flow/sources/acknowledge',internal,writingFlowReady,asyncRoute(async(q,r)=>{
@@ -491,7 +502,8 @@ export function createApp({config,pool,service,lessonService=service,provisional
   app.get('/api/v1/admin/writing-flow/counts',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
     const classCode=q.query.classCode?parse(z.string().trim().min(1).max(80),q.query.classCode):null;
     const teacherName=q.query.teacherName?parse(z.string().trim().min(1).max(120),q.query.teacherName):null;
-    r.json({ok:true,counts:await writingFlowService.dashboardCounts({classCode,teacherName})});
+    const sourceKind=q.query.sourceKind?parse(z.enum(['homework','test']),q.query.sourceKind):null;
+    r.json({ok:true,counts:await writingFlowService.dashboardCounts({classCode,teacherName,sourceKind})});
   }));
   app.get('/api/v1/admin/writing-flow/class-coverage',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(_q,r)=>{
     r.json({ok:true,classes:await writingFlowService.listClassCoverage()});
@@ -509,7 +521,8 @@ export function createApp({config,pool,service,lessonService=service,provisional
     const taskType=q.query.taskType?parse(z.enum(['task_1','task_2']),q.query.taskType):null;
     const dateFrom=q.query.dateFrom?parse(z.string().date(),q.query.dateFrom):null;
     const dateTo=q.query.dateTo?parse(z.string().date(),q.query.dateTo):null;
-    r.json({ok:true,days:await writingFlowService.dailyStats({classCode,teacherName,taskType,dateFrom,dateTo})});
+    const sourceKind=q.query.sourceKind?parse(z.enum(['homework','test']),q.query.sourceKind):null;
+    r.json({ok:true,days:await writingFlowService.dailyStats({classCode,teacherName,taskType,dateFrom,dateTo,sourceKind})});
   }));
  app.get('/api/v1/admin/writing-flow/pairs',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
    const limit=parse(z.coerce.number().int().min(1).max(100),q.query.limit??50);
@@ -529,10 +542,11 @@ export function createApp({config,pool,service,lessonService=service,provisional
    const cursorAt=q.query.cursorAt?parse(z.string().datetime({offset:true}),q.query.cursorAt):null;
    const cursorId=q.query.cursorId?parse(uuid,q.query.cursorId):null;
    const sort=q.query.sort?parse(z.string().trim().min(1).max(300),q.query.sort):null;
+   const sourceKind=q.query.sourceKind?parse(z.enum(['homework','test']),q.query.sourceKind):null;
    if(Boolean(cursorAt)!==Boolean(cursorId))throw new ApiError(400,'CURSOR_INCOMPLETE','Thiếu một phần con trỏ trang.');
    if(sort&&(cursorAt||cursorId))throw new ApiError(400,'WRITING_SORT_CURSOR_UNSUPPORTED','Danh sách đã sắp xếp dùng số trang.');
    const pairs=await writingFlowService.listPairs({classCode,teacherName,stageKey,stageStatus,
-     view,includeCompleted,taskType,search,searchScope,dateFrom,dateTo,limit,offset,cursorAt,cursorId,sort});
+     view,includeCompleted,taskType,search,searchScope,dateFrom,dateTo,limit,offset,cursorAt,cursorId,sort,sourceKind});
    const last=pairs.at(-1);
    r.json({ok:true,pairs,nextCursor:!sort&&last&&pairs.length===limit
      ?{cursorAt:last.updated_at,cursorId:last.pair_id}:null,
@@ -568,7 +582,7 @@ export function createApp({config,pool,service,lessonService=service,provisional
   }));
  app.get('/api/v1/admin/writing-flow/sources',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
    const limit=parse(z.coerce.number().int().min(1).max(100),q.query.limit??50);
-   const sourceType=q.query.sourceType?parse(z.enum(['lark_homework','google_classroom','manual','legacy']),q.query.sourceType):null;
+   const sourceType=q.query.sourceType?parse(z.enum(['lark_homework','google_classroom','manual','legacy','term_test']),q.query.sourceType):null;
    const status=q.query.status?parse(z.enum(['idle','pending','sent','acknowledged','needs_review','excluded']),q.query.status):null;
    const cursorAt=q.query.cursorAt?parse(z.string().datetime({offset:true}),q.query.cursorAt):null;
    const cursorId=q.query.cursorId?parse(uuid,q.query.cursorId):null;

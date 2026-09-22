@@ -22,6 +22,16 @@ function jsonObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
+// Nhận vào: tên bài tập Classroom.
+// Việc chính: nhận đúng các biến thể Term Test/Mid Test/Final Test nhưng không đoán từ bài Writing thường.
+// Trả ra: loại nguồn để dashboard và luồng chấm Test tách riêng mà vẫn dùng chung bảy giai đoạn.
+export function classifyWritingSourceType(displayName) {
+  const value = String(displayName || '').normalize('NFKC').toLocaleLowerCase('vi')
+    .replace(/[_-]+/gu, ' ').replace(/\s+/gu, ' ').trim();
+  return /\b(term|mid|final)\s*test\b/u.test(value) || /thi\s*(giữa|cuối)\s*kỳ/u.test(value)
+    ? 'term_test' : 'google_classroom';
+}
+
 // Dữ liệu nhận vào: pool PostgreSQL, khóa mã hóa và lệnh của quản trị viên đã xác thực.
 // Việc chính: thêm nguồn thủ công, tải chi tiết, bỏ qua/khôi phục và retry đúng giai đoạn.
 // Kết quả: mọi lệnh được ghi bằng request ID; dashboard chỉ nhận dữ liệu của đúng bài.
@@ -153,15 +163,17 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
         for (const item of sources) {
           const snapshot = { submissionId: item.submissionId, courseWorkId: item.courseWorkId,
             submissionState: item.sourceStatus, alternateLink: item.classroomUrl };
+          const sourceType = classifyWritingSourceType(item.displayName);
           const result = await client.query(`INSERT INTO writing_flow.source_record
             (source_type,source_app_id,source_table_id,source_record_id,homework_file_id,
              source_link_index,display_name,class_code,student_name,teacher_names,
              classroom_url,file_url,source_status,source_created_at,source_updated_at,
              metadata,dispatch_status,next_dispatch_at)
-            VALUES ('google_classroom','google_classroom',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,
+            VALUES ($15,'google_classroom',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,
                     $12,$13,$14::jsonb,'pending',now())
             ON CONFLICT (source_app_id,source_table_id,source_record_id,homework_file_id,source_link_index)
-            DO UPDATE SET display_name=EXCLUDED.display_name,class_code=EXCLUDED.class_code,
+            DO UPDATE SET source_type=EXCLUDED.source_type,
+              display_name=EXCLUDED.display_name,class_code=EXCLUDED.class_code,
               student_name=EXCLUDED.student_name,teacher_names=EXCLUDED.teacher_names,
               classroom_url=EXCLUDED.classroom_url,file_url=EXCLUDED.file_url,
               source_status=EXCLUDED.source_status,source_created_at=EXCLUDED.source_created_at,
@@ -177,7 +189,7 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
           [item.courseId, item.submissionId, item.documentId, item.linkIndex, item.displayName || null,
             item.classCode, item.studentName || null, item.teacherNames || [], item.classroomUrl || null,
             item.fileUrl, item.sourceStatus || null, item.sourceCreatedAt || null,
-            item.sourceUpdatedAt, JSON.stringify(snapshot)]);
+            item.sourceUpdatedAt, JSON.stringify(snapshot), sourceType]);
           rows.push(result.rows[0]);
         }
         // Nguồn Lark chỉ còn dùng trong giai đoạn chuyển đổi. Khi Docs ID khớp duy nhất
@@ -278,7 +290,8 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
       });
     },
 
-    async addManualSource({ displayName, documentUrl, requestId, actorRef }) {
+    async addManualSource({ displayName, documentUrl, requestId, actorRef,
+      kind = 'homework', testConfig = null, topology = null, note = null }) {
       const fileId = documentIdFromUrl(documentUrl);
       if (!fileId) {
         throw new ApiError(400, 'MANUAL_GOOGLE_DOC_INVALID',
@@ -298,26 +311,39 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
         }
         const recordId = crypto.randomUUID();
         const canonicalUrl = `https://docs.google.com/document/d/${fileId}/edit`;
+        const isTest = kind === 'test';
+        const sourceType = isTest ? 'term_test' : 'manual';
+        const normalizedTopology = isTest ? topology : null;
+        const metadata = isTest
+          ? { manualName: name, testConfig, topology: normalizedTopology, note }
+          : { manualName: name };
         const inserted = await client.query(`INSERT INTO writing_flow.source_record
           (source_type,source_app_id,source_table_id,source_record_id,homework_file_id,
            source_link_index,display_name,class_code,file_url,source_status,metadata,
            dispatch_status,next_dispatch_at,created_by)
-          VALUES ('manual','manual_dashboard','manual:' || $1,$1,$2,1,$3,'MANUAL',$4,
-                  'SUBMITTED',jsonb_build_object('manualName',$3),'pending',now(),$5)
+          VALUES ($6,'manual_dashboard','manual:' || $1,$1,$2,1,$3,'MANUAL',$4,
+                  'SUBMITTED',$7::jsonb,'pending',now(),$5)
           RETURNING source_id,display_name,file_url,dispatch_status,dispatch_count,
                     last_error_code,created_at,updated_at`,
-        [recordId, fileId, name, canonicalUrl, actorRef]);
+        [recordId, fileId, name, canonicalUrl, actorRef, sourceType, JSON.stringify(metadata)]);
         const source = inserted.rows[0];
+        if (isTest) {
+          await client.query(`INSERT INTO writing_flow.test_group
+            (source_id,display_name,test_config,topology,note,created_by)
+            VALUES ($1,$2,$3,$4,$5,$6)`,
+          [source.source_id, name, testConfig, normalizedTopology, note, actorRef]);
+        }
         await client.query(`INSERT INTO writing_flow.operator_event
           (source_id,event_type,actor_ref,request_id,reason,after_state)
-          VALUES ($1,'manual_source_added',$2,$3,$4,$5::jsonb)`,
+          VALUES ($1,$6,$2,$3,$4,$5::jsonb)`,
         [source.source_id, actorRef, requestId, name,
-          JSON.stringify({ dispatchStatus: source.dispatch_status })]);
+          JSON.stringify({ dispatchStatus: source.dispatch_status, kind }),
+          isTest ? 'manual_test_added' : 'manual_source_added']);
         return source;
       });
     },
 
-    async claimDueSources({ sourceTypes = ['manual', 'google_classroom'], limit = 50 } = {}) {
+    async claimDueSources({ sourceTypes = ['manual', 'google_classroom', 'term_test'], limit = 50 } = {}) {
       return withTransaction(pool, async client => {
         const due = await client.query(`WITH capacity AS (
           SELECT greatest(0,100-count(*))::int AS available
@@ -422,8 +448,45 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
         const { result_ciphertext: _hidden, ...safe } = row;
         return { ...safe, result };
       });
+      let test = null;
+      if (pair.rows[0].source_type === 'term_test') {
+        const [summary, criteria, components, deliveries] = await Promise.all([
+          pool.query(`SELECT test_group.display_name,test_group.test_config,test_group.topology,
+              test_group.evidence_status,test_group.status AS group_status,
+              test_pair.task_number,test_pair.status AS task_status,test_pair.component_count,
+              test_pair.task_score,test_pair.graded_at,test_pair.delivered_at,
+              test_final.task_1_score,test_final.task_2_score,test_final.writing_score,
+              test_final.status AS final_status,test_final.ready_at
+            FROM writing_flow.test_pair AS test_pair
+            JOIN writing_flow.test_group AS test_group
+              ON test_group.test_group_id=test_pair.test_group_id
+            LEFT JOIN writing_flow.test_final AS test_final
+              ON test_final.test_group_id=test_group.test_group_id
+            WHERE test_pair.pair_id=$1`, [pairId]),
+          pool.query(`SELECT criterion_code,name,band_score,feedback_ciphertext,completed_at
+            FROM writing_flow.test_criterion_result WHERE pair_id=$1 ORDER BY criterion_code`, [pairId]),
+          pool.query(`SELECT criterion_code,component_code,label,summary_ciphertext,
+              feedback_ciphertext,completed_at
+            FROM writing_flow.test_component_result WHERE pair_id=$1
+            ORDER BY criterion_code,component_code`, [pairId]),
+          pool.query(`SELECT destination,status,result_url,readback_ok,error_code,completed_at
+            FROM writing_flow.test_delivery WHERE pair_id=$1 ORDER BY destination`, [pairId]),
+        ]);
+        const safeOpen = value => {
+          try { return open(value, key); } catch { return null; }
+        };
+        test = summary.rows[0] ? { ...summary.rows[0],
+          criteria: criteria.rows.map(row => ({ criterion_code: row.criterion_code,
+            name: row.name, band_score: row.band_score,
+            feedback: safeOpen(row.feedback_ciphertext), completed_at: row.completed_at,
+            components: components.rows.filter(item => item.criterion_code === row.criterion_code)
+              .map(item => ({ component_code: item.component_code,label: item.label,
+                summary: safeOpen(item.summary_ciphertext),feedback: safeOpen(item.feedback_ciphertext),
+                completed_at: item.completed_at })) })),
+          deliveries: deliveries.rows } : null;
+      }
       const { source_ciphertext: _ciphertext, ...safePair } = pair.rows[0];
-      return { pair: safePair, source, stages: stageRows };
+      return { pair: safePair, source, stages: stageRows, test };
     },
 
     async skipPair({ pairId, requestId, actorRef, reason }) {

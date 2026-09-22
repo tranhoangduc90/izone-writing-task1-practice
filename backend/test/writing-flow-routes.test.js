@@ -275,7 +275,7 @@ test('danh sách bài chuyển bộ lọc lớp và giảng viên vào truy vấ
     classCode: 'IC2200', teacherName: 'Giảng viên thử', stageKey: null,
     stageStatus: null, view: null, includeCompleted: false, taskType: null,
     search: null, searchScope: 'all', dateFrom: null, dateTo: null,
-    limit: 50, offset: 10, cursorAt: null, cursorId: null, sort: null,
+    limit: 50, offset: 10, cursorAt: null, cursorId: null, sort: null, sourceKind: null,
   });
   const review = await request(app).get('/api/v1/admin/writing-flow/pairs')
     .query({ view: 'review' });

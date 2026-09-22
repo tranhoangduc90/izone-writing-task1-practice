@@ -316,7 +316,8 @@ test('thống kê giảng viên đọc trực tiếp database mapping và lọc 
   assert.equal(calls.every(call => !/USING \(class_code\)/u.test(call.sql)), true);
   assert.deepEqual(calls[1].values, ['IC2200', 'Giảng viên thử',
     ['intake', 'precheck', 'main', 'critic', 'arbiter', 'render', 'deliver'],
-    null, null, null, false, null, null, true, null, true, [], null, null, null, null, 50, 10]);
+    null, null, null, false, null, null, true, null, true, [], null, null, null, null, 50, 10,
+    null]);
 });
 
 test('dashboard không còn phụ thuộc view phân công Lark', async () => {

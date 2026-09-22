@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { withTransaction } from './db.js';
 import { ApiError } from './service.js';
 import { keyFromHex, open, seal, sha256 } from './writing-flow-crypto.js';
+import { storeWritingTestDelivery, storeWritingTestMainResult } from './writing-flow-test.js';
 
 const STAGES = ['precheck', 'main', 'critic', 'arbiter', 'render', 'deliver'];
 export const LEASE_SECONDS = { precheck: 600, main: 600, critic: 600, arbiter: 600, render: 300, deliver: 180 };
@@ -58,7 +59,9 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
                essay_slot, class_code, document_kind, source_modified_at,
                source_type, source_id, trcc_required_override,
                (SELECT s.display_name FROM writing_flow.source_record AS s
-                 WHERE s.source_id=p.source_id) AS source_display_name
+                 WHERE s.source_id=p.source_id) AS source_display_name,
+               (SELECT g.test_config FROM writing_flow.test_group AS g
+                 WHERE g.source_id=p.source_id) AS test_config
           FROM writing_flow.pair AS p WHERE pair_id = $1 FOR UPDATE`, [pairId]);
       if (pairResult.rowCount !== 1) throw new ApiError(404, 'PAIR_NOT_FOUND', 'Không tìm thấy bài chấm.');
       const pair = pairResult.rows[0];
@@ -265,6 +268,7 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
             sourceType: pair.source_type || 'lark_homework',
             sourceId: pair.source_id || null,
             sourceDisplayName: pair.source_display_name || null,
+            ...(pair.test_config ? { testConfig: pair.test_config } : {}),
             sourceModifiedAt: new Date(pair.source_modified_at).toISOString() };
         })(),
         previous,
@@ -290,7 +294,7 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
     return withTransaction(pool, async client => {
       const pairResult = await client.query(`
         SELECT pair_id, submission_revision, status, homework_file_id,
-               source_link_index, essay_slot
+               source_link_index, essay_slot,source_type
           FROM writing_flow.pair WHERE pair_id=$1 FOR UPDATE`, [pairId]);
       if (pairResult.rowCount !== 1) throw new ApiError(404, 'PAIR_NOT_FOUND', 'Không tìm thấy bài chấm.');
       const pair = pairResult.rows[0];
@@ -340,6 +344,18 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
           throw new ApiError(409, 'DELIVERY_RESULT_MISMATCH',
             'Link hoặc vị trí ghi không khớp cặp bài đã chấm.');
         }
+      }
+      if (pair.source_type === 'term_test' && stageKey === 'main') {
+        const linked = await client.query(`SELECT task_number FROM writing_flow.test_pair
+          WHERE pair_id=$1 FOR UPDATE`, [pairId]);
+        if (linked.rowCount !== 1) {
+          throw new ApiError(409, 'TEST_PAIR_LINK_MISSING', 'Bài Test chưa được ghép đúng Task.');
+        }
+        await storeWritingTestMainResult(client, { pairId,
+          taskNumber: Number(linked.rows[0].task_number), result, encryptionKey: key });
+      }
+      if (pair.source_type === 'term_test' && stageKey === 'deliver') {
+        await storeWritingTestDelivery(client, { pairId, result });
       }
       await client.query(`UPDATE writing_flow.stage_attempt
         SET status='succeeded',result_sha256=$2,result_ciphertext=$3,finished_at=now()

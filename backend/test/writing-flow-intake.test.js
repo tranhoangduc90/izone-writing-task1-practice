@@ -4,12 +4,16 @@ import { createWritingFlowIntake } from '../src/writing-flow-intake.js';
 
 function fakePool() {
   const pairs = [];
+  const testPairs = [];
   const writes = [];
   const client = {
     async query(sql, values = []) {
       writes.push({ sql, values });
       if (sql.includes('INSERT INTO writing_flow.source_record')) {
         return { rowCount: 1, rows: [{ source_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }] };
+      }
+      if (sql.includes('INSERT INTO writing_flow.test_group')) {
+        return { rowCount: 1, rows: [{ test_group_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' }] };
       }
       if (sql.includes('SELECT pair_id, submission_revision, content_sha256, source_modified_at')) {
         const matching = pairs.filter(row => row.source_app_id === values[0]
@@ -49,11 +53,20 @@ function fakePool() {
         const handoff_id = `handoff-${writes.filter(row => row.sql.includes('INSERT INTO writing_flow.handoff')).length}`;
         return { rows: [{ handoff_id }], rowCount: 1 };
       }
+      if (sql.includes('INSERT INTO writing_flow.test_pair')) {
+        testPairs.push({ pairId: values[1], taskNumber: values[2], status: values[3],
+          historicalEvidence: values[4] });
+        return { rowCount: 1, rows: [] };
+      }
+      if (sql.includes("count(*) FILTER (WHERE status='delivered')")) {
+        return { rowCount: 1, rows: [{ total: testPairs.length,
+          delivered: testPairs.filter(row => row.status === 'delivered').length }] };
+      }
       return { rowCount: 1, rows: [] };
     },
     release() {},
   };
-  return { pool: { connect: async () => client }, pairs, writes };
+  return { pool: { connect: async () => client }, pairs, testPairs, writes };
 }
 
 function input() {
@@ -220,4 +233,26 @@ test('không nhận lớp hoặc loại đề khác với bốn field homework',
   wrongTask.pairs[1].taskType = 'task_1';
   await assert.rejects(intake(wrongTask), error => error.code === 'LARK_TASK_TYPE_MISMATCH');
   assert.equal(writes.length, 0);
+});
+
+test('bài Test đã có link kết quả được ghi nhận đã giao và không tạo bàn giao chấm lại', async () => {
+  const { pool, testPairs, writes } = fakePool();
+  const intake = createWritingFlowIntake({ pool, encryptionKey: '11'.repeat(32) });
+  const source = input();
+  source.sourceType = 'term_test';
+  source.sourceMeta = { teacherNames: [], displayName: 'Term test 1 khóa Chuyên sâu',
+    testConfig: 'Term Test 1' };
+  delete source.larkMeta;
+  delete source.larkModifiedMs;
+  source.expectedCount = 1;
+  source.pairs = [{ essaySlot: 1, taskType: 'task_2', topic: 'Đề Test', image: '',
+    essay: 'Bài Test đã chấm', trCcCheck: true, alreadyGraded: true }];
+  const result = await intake(source);
+  assert.equal(result.receipts[0].status, 'existing');
+  assert.equal(result.receipts[0].historicalEvidence, true);
+  assert.deepEqual(testPairs, [{ pairId: result.receipts[0].pairId, taskNumber: 2,
+    status: 'delivered', historicalEvidence: true }]);
+  assert.equal(writes.some(row => row.sql.includes('INSERT INTO writing_flow.handoff')), false);
+  assert.equal(writes.some(row => row.sql.includes("SET status='delivered'")), true);
+  assert.equal(writes.some(row => row.sql.includes('evidence_status=CASE')), true);
 });

@@ -51,6 +51,34 @@ test('biên nhận FETCH_FAILED đưa nguồn về hàng chờ khi chưa đủ b
   assert.equal(sourceUpdate.args[7], 'FETCH_FAILED');
 });
 
+test('chỉ nguồn Classroom được loại với lý do đã kiểm và lưu dấu vết phân loại', async () => {
+  let sourceUpdate = null;
+  const client = { async query(sql, args) {
+    if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return {};
+    if (sql.includes('SELECT i.*,r.status AS run_status')) return { rowCount: 1, rows: [{
+      run_status: 'open', status: 'pending', source_app_id: 'google_classroom',
+      source_table_id: 'course-demo', source_record_id: 'submission-demo',
+      homework_file_id: 'doc-demo', source_link_index: 1, class_code: 'IC2300',
+      source_type: 'google_classroom',
+    }] };
+    if (sql.includes('UPDATE writing_flow.scan_item')) return { rowCount: 1 };
+    if (sql.includes('UPDATE writing_flow.source_record')) {
+      sourceUpdate = { sql, args };
+      return { rowCount: 1 };
+    }
+    if (sql.includes('UPDATE writing_flow.source_issue')) return { rowCount: 0 };
+    throw new Error(`UNEXPECTED_QUERY:${sql}`);
+  }, release() {} };
+  const service = createWritingFlowScan({ pool: { connect: async () => client } });
+  await service.acknowledge({ runId: 'run-demo', itemKey: key, status: 'excluded',
+    exclusionCode: 'NON_WRITING_DOCUMENT' });
+  assert.match(sourceUpdate.sql, /writingFilter/u);
+  assert.equal(sourceUpdate.args[8], 'NON_WRITING_DOCUMENT');
+  assert.match(sourceUpdate.sql, /last_error_code=CASE[\s\S]*WHEN \$6='excluded' THEN \$9/u);
+  await assert.rejects(service.acknowledge({ runId: 'run-demo', itemKey: key,
+    status: 'excluded', exclusionCode: 'UNSAFE_REASON' }), { code: 'SCAN_EXCLUSION_MISMATCH' });
+});
+
 test('đọc lại lỗi nguồn tạo đúng một lượt quét idempotent và giữ nguyên mốc', async () => {
   const issueKey = 'd'.repeat(64);
   const requestId = '22222222-2222-4222-8222-222222222222';

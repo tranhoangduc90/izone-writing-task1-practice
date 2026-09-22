@@ -124,7 +124,9 @@ const writingScanAck=z.object({
  status:z.enum(['accepted','partial','issue','excluded','empty']),
  pairIds:z.array(uuid).max(4).default([]),
  issueKeys:z.array(z.string().regex(/^[0-9a-f]{64}$/)).max(4).default([]),
- detectedSlotCount:z.number().int().min(0).max(4).nullable().default(null)
+ detectedSlotCount:z.number().int().min(0).max(4).nullable().default(null),
+ exclusionCode:z.enum(['CLASS_EXCLUDED','NON_WRITING_TITLE','NON_WRITING_DOCUMENT',
+   'FILE_TYPE_UNSUPPORTED']).nullable().default(null)
 });
 const writingScanCursor=z.object({
  appId:z.string().trim().min(1).max(120),tableId:z.string().trim().min(1).max(120)

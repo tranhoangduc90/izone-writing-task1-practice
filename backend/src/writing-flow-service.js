@@ -616,6 +616,7 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
             LEFT JOIN writing_flow.class_registry AS registry
               ON registry.class_code=coalesce(issue.class_code,source.class_code)
             WHERE issue.status='open'
+              AND registry.class_status IS DISTINCT FROM 'completed'
               AND ${visibleRegistrySql('registry')}
               AND ($1::text IS NULL OR coalesce(issue.class_code,source.class_code)=$1)
               AND ($2::text IS NULL OR $2=ANY(coalesce(nullif(source.teacher_names,ARRAY[]::text[]),

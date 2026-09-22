@@ -386,6 +386,8 @@ test('số đếm dashboard ghi rõ bảng lớp khi pair và source cùng có c
   assert.equal(calls.every(call => !/USING \(class_code\)/u.test(call.sql)), true);
   assert.match(calls[1].sql,
     /teacher_assignments AS teachers ON teachers\.class_code=pair\.class_code/u);
+  assert.match(calls[1].sql,
+    /registry\.class_status IS DISTINCT FROM 'completed'[\s\S]*AS source_issues/u);
 });
 
 test('mọi bảng dashboard nối lớp bằng tên bảng rõ ràng để PostgreSQL không hiểu mơ hồ', async () => {

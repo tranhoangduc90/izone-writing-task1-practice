@@ -15,7 +15,7 @@ export function shouldRetrySourceIssue(status, reasons = []) {
 }
 
 export function shouldResolvePriorTechnicalIssue(status, retryTechnicalIssue) {
-  return status === 'empty' || status === 'issue' && !retryTechnicalIssue;
+  return ['empty', 'excluded'].includes(status) || status === 'issue' && !retryTechnicalIssue;
 }
 
 // Nhận vào: phiên bản từng ô đã lưu và kết quả workflow vừa đọc lại từng file.
@@ -324,13 +324,20 @@ export function createWritingFlowScan({ pool }) {
     // Trả ra: trạng thái bền của link; gửi trùng cùng trạng thái là an toàn.
     // Khi lỗi: link vẫn pending để lượt quét không thể chốt nhầm.
     async acknowledge({ runId, itemKey: key, status, pairIds = [],
-      issueKeys = [], detectedSlotCount = null, expectedPlanSha256 = null }) {
+      issueKeys = [], detectedSlotCount = null, expectedPlanSha256 = null,
+      exclusionCode = null }) {
       return withTransaction(pool, async client => {
         const receiptSha256 = digest([status, [...pairIds].sort(),
-          [...issueKeys].sort(), detectedSlotCount]);
+          [...issueKeys].sort(), detectedSlotCount, exclusionCode]);
         const found = await client.query(`SELECT i.*,r.status AS run_status,
-          r.source_app_id,r.source_table_id
+          r.source_app_id,r.source_table_id,source.source_type
           FROM writing_flow.scan_item i JOIN writing_flow.scan_run r ON r.run_id=i.run_id
+          LEFT JOIN writing_flow.source_record AS source
+            ON source.source_app_id=r.source_app_id
+           AND source.source_table_id=r.source_table_id
+           AND source.source_record_id=i.source_record_id
+           AND source.homework_file_id IS NOT DISTINCT FROM i.homework_file_id
+           AND source.source_link_index IS NOT DISTINCT FROM i.source_link_index
           WHERE i.run_id=$1 AND i.item_key=$2 FOR UPDATE OF i`, [runId, key]);
         if (!found.rowCount) throw new ApiError(404, 'SCAN_ITEM_NOT_FOUND', 'Không thấy link trong lượt quét.');
         const item = found.rows[0];
@@ -403,8 +410,15 @@ export function createWritingFlowScan({ pool }) {
           throw new ApiError(409, 'SCAN_FILE_ISSUE_REQUIRED', 'Thiếu lỗi của cả tài liệu.');
         }
         if (status === 'excluded') {
-          if (item.class_code?.toUpperCase() !== 'IC2288') {
-            throw new ApiError(409, 'SCAN_EXCLUSION_MISMATCH', 'Chỉ lớp IC2288 được bỏ qua.');
+          const allowed = new Set(['CLASS_EXCLUDED','NON_WRITING_TITLE',
+            'NON_WRITING_DOCUMENT','FILE_TYPE_UNSUPPORTED']);
+          const classExcluded = item.class_code?.toUpperCase() === 'IC2288'
+            && exclusionCode === 'CLASS_EXCLUDED';
+          const classifiedClassroom = item.source_type === 'google_classroom'
+            && allowed.has(exclusionCode) && exclusionCode !== 'CLASS_EXCLUDED';
+          if (!classExcluded && !classifiedClassroom) {
+            throw new ApiError(409, 'SCAN_EXCLUSION_MISMATCH',
+              'Kết luận loại nguồn không đúng loại file hoặc lý do.');
           }
         } else if (status === 'empty') {
           if (detectedSlotCount !== 0) {
@@ -438,13 +452,17 @@ export function createWritingFlowScan({ pool }) {
                   THEN now()+interval '30 seconds'*greatest(1,dispatch_count)
                 ELSE NULL END,
               last_error_code=CASE WHEN $6='issue' THEN $8
-                ELSE NULL END,updated_at=now()
+                WHEN $6='excluded' THEN $9 ELSE NULL END,
+              metadata=CASE WHEN $6='excluded' THEN metadata || jsonb_build_object(
+                'writingFilter',jsonb_build_object('version','writing-source-title-v1',
+                  'reason',$9,'classifiedAt',to_jsonb(now()))) ELSE metadata END,
+              updated_at=now()
           WHERE source_app_id=$1 AND source_table_id=$2 AND source_record_id=$3
             AND homework_file_id IS NOT DISTINCT FROM $4 AND source_link_index=$5
             AND source_type IN ('google_classroom','manual')`,
         [item.source_app_id, item.source_table_id, item.source_record_id,
           item.homework_file_id, item.source_link_index, status,
-          retryTechnicalIssue, sourceErrorCode]);
+          retryTechnicalIssue, sourceErrorCode, exclusionCode]);
         // Một lần đọc thành công nhưng kết luận file trống hoặc lỗi format thật
         // thay thế lỗi kỹ thuật cũ; không để dashboard giữ cảnh báo FETCH_FAILED đã hết.
         if (shouldResolvePriorTechnicalIssue(status, retryTechnicalIssue)) {

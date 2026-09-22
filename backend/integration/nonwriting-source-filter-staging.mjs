@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import pg from 'pg';
 
 const databaseUrl = process.env.DATABASE_URL;
-const token = process.env.WRITING_FLOW_INTERNAL_TOKEN;
+const token = process.env.WRITING_FLOW_INTERNAL_TOKEN || process.env.INTERNAL_API_TOKEN;
 const apiBase = process.env.WRITING_FLOW_API_BASE_URL || 'http://127.0.0.1:8790';
 if (!databaseUrl || !token) throw new Error('STAGING_ENV_MISSING');
 const databaseName = new URL(databaseUrl).pathname.replace(/^\//u, '');

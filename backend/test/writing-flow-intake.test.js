@@ -257,4 +257,5 @@ test('bài Test đã có link kết quả được ghi nhận đã giao và khô
   assert.equal(writes.some(row => row.sql.includes('evidence_status=CASE')), true);
   assert.equal(writes.some(row => row.sql.includes('$5::boolean')), true);
   assert.equal(writes.some(row => row.sql.includes('$2::int>0')), true);
+  assert.equal(writes.some(row => row.sql.includes("jsonb_build_object('trCcSource',$16::text)")), true);
 });

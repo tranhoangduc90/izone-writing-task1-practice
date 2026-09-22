@@ -116,7 +116,7 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
            classroom_url,file_url,source_status,source_created_at,source_updated_at,
            metadata,dispatch_status,acknowledged_at)
           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
-                  jsonb_build_object('trCcSource',$16),'acknowledged',now())
+                  jsonb_build_object('trCcSource',$16::text),'acknowledged',now())
           ON CONFLICT (source_app_id,source_table_id,source_record_id,homework_file_id,source_link_index)
           DO UPDATE SET display_name=coalesce(EXCLUDED.display_name,writing_flow.source_record.display_name),
             class_code=coalesce(EXCLUDED.class_code,writing_flow.source_record.class_code),

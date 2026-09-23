@@ -168,7 +168,7 @@ export async function storeWritingTestDelivery(client, { pairId, result }) {
     VALUES ($1,'google_docs','complete',$2,true,now(),now())
     ON CONFLICT (pair_id,destination) DO UPDATE SET status='complete',
       result_url=EXCLUDED.result_url,readback_ok=true,completed_at=now(),updated_at=now()`,
-  [pairId, result.resultUrl]);
+  [pairId, null]);
   await client.query(`UPDATE writing_flow.test_pair SET status='delivered',delivered_at=now(),updated_at=now()
     WHERE pair_id=$1`, [pairId]);
   const group = await client.query(`SELECT current.test_group_id,

@@ -4,6 +4,7 @@ import {
   calculateTestTaskScore,
   calculateTestWritingScore,
   normalizeWritingTestResult,
+  storeWritingTestDelivery,
 } from '../src/writing-flow-test.js';
 
 const taskDefinitions = {
@@ -45,6 +46,18 @@ test('Task 1 chỉ nhận đủ đúng 9 khía cạnh và tự tính lại đi�
   assert.equal(normalized.componentCount, 9);
   assert.equal(normalized.criteria.length, 4);
   assert.equal(normalized.taskScore, 6.5);
+});
+
+test('biên nhận giao Test không lưu hoặc yêu cầu link LMS', async () => {
+  const calls = [];
+  const client = { async query(sql, values) {
+    calls.push({ sql, values });
+    if (sql.includes('bool_and(')) return { rows: [{ test_group_id: 'group-demo', all_delivered: true }] };
+    return { rows: [], rowCount: 1 };
+  } };
+  await storeWritingTestDelivery(client, { pairId: 'pair-demo', result: { readbackOk: true } });
+  assert.equal(calls[0].values[1], null);
+  assert.match(calls[0].sql, /'google_docs','complete'/u);
 });
 
 test('Task 2 chỉ nhận đủ đúng 10 khía cạnh', () => {

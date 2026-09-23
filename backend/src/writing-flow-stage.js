@@ -29,7 +29,19 @@ function decode(value, key) {
 // Nhận vào: lời xác nhận đã tạo trang cho một cặp bài.
 // Việc chính: chỉ nhận link xem có cùng mã trang, version và bằng chứng đọc lại.
 // Trả ra: lỗi rõ ràng trước khi lưu bàn giao ghi vào homework.
-export function verifyWritingRenderResult(result) {
+export function verifyWritingRenderResult(result, sourceType = 'lark_homework') {
+  if (sourceType === 'term_test') {
+    const scoreInReport = /Điểm Task:\s*(?:\*\*)?([0-9](?:[.,]5)?)/u
+      .exec(String(result?.reportMarkdown || ''));
+    if (result?.readbackOk !== true || typeof result.reportMarkdown !== 'string'
+      || result.reportMarkdown.trim().length < 80 || result.reportMarkdown.length > 450000
+      || !scoreInReport || Number(scoreInReport[1].replace(',', '.')) !== Number(result.taskScore)
+      || !Number.isFinite(Number(result.taskScore)) || result.resultUrl) {
+      throw new ApiError(409, 'RENDER_TEST_REPORT_INVALID',
+        'Bản nhận xét và điểm Test chưa đủ để ghi vào tài liệu.');
+    }
+    return;
+  }
   const match = /^https:\/\/ducizone\.ddns\.net\/writing\/shared\/writing-essays\/([a-f0-9]{48})\/view\?v=(\d+)$/u
     .exec(String(result?.resultUrl || ''));
   if (result?.readbackOk !== true || !match
@@ -39,6 +51,30 @@ export function verifyWritingRenderResult(result) {
     || !Number.isInteger(result.correctionsCount) || result.correctionsCount < 1) {
     throw new ApiError(409, 'RENDER_READBACK_MISSING',
       'Chưa xác nhận đúng trang kết quả của bài này.');
+  }
+}
+
+// Dữ liệu nhận vào: biên nhận writer và bản nhận xét Test hoặc link Homework đã lưu.
+// Việc chính: đối chiếu đúng tài liệu, vị trí và nội dung đã đọc lại trước khi báo Đã giao.
+// Kết quả: Test chỉ cần nhận xét/điểm trong Docs; Homework giữ kiểm link LMS như cũ.
+export function verifyWritingDeliveryResult(result, rendered, pair, sourceType = 'lark_homework') {
+  const samePlace = result?.readbackOk === true
+    && result.homeworkFileId === pair.homework_file_id
+    && Number(result.essaySlot) === Number(pair.essay_slot)
+    && Number(result.sourceLinkIndex) === Number(pair.source_link_index);
+  if (sourceType === 'term_test') {
+    if (!samePlace || result.resultUrl || !rendered?.reportMarkdown
+      || result.writerPayloadHash !== sha256(rendered.reportMarkdown)) {
+      throw new ApiError(409, 'DELIVERY_TEST_READBACK_MISMATCH',
+        'Bản nhận xét trong tài liệu không khớp bài Test đã chấm.');
+    }
+    return;
+  }
+  if (!samePlace || typeof result.resultUrl !== 'string'
+    || !result.resultUrl.startsWith('https://')
+    || result.resultUrl !== rendered?.resultUrl) {
+    throw new ApiError(409, 'DELIVERY_RESULT_MISMATCH',
+      'Link hoặc vị trí ghi không khớp cặp bài đã chấm.');
   }
 }
 
@@ -326,24 +362,24 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
           WHERE attempt_id=$1`, [attemptId, resultSha, resultCiphertext]);
         return { status: 'late', pairId, stageKey };
       }
-      if (stageKey === 'deliver'
-        && (result.readbackOk !== true || result.homeworkFileId !== pair.homework_file_id
-          || typeof result.resultUrl !== 'string' || !result.resultUrl.startsWith('https://'))) {
-        throw new ApiError(409, 'DELIVERY_READBACK_MISSING', 'Chưa xác nhận link trong đúng homework.');
+      if (stageKey === 'render') {
+        verifyWritingRenderResult(result, pair.source_type);
+        if (pair.source_type === 'term_test') {
+          const score = await client.query(`SELECT task_score FROM writing_flow.test_pair
+            WHERE pair_id=$1`, [pairId]);
+          if (score.rowCount !== 1 || Number(score.rows[0].task_score) !== Number(result.taskScore)) {
+            throw new ApiError(409, 'RENDER_TEST_SCORE_MISMATCH',
+              'Điểm trên bản nhận xét không khớp điểm Test đã lưu.');
+          }
+        }
       }
-      if (stageKey === 'render') verifyWritingRenderResult(result);
       if (stageKey === 'deliver') {
         const rendered = await client.query(`SELECT result_ciphertext
           FROM writing_flow.stage_result
           WHERE pair_id=$1 AND stage_key='render' AND status='succeeded'`, [pairId]);
         const savedResult = rendered.rowCount === 1
           ? decode(rendered.rows[0].result_ciphertext, key) : null;
-        if (!savedResult || result.resultUrl !== savedResult.resultUrl
-          || Number(result.essaySlot) !== Number(pair.essay_slot)
-          || Number(result.sourceLinkIndex) !== Number(pair.source_link_index)) {
-          throw new ApiError(409, 'DELIVERY_RESULT_MISMATCH',
-            'Link hoặc vị trí ghi không khớp cặp bài đã chấm.');
-        }
+        verifyWritingDeliveryResult(result, savedResult, pair, pair.source_type);
       }
       if (pair.source_type === 'term_test' && stageKey === 'main') {
         const linked = await client.query(`SELECT task_number FROM writing_flow.test_pair

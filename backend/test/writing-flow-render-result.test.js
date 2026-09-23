@@ -40,3 +40,15 @@ test('Test nhận bản nhận xét và điểm để ghi vào Docs, không tạ
   assert.throws(() => verifyWritingDeliveryResult({ ...delivered, resultUrl: result.resultUrl },
     prepared, pair, 'term_test'));
 });
+
+test('Test nhận nguyên báo cáo HTML và Markdown của bộ chấm cũ', () => {
+  const reportMarkdown = '<h1>Overall: <strong>6.5</strong></h1>\n'
+    + '<div style="margin-left: 20px;"><h3>Task Response: 6.5</h3></div>\n'
+    + '---\n# **Nhận xét từng tiêu chí:**\n## Task Response\n'
+    + 'Bài có đủ nhận xét chi tiết cho từng tiêu chí và phần phát triển ý.';
+  assert.doesNotThrow(() => verifyWritingRenderResult({ reportMarkdown,
+    taskScore: 6.5, readbackOk: true }, 'term_test'));
+  assert.throws(() => verifyWritingRenderResult({ reportMarkdown,
+    taskScore: 7, readbackOk: true }, 'term_test'),
+  error => error.code === 'RENDER_TEST_REPORT_INVALID');
+});

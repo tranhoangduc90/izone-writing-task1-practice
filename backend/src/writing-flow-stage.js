@@ -31,8 +31,10 @@ function decode(value, key) {
 // Trả ra: lỗi rõ ràng trước khi lưu bàn giao ghi vào homework.
 export function verifyWritingRenderResult(result, sourceType = 'lark_homework') {
   if (sourceType === 'term_test') {
-    const scoreInReport = /Điểm Task:\s*(?:\*\*)?([0-9](?:[.,]5)?)/u
-      .exec(String(result?.reportMarkdown || ''));
+    const report = String(result?.reportMarkdown || '');
+    // Nhận điểm ở mẫu Test cũ và mẫu chuyển tiếp; giữ nguyên báo cáo gốc.
+    const scoreInReport = /<h1>Overall:\s*<strong>([0-9](?:[.,]5)?)<\/strong><\/h1>/iu.exec(report)
+      || /Điểm Task:\s*(?:\*\*)?([0-9](?:[.,]5)?)/u.exec(report);
     if (result?.readbackOk !== true || typeof result.reportMarkdown !== 'string'
       || result.reportMarkdown.trim().length < 80 || result.reportMarkdown.length > 450000
       || !scoreInReport || Number(scoreInReport[1].replace(',', '.')) !== Number(result.taskScore)

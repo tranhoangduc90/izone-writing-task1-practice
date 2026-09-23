@@ -176,7 +176,8 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
         const writingSources = sources.filter(item => !isUnsupportedNativeGoogleFileUrl(item.fileUrl));
         for (const item of writingSources) {
           const snapshot = { submissionId: item.submissionId, courseWorkId: item.courseWorkId,
-            submissionState: item.sourceStatus, alternateLink: item.classroomUrl };
+            submissionState: item.sourceStatus, alternateLink: item.classroomUrl,
+            ...(item.googleUserId ? { googleUserId: item.googleUserId } : {}) };
           const sourceType = classifyWritingSourceType(item.displayName);
           const result = await client.query(`INSERT INTO writing_flow.source_record
             (source_type,source_app_id,source_table_id,source_record_id,homework_file_id,
@@ -194,10 +195,10 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
               source_updated_at=GREATEST(writing_flow.source_record.source_updated_at,EXCLUDED.source_updated_at),
               metadata=EXCLUDED.metadata,
               dispatch_status=CASE WHEN writing_flow.source_record.source_updated_at IS DISTINCT FROM EXCLUDED.source_updated_at
-                OR writing_flow.source_record.metadata IS DISTINCT FROM EXCLUDED.metadata
+                OR writing_flow.source_record.metadata - 'googleUserId' IS DISTINCT FROM EXCLUDED.metadata - 'googleUserId'
                 THEN 'pending' ELSE writing_flow.source_record.dispatch_status END,
               next_dispatch_at=CASE WHEN writing_flow.source_record.source_updated_at IS DISTINCT FROM EXCLUDED.source_updated_at
-                OR writing_flow.source_record.metadata IS DISTINCT FROM EXCLUDED.metadata
+                OR writing_flow.source_record.metadata - 'googleUserId' IS DISTINCT FROM EXCLUDED.metadata - 'googleUserId'
                 THEN now() ELSE writing_flow.source_record.next_dispatch_at END,updated_at=now()
             RETURNING source_id,dispatch_status,source_record_id,homework_file_id,source_link_index`,
           [item.courseId, item.submissionId, item.documentId, item.linkIndex, item.displayName || null,

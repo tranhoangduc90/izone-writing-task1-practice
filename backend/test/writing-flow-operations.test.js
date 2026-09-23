@@ -133,13 +133,18 @@ test('đồng bộ Classroom bổ sung tên homework cho nguồn chuyển tiếp
     throw new Error(`UNEXPECTED_SQL:${sql}`);
   });
   await createWritingFlowOperations({ pool }).upsertClassroomSources({ sources: [{
-    courseId: 'course', submissionId: 'submission', documentId: 'doc', linkIndex: 1,
+    courseId: 'course', submissionId: 'submission', googleUserId: 'google-user-123',
+    documentId: 'doc', linkIndex: 1,
     displayName: 'Writing homework 12', classCode: 'IC2200', studentName: 'Học viên giả',
     teacherNames: ['Giảng viên giả'], classroomUrl: 'https://classroom.google.com/c/demo',
     fileUrl: 'https://docs.google.com/document/d/demo/edit', sourceStatus: 'TURNED_IN',
     sourceUpdatedAt: '2026-09-20T00:00:00Z',
   }] });
   const backfill = statements.find(item => item.sql.includes('WITH classroom_candidate'));
+  const inserted = statements.find(item => item.sql.includes('INSERT INTO writing_flow.source_record'));
+  assert.equal(JSON.parse(inserted.params[inserted.params.length - 2]).googleUserId,
+    'google-user-123');
+  assert.match(inserted.sql, /metadata - 'googleUserId'/u);
   assert.match(backfill.sql, /count\(\*\) OVER \(PARTITION BY homework_file_id\)/u);
   assert.match(backfill.sql, /homework_file_id=ANY\(\$1::text\[\]\)/u);
   assert.deepEqual(backfill.params, [['doc']]);

@@ -240,6 +240,7 @@ const writingClassRegistryItem=z.object({
 });
 const writingClassroomSource=z.object({
  courseId:z.string().trim().min(1).max(120),submissionId:z.string().trim().min(1).max(160),
+ googleUserId:z.string().trim().min(1).max(160).optional(),
  courseWorkId:z.string().trim().min(1).max(160),documentId:z.string().trim().min(20).max(160),
  linkIndex:z.number().int().min(1).max(20),displayName:z.string().trim().max(300).nullable().optional(),
  classCode:z.string().trim().min(1).max(80),studentName:z.string().trim().max(200).nullable().optional(),

@@ -56,7 +56,6 @@ export function createWritingFlowHandoff({ pool }) {
                  AND h.last_sent_at<=now()-interval '6 hours'))
              AND p.status<>'superseded'
              AND (p.status<>'delivered' OR h.to_stage='trcc_repair')
-             AND NOT (p.source_type='term_test' AND h.to_stage='main')
              AND ${stageFilter}
              ${documentGuard}
            ORDER BY h.next_send_at,h.created_at,h.handoff_id

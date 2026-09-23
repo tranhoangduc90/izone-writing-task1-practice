@@ -180,6 +180,47 @@ test('bước giao link nhận phiên bản trang mới chỉ khi đã đánh d�
   assert.deepEqual(updates[0], [pairId, 'deliver', newHash]);
 });
 
+test('đủ lượt ghi Google trong một phút thì hoãn riêng bước giao, không tốn lượt thử', async () => {
+  const pairId = '71111111-1111-4111-8111-111111111111';
+  const handoffId = '72222222-2222-4222-8222-222222222222';
+  let reserved = false;
+  let insertedAttempt = false;
+  let deferred = false;
+  const client = {
+    async query(sql) {
+      if (sql.includes('SELECT pair_id, submission_revision')) return {
+        rowCount: 1, rows: [{ pair_id: pairId, submission_revision: 'revision-demo',
+          status: 'running', source_type: 'term_test' }],
+      };
+      if (sql.includes('SELECT handoff_id, from_stage')) return {
+        rowCount: 1, rows: [{ handoff_id: handoffId, from_stage: 'render',
+          to_stage: 'deliver', source_result_sha256: 'a'.repeat(64), status: 'pending' }],
+      };
+      if (sql.includes('SELECT pair_id, stage_key, status')) return {
+        rowCount: 1, rows: [{ pair_id: pairId, stage_key: 'deliver',
+          status: 'pending', cycle_no: 1, attempt_count: 0,
+          input_sha256: 'a'.repeat(64) }],
+      };
+      if (sql.includes('pg_advisory_xact_lock')) reserved = true;
+      if (sql.includes('AS recent_count')) return {
+        rowCount: 1, rows: [{ recent_count: '12' }],
+      };
+      if (sql.includes("SET status='pending',next_send_at=")) deferred = true;
+      if (sql.includes('INSERT INTO writing_flow.stage_attempt')) insertedAttempt = true;
+      return { rowCount: 1, rows: [] };
+    },
+    release() {},
+  };
+  const result = await createWritingFlowStage({
+    pool: { connect: async () => client }, encryptionKey: '11'.repeat(32),
+  }).claim({ pairId, revision: 'revision-demo', stageKey: 'deliver',
+    handoffId, executionId: 'execution-quota' });
+  assert.equal(result.status, 'deferred');
+  assert.equal(reserved, true);
+  assert.equal(deferred, true);
+  assert.equal(insertedAttempt, false);
+});
+
 test('bàn giao đã đóng trong hàng n8n không được tạo lượt thử mới', async () => {
   const encryptionKey = '11'.repeat(32);
   const pairId = '51111111-1111-4111-8111-111111111111';

@@ -241,6 +241,22 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
         [pairId, stageKey, stage.cycle_no]);
         return { status: 'needs_review', pairId, stageKey };
       }
+      if (stageKey === 'deliver') {
+        // Google Docs giới hạn lượt ghi theo người dùng/phút. Khóa ngắn này
+        // giữ ngân sách chung giữa nhiều API instance và mọi bài Homework/Test.
+        // AI ở các bước trước vẫn chạy theo concurrency của n8n.
+        await client.query(`SELECT pg_advisory_xact_lock(hashtext('writing_flow_docs_delivery_budget'))`);
+        const recent = await client.query(`SELECT count(*) AS recent_count
+          FROM writing_flow.stage_attempt
+          WHERE stage_key='deliver' AND started_at>now()-interval '60 seconds'`);
+        if (Number(recent.rows[0]?.recent_count ?? 0) >= 12) {
+          await client.query(`UPDATE writing_flow.handoff
+            SET status='pending',next_send_at=now()+interval '65 seconds'
+            WHERE handoff_id=$1`, [handoffId]);
+          await client.query(`SELECT pg_notify('writing_flow_work_ready','handoff')`);
+          return { status: 'deferred', pairId, stageKey, retryAfterSeconds: 65 };
+        }
+      }
       const attemptNo = Number(stage.attempt_count) + 1;
       const requestKey = crypto.randomUUID();
       const attemptResult = await client.query(`

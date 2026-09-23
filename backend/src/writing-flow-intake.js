@@ -275,10 +275,12 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
           receipts.push({ essaySlot: pair.essaySlot, pairId, status: 'existing',
             revision: pair.revision, historicalEvidence: true });
         } else {
+          // Bàn giao đến hạn ngay sau commit; trigger database đánh thức backend.
+          // n8n sẽ tự nhận việc thật bằng /due, không cần workflow trước gọi tiếp.
           const handoff = await client.query(`
             INSERT INTO writing_flow.handoff
               (pair_id, from_stage, to_stage, source_result_sha256, next_send_at)
-            VALUES ($1,'intake','precheck',$2,now()+interval '6 hours')
+            VALUES ($1,'intake','precheck',$2,now())
             RETURNING handoff_id`,
           [pairId, pair.resultSha256]);
           receipts.push({ essaySlot: pair.essaySlot, pairId, status: 'received',

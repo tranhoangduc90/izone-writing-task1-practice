@@ -449,10 +449,12 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
       [pairId, stageKey === 'deliver' ? 'delivered' : 'running']);
       let handoffId = null;
       if (nextStage) {
+        // Kết quả đã lưu bền; giao việc đến hạn ngay để backend đánh thức bước sau.
+        // Nếu tín hiệu bị mất, bản ghi pending vẫn được bộ phục hồi tìm lại.
         const handoff = await client.query(`
           INSERT INTO writing_flow.handoff
             (pair_id,from_stage,to_stage,source_result_sha256,next_send_at)
-          VALUES ($1,$2,$3,$4,now()+interval '6 hours')
+          VALUES ($1,$2,$3,$4,now())
           RETURNING handoff_id`, [pairId, stageKey, nextStage, resultSha]);
         handoffId = handoff.rows[0].handoff_id;
       }

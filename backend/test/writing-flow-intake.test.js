@@ -108,7 +108,7 @@ test('ba ô 1, 2, 4 tạo ba bàn giao; quét lại và sửa một ô không ch
     && /^[0-9a-f]{64}$/.test(row.revision) && row.handoffId));
   assert.equal(writes.filter(row => row.sql.includes('INSERT INTO writing_flow.handoff')).length, 3);
   assert.ok(writes.filter(row => row.sql.includes('INSERT INTO writing_flow.handoff'))
-    .every(row => row.sql.includes("now()+interval '6 hours'")));
+    .every(row => row.sql.includes("VALUES ($1,'intake','precheck',$2,now())")));
   const resolved = writes.filter(row => row.sql.includes('UPDATE writing_flow.source_issue'));
   assert.deepEqual(resolved.map(row => row.values[5]), [1, 2, 4]);
   assert.ok(resolved.every(row => row.sql.includes('essay_slot=$6')));

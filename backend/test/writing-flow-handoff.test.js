@@ -127,15 +127,15 @@ test('mỗi lượt dành tối đa hai mươi chỗ cho bước ghi Google và 
   assert.doesNotMatch(claims[1].sql, /sibling_pair\.homework_file_id/u);
 });
 
-test('bàn giao trực tiếp giữ cứu hộ sáu giờ, retry quota dùng mốc do chính sách cấp', () => {
+test('backend nhận bàn giao mới ngay; chỉ lượt đã gửi mới chờ sáu giờ để cứu hộ', () => {
   const intakeSource = fs.readFileSync(new URL('../src/writing-flow-intake.js', import.meta.url), 'utf8');
   const stageSource = fs.readFileSync(new URL('../src/writing-flow-stage.js', import.meta.url), 'utf8');
   const serviceSource = fs.readFileSync(new URL('../src/writing-flow-service.js', import.meta.url), 'utf8');
 
   assert.match(intakeSource,
-    /VALUES \(\$1,'intake','precheck',\$2,now\(\)\+interval '6 hours'\)/u);
+    /VALUES \(\$1,'intake','precheck',\$2,now\(\)\)/u);
   assert.match(stageSource,
-    /VALUES \(\$1,\$2,\$3,\$4,now\(\)\+interval '6 hours'\)/u);
+    /VALUES \(\$1,\$2,\$3,\$4,now\(\)\)/u);
   assert.match(stageSource,
     /VALUES \(\$1,'retry',\$2,\$3,now\(\)\+\(\$4::text\|\|' seconds'\)::interval\)/u);
   assert.match(serviceSource,

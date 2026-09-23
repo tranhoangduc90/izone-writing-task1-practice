@@ -54,8 +54,17 @@ function fakePool() {
         return { rows: [{ handoff_id }], rowCount: 1 };
       }
       if (sql.includes('INSERT INTO writing_flow.test_pair')) {
-        testPairs.push({ pairId: values[1], taskNumber: values[2], status: values[3],
-          historicalEvidence: values[4] });
+        const current = testPairs.find(row => row.taskNumber === values[2]);
+        if (current) {
+          if (current.pairId !== values[1]
+            || !sql.includes('WHERE writing_flow.test_pair.pair_id IS DISTINCT FROM EXCLUDED.pair_id')) {
+            Object.assign(current, { pairId: values[1], status: values[3],
+              historicalEvidence: values[4] });
+          }
+        } else {
+          testPairs.push({ pairId: values[1], taskNumber: values[2], status: values[3],
+            historicalEvidence: values[4] });
+        }
         return { rowCount: 1, rows: [] };
       }
       if (sql.includes("count(*) FILTER (WHERE status='delivered')")) {
@@ -258,4 +267,27 @@ test('bài Test đã có link kết quả được ghi nhận đã giao và khô
   assert.equal(writes.some(row => row.sql.includes('$5::boolean')), true);
   assert.equal(writes.some(row => row.sql.includes('$2::int>0')), true);
   assert.equal(writes.some(row => row.sql.includes("jsonb_build_object('trCcSource',$16::text)")), true);
+});
+
+test('quét lại đúng bài Test đã có kết quả không xóa trạng thái và bằng chứng lịch sử', async () => {
+  const { pool, testPairs, writes } = fakePool();
+  const intake = createWritingFlowIntake({ pool, encryptionKey: '11'.repeat(32) });
+  const source = input();
+  source.sourceType = 'term_test';
+  source.sourceMeta = { teacherNames: [], displayName: 'Term Test 1' };
+  delete source.larkMeta;
+  delete source.larkModifiedMs;
+  source.expectedCount = 1;
+  source.pairs = [{ essaySlot: 1, taskType: 'task_2', topic: 'Đề giả', image: '',
+    essay: 'Bài giả đã có kết quả cũ', trCcCheck: true, alreadyGraded: true }];
+  const first = await intake(source);
+  assert.equal(testPairs[0].status, 'delivered');
+  assert.equal(testPairs[0].historicalEvidence, true);
+  const second = await intake(source);
+  assert.equal(second.receipts[0].status, 'existing');
+  assert.equal(second.receipts[0].pairId, first.receipts[0].pairId);
+  assert.equal(testPairs.length, 1);
+  assert.equal(testPairs[0].status, 'delivered');
+  assert.equal(testPairs[0].historicalEvidence, true);
+  assert.equal(writes.filter(row => row.sql.includes('INSERT INTO writing_flow.handoff')).length, 0);
 });

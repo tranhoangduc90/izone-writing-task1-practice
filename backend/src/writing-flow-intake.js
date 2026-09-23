@@ -299,7 +299,8 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
               CASE WHEN $5::boolean THEN jsonb_build_object('source','google_docs_result_link') ELSE '{}'::jsonb END)
             ON CONFLICT (test_group_id,task_number) DO UPDATE SET pair_id=EXCLUDED.pair_id,
               status=EXCLUDED.status,delivered_at=EXCLUDED.delivered_at,
-              historical_evidence=EXCLUDED.historical_evidence,updated_at=now()`,
+              historical_evidence=EXCLUDED.historical_evidence,updated_at=now()
+            WHERE writing_flow.test_pair.pair_id IS DISTINCT FROM EXCLUDED.pair_id`,
           [testGroupId, receipt.pairId, taskNumber,
             receipt.historicalEvidence === true ? 'delivered' : 'pending',
             receipt.historicalEvidence === true]);

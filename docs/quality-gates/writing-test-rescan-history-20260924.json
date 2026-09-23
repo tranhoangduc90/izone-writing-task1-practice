@@ -1,0 +1,185 @@
+{
+  "schema_version": 2,
+  "product": "Tiếp nhận bài Test Writing 56/67",
+  "change_id": "writing-test-rescan-history-20260924",
+  "change_kind": "bugfix",
+  "escaped_user_defect": true,
+  "risk": "high",
+  "system_traits": ["stateful", "asynchronous", "concurrent", "external_side_effects", "personal_data"],
+  "requirements": [
+    {
+      "id": "REQ-1",
+      "statement": "Quét lại đúng cặp Test đã có kết quả không được xóa trạng thái đã giao hoặc bằng chứng lịch sử.",
+      "test_ids": ["T-REGRESSION", "T-FULL"]
+    }
+  ],
+  "invariants": [
+    {
+      "id": "INV-1",
+      "statement": "Chỉ thay cách upsert test_pair khi pair_id không đổi; phiên bản bài mới vẫn nhận trạng thái mới.",
+      "test_ids": ["T-REGRESSION", "T-FULL"]
+    },
+    {
+      "id": "INV-2",
+      "statement": "Không ghi Lark Base hoặc đưa dữ liệu học viên vào log và Git.",
+      "test_ids": ["T-SECURITY"]
+    }
+  ],
+  "tests": [
+    {
+      "id": "T-HAPPY",
+      "category": "happy_path",
+      "priority": "P0",
+      "status": "passed",
+      "evidence": "Bài Test lần đầu có bằng chứng cũ được đánh dấu delivered, không tạo handoff AI; 11/11 test tiếp nhận đạt."
+    },
+    {
+      "id": "T-INVALID",
+      "category": "invalid_input",
+      "priority": "P0",
+      "status": "passed",
+      "evidence": "Bài đổi nội dung với cùng mốc file bị từ chối SOURCE_VERSION_CONFLICT, không ghi đè cặp cũ."
+    },
+    {
+      "id": "T-REGRESSION",
+      "category": "regression",
+      "priority": "P0",
+      "status": "passed",
+      "evidence": "Cùng một ca quét lại bài Test đã giao: trên base 10/11 đạt và trạng thái bị đổi thành pending; trên head 11/11 đạt, không có handoff AI."
+    },
+    {
+      "id": "T-FULL",
+      "category": "regression",
+      "priority": "P0",
+      "status": "passed",
+      "evidence": "Toàn bộ backend suite trên candidate đạt 231/231, không skip."
+    },
+    {
+      "id": "T-LIFECYCLE",
+      "category": "lifecycle_time",
+      "priority": "P0",
+      "status": "passed",
+      "evidence": "Staging source và container cùng checksum candidate; dịch vụ healthy sau build."
+    },
+    {
+      "id": "T-CONCURRENT",
+      "category": "concurrency_idempotency",
+      "priority": "P0",
+      "status": "passed",
+      "evidence": "Giao dịch tiếp nhận vẫn giữ khóa theo cặp; ON CONFLICT chỉ cập nhật khi pair_id mới, quét trùng không tạo handoff."
+    },
+    {
+      "id": "T-EXTERNAL",
+      "category": "external_partial",
+      "priority": "P0",
+      "status": "passed",
+      "evidence": "14 Google Docs đã được khôi phục và đọc lại riêng; bản sửa backend chỉ thay đúng câu lệnh ghi test_pair."
+    },
+    {
+      "id": "T-ROLLBACK",
+      "category": "rollback_recovery",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "Trước staging đã sao lưu một file có checksum ở /opt/backups/writing-practice; script deploy chặn nếu bản live lệch base."
+    },
+    {
+      "id": "T-SECURITY",
+      "category": "security_privacy",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "Fixture là dữ liệu giả; script deploy và readback chỉ in checksum, số lượng và trạng thái khỏe."
+    }
+  ],
+  "red_green": {
+    "red_on_base": {
+      "test_id": "T-REGRESSION",
+      "command": "node --test backend/test/writing-flow-intake.test.js trên base với ca quét lại mới",
+      "tree_revision": "backend-intake-base-20260924",
+      "outcome": "failed",
+      "exit_code": 1,
+      "failed": 1,
+      "evidence": "Bài đã giao bị test_pair đổi thành pending trong lần quét trùng."
+    },
+    "green_on_head": {
+      "test_id": "T-REGRESSION",
+      "command": "node --test backend/test/writing-flow-intake.test.js",
+      "tree_revision": "backend-intake-4e8a953d911b",
+      "outcome": "passed",
+      "exit_code": 0,
+      "passed": 11,
+      "failed": 0,
+      "skipped": 0,
+      "evidence": "Ca quét lại giữ delivered và historicalEvidence, tổng 11/11 đạt."
+    }
+  },
+  "cross_constraints": [
+    {
+      "id": "STATE-1",
+      "left": {"name": "existing_pair_id_changes_on_rescan", "value": 0},
+      "operator": "==",
+      "right": {"name": "new_handoffs_on_rescan", "value": 0},
+      "status": "passed",
+      "evidence": "Regression quét lại cùng revision giữ nguyên pair_id, delivered và bằng chứng lịch sử; không tạo handoff."
+    }
+  ],
+  "verification_runs": [
+    {
+      "id": "V-FOCUSED",
+      "scope": "focused",
+      "command": "node --test backend/test/writing-flow-intake.test.js",
+      "tree_revision": "backend-intake-4e8a953d911b",
+      "captured_at": "2026-09-23T19:05:00Z",
+      "exit_code": 0,
+      "outcome": "passed",
+      "passed": 11,
+      "failed": 0,
+      "skipped": 0,
+      "evidence": "11/11 bài test tiếp nhận đạt."
+    },
+    {
+      "id": "V-FULL",
+      "scope": "full_suite",
+      "command": "node --test backend/test/*.test.js",
+      "tree_revision": "backend-intake-4e8a953d911b",
+      "captured_at": "2026-09-23T19:05:00Z",
+      "exit_code": 0,
+      "outcome": "passed",
+      "passed": 231,
+      "failed": 0,
+      "skipped": 0,
+      "evidence": "Toàn bộ backend suite đạt 231/231."
+    }
+  ],
+  "mutations": [
+    {
+      "id": "M-STAGING",
+      "target": "Chỉ file backend/src/writing-flow-intake.js trên staging",
+      "outcome": "success",
+      "readback": "verified",
+      "evidence": "Source staging và file trong container cùng hash raw 4e8a953d911b; service healthy, backup có checksum."
+    },
+    {
+      "id": "M-PRODUCTION",
+      "target": "Chỉ file backend/src/writing-flow-intake.js trên production",
+      "outcome": "success",
+      "readback": "verified",
+      "evidence": "Service healthy; source và container có cùng checksum candidate; backup có checksum. Sau phát hành, 14 Docs và 14 trạng thái lịch sử được đọc lại chính xác."
+    }
+  ],
+  "release": {
+    "target_environment": "production",
+    "decision": "deployed_awaiting_validation",
+    "base_tree_revision": "backend-intake-base-20260924",
+    "current_tree_revision": "backend-intake-4e8a953d911b",
+    "production_authorized": true,
+    "rollback": "Khôi phục đúng file intake từ backup có checksum rồi build lại duy nhất service API; giữ Test AI tạm dừng.",
+    "deployment_readback": "verified",
+    "operational_observation": "Production healthy và bản file chạy trong container đúng candidate; 14 Docs và 14 bản ghi phục hồi đọc lại đúng. Chưa có lượt quét Test thật sau phát hành vì AI vẫn tạm giữ.",
+    "open_risks": [
+      {
+        "severity": "P2",
+        "summary": "Cần chứng minh nhận diện lịch sử trên bài thật trước khi mở Test AI."
+      }
+    ]
+  }
+}

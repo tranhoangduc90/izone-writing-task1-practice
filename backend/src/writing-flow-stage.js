@@ -6,6 +6,12 @@ import { storeWritingTestDelivery, storeWritingTestMainResult } from './writing-
 
 const STAGES = ['precheck', 'main', 'critic', 'arbiter', 'render', 'deliver'];
 export const LEASE_SECONDS = { precheck: 600, main: 600, critic: 600, arbiter: 600, render: 300, deliver: 180 };
+export function leaseSecondsForStage(stageKey, sourceType) {
+  // Bộ Test cũ gọi 13/14 workflow nối tiếp; một lượt thật đã mất gần sáu phút.
+  // Chừa thời gian cho AI chậm để lease không hết và khởi phát chấm trùng.
+  return stageKey === 'main' && sourceType === 'term_test'
+    ? 1800 : LEASE_SECONDS[stageKey];
+}
 const NEXT = { precheck: ['main'], main: ['critic'], critic: ['arbiter', 'render'],
   arbiter: ['render'], render: ['deliver'], deliver: [null] };
 
@@ -278,7 +284,8 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
                started_at=now(), lease_expires_at=now()+($5::integer*interval '1 second'),
                updated_at=now()
          WHERE pair_id=$1 AND stage_key=$2`,
-      [pairId, stageKey, attemptNo, executionId, LEASE_SECONDS[stageKey]]);
+      [pairId, stageKey, attemptNo, executionId,
+        leaseSecondsForStage(stageKey, pair.source_type)]);
       await client.query(`UPDATE writing_flow.pair SET status='running',updated_at=now()
         WHERE pair_id=$1`, [pairId]);
       await client.query(`UPDATE writing_flow.handoff SET status='acknowledged',

@@ -795,6 +795,7 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
                render.result_ciphertext AS render_result_ciphertext,
                repair.status AS trcc_repair_status,
                test_group.test_config,test_group.topology,test_pair.task_number,
+               test_pair.historical_evidence,
                test_pair.component_count,test_pair.task_score,test_pair.status AS test_task_status,
                test_final.writing_score,test_final.status AS test_final_status,
                EXISTS (SELECT 1 FROM writing_flow.stage_result AS graded
@@ -878,9 +879,17 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
             if (/^https:\/\/ducizone\.ddns\.net\/writing\/shared\/writing-essays\/[a-f0-9]{48}\/view\?v=\d+$/u.test(value)) lmsUrl = value;
           } catch { dataIssueCode ||= 'RESULT_DECRYPT_FAILED'; }
         }
-        const { source_ciphertext: _hidden, render_result_ciphertext: _hiddenRender, ...safe } = row;
+        const legacyRestored = row.source_type === 'term_test'
+          && row.historical_evidence?.source === 'restored_legacy_result';
+        const { source_ciphertext: _hidden, render_result_ciphertext: _hiddenRender,
+          historical_evidence: _hiddenEvidence, ...safe } = row;
         return { ...safe, topic, image_url: imageUrl, tr_cc_check: trCcCheck,
-          essay_preview: essayPreview, lms_url: lmsUrl, data_issue_code: dataIssueCode };
+          essay_preview: essayPreview, lms_url: legacyRestored ? null : lmsUrl,
+          task_score: legacyRestored ? null : row.task_score,
+          writing_score: legacyRestored ? null : row.writing_score,
+          grading_text_available: legacyRestored ? false : row.grading_text_available,
+          result_origin: legacyRestored ? 'legacy_restored' : 'current',
+          data_issue_code: dataIssueCode };
       });
     },
 

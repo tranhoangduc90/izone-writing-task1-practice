@@ -186,6 +186,37 @@ test('lịch sử chỉ trả bản mới nhất mỗi ô và giải mã các fi
   assert.equal(Object.hasOwn(row, 'snapshot_ciphertext'), false);
 });
 
+test('chi tiết Test đã phục hồi chỉ hiện kết quả cũ trong Docs, không lộ link chấm sai', async () => {
+  const encryptionKey = '22'.repeat(32);
+  const binaryKey = Buffer.from(encryptionKey, 'hex');
+  const resultUrl = `https://ducizone.ddns.net/writing/shared/writing-essays/${'a'.repeat(48)}/view?v=1`;
+  const pool = poolWith(async sql => {
+    if (sql.includes('FROM writing_flow.pair AS p')) return { rowCount: 1, rows: [{
+      pair_id: '11111111-1111-4111-8111-111111111111', source_type: 'term_test',
+      source_ciphertext: seal(JSON.stringify(['task_2', 'Đề giả', '', 'Bài giả', false]), binaryKey),
+    }] };
+    if (sql.includes('FROM writing_flow.stage_result WHERE pair_id=$1')) {
+      return { rowCount: 1, rows: [{ stage_key: 'render', status: 'succeeded',
+        result_ciphertext: seal(JSON.stringify({ resultUrl }), binaryKey) }] };
+    }
+    if (sql.includes('FROM writing_flow.test_pair AS test_pair')) {
+      assert.match(sql, /test_pair\.historical_evidence/u);
+      return { rowCount: 1, rows: [{ task_score: 5, writing_score: 5,
+        historical_evidence: { source: 'restored_legacy_result' } }] };
+    }
+    if (sql.includes('FROM writing_flow.test_delivery')) return { rowCount: 1,
+      rows: [{ destination: 'google_docs', result_url: resultUrl }] };
+    return { rowCount: 0, rows: [] };
+  });
+  const detail = await createWritingFlowOperations({ pool, encryptionKey })
+    .pairDetail({ pairId: '11111111-1111-4111-8111-111111111111' });
+  assert.equal(detail.test.result_origin, 'legacy_restored');
+  assert.equal(detail.test.task_score, null);
+  assert.equal(detail.test.writing_score, null);
+  assert.equal(detail.test.deliveries.length, 0);
+  assert.equal(detail.stages[0].result?.resultUrl, undefined);
+});
+
 test('chỉ cấp lớp đã duyệt hợp lệ, gồm CS thiếu trạng thái nguồn, và giới hạn theo tham số', async () => {
   const classCodes = Array.from({ length: 8 }, (_, index) => `IC22${String(index).padStart(2, '0')}`);
   const statements = [];

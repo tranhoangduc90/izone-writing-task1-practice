@@ -358,6 +358,27 @@ test('mọi tab dashboard giải mã đúng khóa hex như production và trả 
   assert.equal(Object.hasOwn(rows[0], 'render_result_ciphertext'), false);
 });
 
+test('Test đã khôi phục kết quả cũ không hiện link LMS và điểm của lượt chấm sai', async () => {
+  const encryptionKey = Buffer.alloc(32, 7).toString('hex');
+  const binaryKey = Buffer.from(encryptionKey, 'hex');
+  const resultUrl = `https://ducizone.ddns.net/writing/shared/writing-essays/${'b'.repeat(48)}/view?v=1`;
+  const pool = { query: async sql => {
+    assert.match(sql, /test_pair\.historical_evidence/u);
+    return { rows: [{
+      pair_id: '11111111-1111-4111-8111-111111111111',
+      source_type: 'term_test', task_score: 5.0, writing_score: 5.0,
+      historical_evidence: { source: 'restored_legacy_result' },
+      render_result_ciphertext: seal(JSON.stringify({ resultUrl }), binaryKey),
+    }] };
+  } };
+  const [row] = await createWritingFlowService({ pool, encryptionKey }).listPairs({ limit: 1 });
+  assert.equal(row.lms_url, null);
+  assert.equal(row.task_score, null);
+  assert.equal(row.writing_score, null);
+  assert.equal(row.result_origin, 'legacy_restored');
+  assert.equal(Object.hasOwn(row, 'historical_evidence'), false);
+});
+
 test('dòng lỗi giải mã được đánh dấu rõ thay vì âm thầm hiện ô trống', async () => {
   const encryptionKey = Buffer.alloc(32, 8).toString('hex');
   const pool = { query: async () => ({ rows: [{ pair_id: 'pair-bad',

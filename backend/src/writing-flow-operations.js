@@ -468,6 +468,7 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
           pool.query(`SELECT test_group.display_name,test_group.test_config,test_group.topology,
               test_group.evidence_status,test_group.status AS group_status,
               test_pair.task_number,test_pair.status AS task_status,test_pair.component_count,
+              test_pair.historical_evidence,
               test_pair.task_score,test_pair.graded_at,test_pair.delivered_at,
               test_final.task_1_score,test_final.task_2_score,test_final.writing_score,
               test_final.status AS final_status,test_final.ready_at
@@ -498,6 +499,20 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
                 summary: safeOpen(item.summary_ciphertext),feedback: safeOpen(item.feedback_ciphertext),
                 completed_at: item.completed_at })) })),
           deliveries: deliveries.rows } : null;
+        if (test?.historical_evidence?.source === 'restored_legacy_result') {
+          // Bài cũ đã được khôi phục trong Docs. Giữ dấu vết các bước nhưng
+          // không trình bày điểm và link của lượt chấm sai như kết quả hiện hành.
+          for (const stage of stageRows) {
+            if (['main', 'critic', 'arbiter', 'render', 'deliver'].includes(stage.stage_key)) {
+              stage.result = { superseded: true,
+                message: 'Kết quả lượt chấm này đã được thay bằng bản cũ trong Google Docs.' };
+            }
+          }
+          test = { ...test, task_score: null, task_1_score: null,
+            task_2_score: null, writing_score: null, criteria: [], deliveries: [],
+            result_origin: 'legacy_restored' };
+        }
+        if (test) delete test.historical_evidence;
       }
       const { source_ciphertext: _ciphertext, ...safePair } = pair.rows[0];
       return { pair: safePair, source, stages: stageRows, test };

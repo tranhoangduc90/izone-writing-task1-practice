@@ -25,10 +25,12 @@ test('file thủ công chỉ nhận URL Google Docs thật', () => {
   assert.equal(documentIdFromUrl('không-phải-link'), '');
 });
 
-test('phân loại Term Test theo tên bài tập nhưng giữ Writing homework thường', () => {
+test('chỉ tên bài tập chứa test được nhận là Test, không suy từ lớp', () => {
   assert.equal(classifyWritingSourceType('Writing Term Test 2'), 'term_test');
   assert.equal(classifyWritingSourceType('FINAL_TEST - Writing'), 'term_test');
-  assert.equal(classifyWritingSourceType('Thi cuối kỳ - Writing'), 'term_test');
+  assert.equal(classifyWritingSourceType('Writing Mini Test'), 'term_test');
+  assert.equal(classifyWritingSourceType('Test - Writing Task 1'), 'term_test');
+  assert.equal(classifyWritingSourceType('Thi cuối kỳ - Writing'), 'google_classroom');
   assert.equal(classifyWritingSourceType('Writing 12 - Homework'), 'google_classroom');
 });
 

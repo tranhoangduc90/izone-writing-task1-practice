@@ -46,6 +46,7 @@ test('lỗi đọc kỹ thuật được thử tối đa ba lượt còn lỗi n
 
 test('biên nhận FETCH_FAILED đưa nguồn về hàng chờ khi chưa đủ ba lượt', async () => {
   let sourceUpdate = null;
+  let issueResolution = null;
   const issueKey = 'e'.repeat(64);
   const client = { async query(sql, args) {
     if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return {};
@@ -62,6 +63,10 @@ test('biên nhận FETCH_FAILED đưa nguồn về hàng chờ khi chưa đủ b
       sourceUpdate = { sql, args };
       return { rowCount: 1 };
     }
+    if (sql.includes('UPDATE writing_flow.source_issue')) {
+      issueResolution = { sql, args };
+      return { rowCount: 0 };
+    }
     throw new Error(`UNEXPECTED_QUERY:${sql}`);
   }, release() {} };
   const service = createWritingFlowScan({ pool: { connect: async () => client } });
@@ -72,6 +77,7 @@ test('biên nhận FETCH_FAILED đưa nguồn về hàng chờ khi chưa đủ b
   assert.match(sourceUpdate.sql, /'google_classroom','manual','term_test'/u);
   assert.equal(sourceUpdate.args[6], true);
   assert.equal(sourceUpdate.args[7], 'FETCH_FAILED');
+  assert.deepEqual(issueResolution.args[5], [issueKey]);
 });
 
 test('nguồn Homework và Test từ Classroom được loại với lý do đã kiểm', async () => {
@@ -104,6 +110,33 @@ test('nguồn Homework và Test từ Classroom được loại với lý do đã
     exclusionCode: 'FILE_TYPE_UNSUPPORTED' });
   await assert.rejects(service.acknowledge({ runId: 'run-demo', itemKey: key,
     status: 'excluded', exclusionCode: 'UNSAFE_REASON' }), { code: 'SCAN_EXCLUSION_MISMATCH' });
+});
+
+test('lượt đọc mới khép lỗi format cũ nhưng giữ lỗi còn hiện hành và mục đã bỏ qua', async () => {
+  const updates = [];
+  const client = { async query(sql, args) {
+    if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(sql)) return {};
+    if (sql.includes('SELECT i.*,r.status AS run_status')) return { rowCount: 1, rows: [{
+      run_status: 'open', status: 'pending', source_app_id: 'google_classroom',
+      source_table_id: 'course-demo', source_record_id: 'submission-demo',
+      homework_file_id: 'doc-demo', source_link_index: 1,
+      source_type: 'term_test', class_code: 'IC2300',
+    }] };
+    if (sql.includes('UPDATE writing_flow.scan_item')
+      || sql.includes('UPDATE writing_flow.source_record')) return { rowCount: 1 };
+    if (sql.includes('UPDATE writing_flow.source_issue')) {
+      updates.push({ sql, args });
+      return { rowCount: 1 };
+    }
+    throw new Error(`UNEXPECTED_QUERY:${sql}`);
+  }, release() {} };
+  const service = createWritingFlowScan({ pool: { connect: async () => client } });
+  await service.acknowledge({ runId: 'run-demo', itemKey: key,
+    status: 'empty', detectedSlotCount: 0 });
+  assert.equal(updates.length, 1);
+  assert.match(updates[0].sql, /status='open' AND NOT \(issue_key=ANY\(\$6::text\[\]\)\)/u);
+  assert.deepEqual(updates[0].args[5], []);
+  assert.doesNotMatch(updates[0].sql, /status='skipped'/u);
 });
 
 test('đọc lại lỗi nguồn tạo đúng một lượt quét idempotent và giữ nguyên mốc', async () => {

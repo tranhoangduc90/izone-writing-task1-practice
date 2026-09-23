@@ -476,18 +476,17 @@ export function createWritingFlowScan({ pool }) {
         [item.source_app_id, item.source_table_id, item.source_record_id,
           item.homework_file_id, item.source_link_index, status,
           retryTechnicalIssue, sourceErrorCode, exclusionCode]);
-        // Một lần đọc thành công nhưng kết luận file trống hoặc lỗi format thật
-        // thay thế lỗi kỹ thuật cũ; không để dashboard giữ cảnh báo FETCH_FAILED đã hết.
-        if (shouldResolvePriorTechnicalIssue(status, retryTechnicalIssue)) {
-          await client.query(`UPDATE writing_flow.source_issue
-            SET status='resolved',resolved_at=now(),last_seen_at=now()
-            WHERE source_app_id=$1 AND source_table_id=$2 AND source_record_id=$3
-              AND homework_file_id IS NOT DISTINCT FROM $4 AND source_link_index=$5
-              AND status='open' AND reason_code=ANY($6::text[])`,
-          [item.source_app_id, item.source_table_id, item.source_record_id,
-            item.homework_file_id, item.source_link_index,
-            [...RETRYABLE_SOURCE_ISSUES]]);
-        }
+        // Nhận vào: biên nhận mới của cùng file và các lỗi còn tồn tại trong lượt này.
+        // Việc chính: khép lỗi cũ đã được kết luận mới thay thế, kể cả lỗi format Test cũ.
+        // Kết quả: dashboard chỉ đếm lỗi còn hiện hành; lịch sử resolved vẫn đọc được.
+        // Khi lỗi: transaction rollback, không chốt lượt quét hoặc xóa lỗi đã bỏ qua.
+        await client.query(`UPDATE writing_flow.source_issue
+          SET status='resolved',resolved_at=now(),last_seen_at=now()
+          WHERE source_app_id=$1 AND source_table_id=$2 AND source_record_id=$3
+            AND homework_file_id IS NOT DISTINCT FROM $4 AND source_link_index=$5
+            AND status='open' AND NOT (issue_key=ANY($6::text[]))`,
+        [item.source_app_id, item.source_table_id, item.source_record_id,
+          item.homework_file_id, item.source_link_index, issueKeys]);
         return { itemKey: key, status };
       });
     },

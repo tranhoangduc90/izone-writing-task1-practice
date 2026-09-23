@@ -37,13 +37,12 @@ function isUnsupportedNativeGoogleFileUrl(value) {
 }
 
 // Nhận vào: tên bài tập Classroom.
-// Việc chính: nhận đúng các biến thể Term Test/Mid Test/Final Test nhưng không đoán từ bài Writing thường.
+// Việc chính: nhận Test khi và chỉ khi tiêu đề bài tập Classroom có chữ "test".
 // Trả ra: loại nguồn để dashboard và luồng chấm Test tách riêng mà vẫn dùng chung bảy giai đoạn.
 export function classifyWritingSourceType(displayName) {
   const value = String(displayName || '').normalize('NFKC').toLocaleLowerCase('vi')
     .replace(/[_-]+/gu, ' ').replace(/\s+/gu, ' ').trim();
-  return /\b(term|mid|final)\s*test\b/u.test(value) || /thi\s*(giữa|cuối)\s*kỳ/u.test(value)
-    ? 'term_test' : 'google_classroom';
+  return value.includes('test') ? 'term_test' : 'google_classroom';
 }
 
 // Dữ liệu nhận vào: pool PostgreSQL, khóa mã hóa và lệnh của quản trị viên đã xác thực.

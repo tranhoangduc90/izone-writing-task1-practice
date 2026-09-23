@@ -11,10 +11,11 @@ const group = 'a'.repeat(48);
 const result = { resultUrl: `https://ducizone.ddns.net/writing/shared/writing-essays/${group}/view?v=2`,
   writerGroupId: group, version: 2, correctionsCount: 2, readbackOk: true };
 
-test('lease chấm Test đủ cho bộ chuyên môn cũ, Homework giữ thời hạn hiện hành', () => {
+test('thời hạn chấm và ghi Test đủ biên; Homework giữ thời hạn hiện hành', () => {
   assert.equal(leaseSecondsForStage('main', 'term_test'), 1800);
   assert.equal(leaseSecondsForStage('main', 'google_classroom'), 600);
-  assert.equal(leaseSecondsForStage('deliver', 'term_test'), 180);
+  assert.equal(leaseSecondsForStage('deliver', 'term_test'), 600);
+  assert.equal(leaseSecondsForStage('deliver', 'google_classroom'), 180);
 });
 
 test('chỉ link xem đã đọc lại của đúng trang và đúng version được nhận', () => {

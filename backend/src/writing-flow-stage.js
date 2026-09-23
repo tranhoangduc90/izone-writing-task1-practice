@@ -9,8 +9,11 @@ export const LEASE_SECONDS = { precheck: 600, main: 600, critic: 600, arbiter: 6
 export function leaseSecondsForStage(stageKey, sourceType) {
   // Bộ Test cũ gọi 13/14 workflow nối tiếp; một lượt thật đã mất gần sáu phút.
   // Chừa thời gian cho AI chậm để lease không hết và khởi phát chấm trùng.
-  return stageKey === 'main' && sourceType === 'term_test'
-    ? 1800 : LEASE_SECONDS[stageKey];
+  if (sourceType === 'term_test' && stageKey === 'main') return 1800;
+  // Writer Test cũ có thể chờ Google tới 180 giây; chừa thêm thời gian
+  // để đọc lại và lưu biên nhận trước khi hệ thống cứu việc quá hạn.
+  if (sourceType === 'term_test' && stageKey === 'deliver') return 600;
+  return LEASE_SECONDS[stageKey];
 }
 const NEXT = { precheck: ['main'], main: ['critic'], critic: ['arbiter', 'render'],
   arbiter: ['render'], render: ['deliver'], deliver: [null] };

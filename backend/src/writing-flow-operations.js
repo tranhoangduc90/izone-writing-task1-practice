@@ -22,6 +22,20 @@ function jsonObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
+// Nhận vào: đường dẫn tệp đính kèm Classroom.
+// Việc chính: loại tệp Google gốc rõ ràng không phải Docs khỏi hàng chấm Writing;
+// bản gốc vẫn nằm trong database mapping của Classroom.
+// Trả ra: true khi đây là tệp Google gốc không phải Docs/DOCX cần chấm.
+function isUnsupportedNativeGoogleFileUrl(value) {
+  try {
+    const url = new URL(String(value || ''));
+    return url.protocol === 'https:' && url.hostname === 'docs.google.com'
+      && /^\/(?:spreadsheets|presentation|forms|drawings)\//u.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
 // Nhận vào: tên bài tập Classroom.
 // Việc chính: nhận đúng các biến thể Term Test/Mid Test/Final Test nhưng không đoán từ bài Writing thường.
 // Trả ra: loại nguồn để dashboard và luồng chấm Test tách riêng mà vẫn dùng chung bảy giai đoạn.
@@ -160,7 +174,8 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
     async upsertClassroomSources({ sources }) {
       return withTransaction(pool, async client => {
         const rows = [];
-        for (const item of sources) {
+        const writingSources = sources.filter(item => !isUnsupportedNativeGoogleFileUrl(item.fileUrl));
+        for (const item of writingSources) {
           const snapshot = { submissionId: item.submissionId, courseWorkId: item.courseWorkId,
             submissionState: item.sourceStatus, alternateLink: item.classroomUrl };
           const sourceType = classifyWritingSourceType(item.displayName);
@@ -194,7 +209,7 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
         }
         // Nguồn Lark chỉ còn dùng trong giai đoạn chuyển đổi. Khi Docs ID khớp duy nhất
         // một bài Classroom, bổ sung tên homework và metadata để dashboard không còn ô trống.
-        const updatedDocumentIds = [...new Set(sources.map(item => item.documentId).filter(Boolean))];
+        const updatedDocumentIds = [...new Set(writingSources.map(item => item.documentId).filter(Boolean))];
         if (updatedDocumentIds.length) await client.query(`WITH classroom_candidate AS (
             SELECT source_id,homework_file_id,display_name,student_name,teacher_names,classroom_url,
               source_status,source_created_at,metadata,

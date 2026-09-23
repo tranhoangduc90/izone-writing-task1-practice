@@ -66,7 +66,10 @@ export function verifyClosureContent(closure, observations, nowMs = Date.now()) 
     const actual = [...actualPairs].sort((a, b) => a.essaySlot - b.essaySlot);
     if (wanted.length !== actual.length
       || wanted.some((pair, index) => pair.essaySlot !== actual[index]?.essaySlot
-        || pair.revision !== actual[index]?.revision)) {
+        || (pair.revision !== actual[index]?.revision
+          && !(pair.trccRequiredOverride === true && pair.contentSha256
+            && pair.contentSha256 === actual[index]?.contentSha256
+            && actual[index]?.trCcCheck === true)))) {
       throw new ApiError(409, 'CLOSURE_ESSAY_CHANGED',
         'Đề hoặc bài làm đã đổi sau lần tiếp nhận.');
     }
@@ -137,7 +140,7 @@ export function createWritingFlowScan({ pool }) {
         const pairs = await pool.query(`SELECT p.pair_id,p.status,
             p.source_app_id,p.source_table_id,p.source_record_id,
             p.homework_file_id,p.source_link_index,p.essay_slot,
-            p.submission_revision,
+            p.submission_revision,p.content_sha256,p.trcc_required_override,
             s.status AS delivery_status
           FROM writing_flow.pair p
           LEFT JOIN writing_flow.stage_result s
@@ -162,6 +165,10 @@ export function createWritingFlowScan({ pool }) {
         }
         links[index].expectedPairs = pairs.rows.map(pair => ({
           essaySlot: pair.essay_slot, revision: pair.submission_revision,
+          ...(pair.trcc_required_override === true ? {
+            contentSha256: pair.content_sha256,
+            trccRequiredOverride: true,
+          } : {}),
         })).sort((left, right) => left.essaySlot - right.essaySlot);
       }
       if (!expected) return { eligible: false, reason: 'NO_WRITING_PAIR',
@@ -199,7 +206,13 @@ export function createWritingFlowScan({ pool }) {
           if (row.essay_slot !== null) prior.expectedPairs.push({
             essaySlot: row.essay_slot, revision: row.submission_revision });
         }
-        needsNewTimestamp = JSON.stringify(priorLinks) !== JSON.stringify(links);
+        const currentLinks = links.map(link => ({
+          linkIndex: link.linkIndex, docId: link.docId,
+          expectedPairs: link.expectedPairs.map(pair => ({
+            essaySlot: pair.essaySlot, revision: pair.revision,
+          })),
+        }));
+        needsNewTimestamp = JSON.stringify(priorLinks) !== JSON.stringify(currentLinks);
       }
       return { eligible: true, reason: 'ALL_PAIRS_DELIVERED',
         runId: run.run_id, scannedThroughAt: run.scanned_through_at,
@@ -414,7 +427,7 @@ export function createWritingFlowScan({ pool }) {
             'NON_WRITING_DOCUMENT','FILE_TYPE_UNSUPPORTED']);
           const classExcluded = item.class_code?.toUpperCase() === 'IC2288'
             && exclusionCode === 'CLASS_EXCLUDED';
-          const classifiedClassroom = item.source_type === 'google_classroom'
+          const classifiedClassroom = ['google_classroom', 'term_test'].includes(item.source_type)
             && allowed.has(exclusionCode) && exclusionCode !== 'CLASS_EXCLUDED';
           if (!classExcluded && !classifiedClassroom) {
             throw new ApiError(409, 'SCAN_EXCLUSION_MISMATCH',
@@ -459,7 +472,7 @@ export function createWritingFlowScan({ pool }) {
               updated_at=now()
           WHERE source_app_id=$1 AND source_table_id=$2 AND source_record_id=$3
             AND homework_file_id IS NOT DISTINCT FROM $4 AND source_link_index=$5
-            AND source_type IN ('google_classroom','manual')`,
+            AND source_type IN ('google_classroom','manual','term_test')`,
         [item.source_app_id, item.source_table_id, item.source_record_id,
           item.homework_file_id, item.source_link_index, status,
           retryTechnicalIssue, sourceErrorCode, exclusionCode]);
@@ -771,9 +784,12 @@ export function createWritingFlowScan({ pool }) {
         const match = await pool.query(`SELECT pair_id FROM writing_flow.pair
           WHERE source_app_id=$1 AND source_table_id=$2 AND source_record_id=$3
             AND homework_file_id=$4 AND source_link_index=$5
-            AND essay_slot=$6 AND submission_revision=$7 AND status<>'superseded'
-          ORDER BY created_at DESC LIMIT 1`,
-        [...scope, expected.essaySlot, expected.revision]);
+            AND essay_slot=$6 AND status<>'superseded'
+            AND (submission_revision=$7 OR ($8::boolean IS TRUE
+              AND trcc_required_override IS TRUE AND content_sha256=$9::char(64)))
+          ORDER BY (submission_revision=$7) DESC,created_at DESC LIMIT 1`,
+        [...scope, expected.essaySlot, expected.revision,
+          expected.trCcCheck === true, expected.contentSha256 || null]);
         if (match.rowCount !== 1) {
           throw new ApiError(409, 'SCAN_PAIR_RECEIPT_MISSING', 'Thiếu biên nhận bài của một ô.');
         }

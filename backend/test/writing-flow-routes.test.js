@@ -170,6 +170,25 @@ test('kế hoạch từng ô phải lưu qua token nội bộ trước khi phát
   assert.equal(accepted.body.item.operationCount, 2);
 });
 
+test('API giữ dấu nội dung và cờ TR/CC trong kế hoạch biên nhận', async () => {
+  let received;
+  const contentSha256 = 'c'.repeat(64);
+  const app = makeApp(null, {}, {}, {}, { prepare: async input => {
+    received = input;
+    return { itemKey: input.itemKey, status: 'planned', operationCount: 1 };
+  } });
+  const response = await request(app).post('/api/v1/internal/writing-flow/scans/prepare')
+    .set('Authorization', `Bearer ${config.internalApiToken}`)
+    .send({ runId: reviewId, itemKey: 'a'.repeat(64), status: 'accepted',
+      detectedSlotCount: 1, receiptRequest: { appId: 'app-demo',
+        tableId: 'table-demo', recordId: 'record-demo', docId: 'doc-demo',
+        linkIndex: 1, expectedPairs: [{ essaySlot: 1, revision: 'b'.repeat(64),
+          contentSha256, trCcCheck: true }], expectedIssues: [] } });
+  assert.equal(response.status, 200);
+  assert.equal(received.receiptRequest.expectedPairs[0].contentSha256, contentSha256);
+  assert.equal(received.receiptRequest.expectedPairs[0].trCcCheck, true);
+});
+
 test('lượt quét cần token và danh sách đã đọc hết trang', async () => {
   const url = '/api/v1/internal/writing-flow/scans/begin';
   const body = { requestKey: requestId, appId: 'app-demo', tableId: 'table-demo',

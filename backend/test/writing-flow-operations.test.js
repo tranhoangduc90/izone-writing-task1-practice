@@ -145,6 +145,21 @@ test('đồng bộ Classroom bổ sung tên homework cho nguồn chuyển tiếp
   assert.match(backfill.sql, /legacy\.source_type='lark_homework'/u);
 });
 
+test('Google Sheets và Slides của bài Test chỉ ở mapping và không vào hàng chấm Writing', async () => {
+  const pool = poolWith(async sql => {
+    throw new Error(`WRITING_SHOULD_NOT_INSERT_SHEET:${sql}`);
+  });
+  const common = {
+    courseId: 'course', submissionId: 'submission', documentId: 'sheet-id', linkIndex: 1,
+    displayName: 'Term Test 2', classCode: 'IC2300', sourceUpdatedAt: '2026-09-20T00:00:00Z',
+  };
+  const result = await createWritingFlowOperations({ pool }).upsertClassroomSources({ sources: [
+    { ...common, fileUrl: 'https://docs.google.com/spreadsheets/d/sheet-id/edit' },
+    { ...common, fileUrl: 'https://docs.google.com/presentation/d/slide-id/edit' },
+  ] });
+  assert.deepEqual(result, []);
+});
+
 test('lịch sử chỉ trả bản mới nhất mỗi ô và giải mã các field dashboard', async () => {
   const hexKey = '22'.repeat(32);
   const snapshot = { homeworkTitle: 'Writing homework 12',

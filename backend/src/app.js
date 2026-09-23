@@ -146,7 +146,9 @@ const writingScanClosureComplete=writingScanClosure.extend({
   observedAtMs:z.number().int().positive().safe(),
   receiptRequest:z.object({expectedPairs:z.array(z.object({
    essaySlot:z.number().int().min(1).max(4),
-   revision:z.string().regex(/^[0-9a-f]{64}$/)
+   revision:z.string().regex(/^[0-9a-f]{64}$/),
+   contentSha256:z.string().regex(/^[0-9a-f]{64}$/).optional(),
+   trCcCheck:z.boolean().optional()
   })).max(4)}).optional()
  })).max(100)
 });
@@ -155,7 +157,9 @@ const writingScanReceipts=z.object({
  recordId:z.string().trim().min(1).max(120),docId:z.string().trim().min(1).max(160).nullable(),
  linkIndex:z.number().int().min(1).max(100),
  expectedPairs:z.array(z.object({essaySlot:z.number().int().min(1).max(4),
-   revision:z.string().regex(/^[0-9a-f]{64}$/)})).max(4),
+   revision:z.string().regex(/^[0-9a-f]{64}$/),
+   contentSha256:z.string().regex(/^[0-9a-f]{64}$/).optional(),
+   trCcCheck:z.boolean().optional()})).max(4),
  expectedIssues:z.array(z.object({essaySlot:z.number().int().min(1).max(4).nullable(),
    reasonCode:z.string().trim().min(1).max(100)})).max(4)
 }).superRefine((value,context)=>{

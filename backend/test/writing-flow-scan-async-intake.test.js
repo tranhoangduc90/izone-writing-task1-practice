@@ -11,6 +11,28 @@ const request = {
   expectedIssues: [{ essaySlot: 2, reasonCode: 'SOURCE_MISSING' }],
 };
 
+test('biên nhận nhận bài đã cứu TR/CC theo nội dung mà không tạo phiên bản chấm mới', async () => {
+  const contentSha256 = 'c'.repeat(64);
+  const pool = { async query(sql, args) {
+    assert.match(sql, /FROM writing_flow\.pair/u);
+    if (sql.includes('trcc_required_override') && args[7] === true
+      && args[8] === contentSha256) {
+      return { rowCount: 1, rows: [{ pair_id: 'existing-pair' }] };
+    }
+    return { rowCount: 0, rows: [] };
+  } };
+  const service = createWritingFlowScan({ pool });
+  const input = { ...request, expectedIssues: [], expectedPairs: [{
+    essaySlot: 1, revision: 'b'.repeat(64), contentSha256, trCcCheck: true,
+  }] };
+  assert.deepEqual(await service.receipts(input), {
+    pairIds: ['existing-pair'], issueKeys: [],
+  });
+  await assert.rejects(service.receipts({ ...input, expectedPairs: [{
+    ...input.expectedPairs[0], trCcCheck: false,
+  }] }), { code: 'SCAN_PAIR_RECEIPT_MISSING' });
+});
+
 test('lỗi đọc kỹ thuật được thử tối đa ba lượt còn lỗi nguồn thật dừng ngay', () => {
   assert.equal(shouldRetrySourceIssue('issue', ['FETCH_FAILED']), true);
   assert.equal(shouldRetrySourceIssue('issue', ['SOURCE_METADATA_MISSING']), true);
@@ -47,19 +69,21 @@ test('biên nhận FETCH_FAILED đưa nguồn về hàng chờ khi chưa đủ b
     status: 'issue', issueKeys: [issueKey], detectedSlotCount: null });
   assert.match(sourceUpdate.sql, /dispatch_count<3/u);
   assert.match(sourceUpdate.sql, /interval '30 seconds'/u);
+  assert.match(sourceUpdate.sql, /'google_classroom','manual','term_test'/u);
   assert.equal(sourceUpdate.args[6], true);
   assert.equal(sourceUpdate.args[7], 'FETCH_FAILED');
 });
 
-test('chỉ nguồn Classroom được loại với lý do đã kiểm và lưu dấu vết phân loại', async () => {
+test('nguồn Homework và Test từ Classroom được loại với lý do đã kiểm', async () => {
   let sourceUpdate = null;
+  let sourceType = 'google_classroom';
   const client = { async query(sql, args) {
     if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return {};
     if (sql.includes('SELECT i.*,r.status AS run_status')) return { rowCount: 1, rows: [{
       run_status: 'open', status: 'pending', source_app_id: 'google_classroom',
       source_table_id: 'course-demo', source_record_id: 'submission-demo',
       homework_file_id: 'doc-demo', source_link_index: 1, class_code: 'IC2300',
-      source_type: 'google_classroom',
+      source_type: sourceType,
     }] };
     if (sql.includes('UPDATE writing_flow.scan_item')) return { rowCount: 1 };
     if (sql.includes('UPDATE writing_flow.source_record')) {
@@ -75,6 +99,9 @@ test('chỉ nguồn Classroom được loại với lý do đã kiểm và lưu 
   assert.match(sourceUpdate.sql, /writingFilter/u);
   assert.equal(sourceUpdate.args[8], 'NON_WRITING_DOCUMENT');
   assert.match(sourceUpdate.sql, /last_error_code=CASE[\s\S]*WHEN \$6='excluded' THEN \$9/u);
+  sourceType = 'term_test';
+  await service.acknowledge({ runId: 'run-demo', itemKey: key, status: 'excluded',
+    exclusionCode: 'FILE_TYPE_UNSUPPORTED' });
   await assert.rejects(service.acknowledge({ runId: 'run-demo', itemKey: key,
     status: 'excluded', exclusionCode: 'UNSAFE_REASON' }), { code: 'SCAN_EXCLUSION_MISMATCH' });
 });

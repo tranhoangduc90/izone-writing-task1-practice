@@ -131,3 +131,24 @@ test('API chỉ nhận bằng chứng đọc lại đủ file và đúng dấu v
     receiptRequest: { expectedPairs: [] } }]),
   error => error.code === 'CLOSURE_CONTENT_PROOF_MISMATCH');
 });
+
+test('hồ sơ cứu TR/CC được chốt khi nội dung bài không đổi dù mã phiên bản khác', () => {
+  const contentSha256 = 'c'.repeat(64);
+  const expected = { eligible: true, expectedPairCount: 1,
+    links: [{ linkIndex: 1, docId: 'doc-one', expectedPairs: [
+      { essaySlot: 1, revision: 'a'.repeat(64), contentSha256,
+        trccRequiredOverride: true },
+    ] }] };
+  const actualPair = { essaySlot: 1, revision: 'b'.repeat(64),
+    contentSha256, trCcCheck: true };
+  const observed = [{ linkIndex: 1, docId: 'doc-one', status: 'accepted',
+    observedAtMs: Date.now(), receiptRequest: { expectedPairs: [actualPair] } }];
+  assert.deepEqual(verifyClosureContent(expected, observed),
+    { verifiedLinkCount: 1, verifiedPairCount: 1 });
+  assert.throws(() => verifyClosureContent(expected, [{ ...observed[0],
+    receiptRequest: { expectedPairs: [{ ...actualPair, contentSha256: 'd'.repeat(64) }] },
+  }]), error => error.code === 'CLOSURE_ESSAY_CHANGED');
+  assert.throws(() => verifyClosureContent(expected, [{ ...observed[0],
+    receiptRequest: { expectedPairs: [{ ...actualPair, trCcCheck: false }] },
+  }]), error => error.code === 'CLOSURE_ESSAY_CHANGED');
+});

@@ -10,6 +10,28 @@ function fakeService(){return {getRoster:async()=>({activity:{slug:'task-1',titl
 const allowedClassAccess={listClasses:async()=>[{classCode:'CS.TEST'}],assertActivityClass:async()=>{},assertSession:async()=>{},assertAttempt:async()=>{},assertProvisionalStudent:async()=>{},assertCommentThread:async()=>{}};
 function app(service=fakeService(),adminAuth,teacherCommentService=null,lmsResultService=null,teacherClassAccess=allowedClassAccess){return createApp({config,pool:{query:async()=>({rows:[]})},service,adminAuth,teacherCommentService,lmsResultService,teacherClassAccess});}
 function appWithProvisional(service=fakeService(),adminAuth,provisionalOverrides={},teacherClassAccess=allowedClassAccess){const provisionalService={createStudent:async data=>({studentRef:uuid,displayName:data.displayName,provisional:true,requiresAccessCode:true}),listPending:async()=>[],searchOfficialStudents:async()=>[{studentRef:uuid,displayName:'Học viên chính thức',classNames:['Lớp khác']}],resetCode:async()=>({studentRef:uuid,accessCode:'2468'}),reconcile:async()=>({reconciliationStatus:'matched'}),deleteStudent:async()=>({reconciliationStatus:'deleted'}),...provisionalOverrides};return createApp({config,pool:{query:async()=>({rows:[]})},service,provisionalService,adminAuth,teacherClassAccess});}
+test('API nguồn Classroom giữ mã người nộp Google và từ chối mã rỗng', async () => {
+  const accepted = [];
+  const writingFlowService = { upsertClassroomSources: async input => {
+    accepted.push(input.sources[0].googleUserId);
+    return [{ source_id: uuid }];
+  } };
+  const target = createApp({ config, pool: { query: async () => ({ rows: [] }) },
+    service: fakeService(), writingFlowService, teacherClassAccess: allowedClassAccess });
+  const source = { courseId: '123', submissionId: 'submission-a', courseWorkId: 'work-1',
+    documentId: 'A'.repeat(25), linkIndex: 1, classCode: 'IC2300',
+    fileUrl: `https://docs.google.com/document/d/${'A'.repeat(25)}/edit`,
+    sourceUpdatedAt: '2026-09-24T00:00:00Z' };
+  const path = '/api/v1/internal/writing-flow/classroom-sources/upsert';
+  const valid = await request(target).post(path).set('Authorization', `Bearer ${config.internalApiToken}`)
+    .send({ sources: [{ ...source, googleUserId: 'google-user-a' }] });
+  assert.equal(valid.status, 200);
+  assert.deepEqual(accepted, ['google-user-a']);
+  const invalid = await request(target).post(path).set('Authorization', `Bearer ${config.internalApiToken}`)
+    .send({ sources: [{ ...source, googleUserId: '   ' }] });
+  assert.equal(invalid.status, 400);
+  assert.deepEqual(accepted, ['google-user-a']);
+});
 test('CORS allows credentialed PUT/DELETE, CSRF header and exposes ETag plus Retry-After',async()=>{const r=await request(app()).options('/api/v1/sessions/x').set('Origin','https://app.example');assert.equal(r.status,204);assert.match(r.headers['access-control-allow-methods'],/PUT/);assert.match(r.headers['access-control-allow-methods'],/DELETE/);assert.match(r.headers['access-control-allow-headers'],/If-None-Match/);assert.match(r.headers['access-control-allow-headers'],/x-izone-csrf/i);assert.equal(r.headers['access-control-allow-credentials'],'true');assert.match(r.headers['access-control-expose-headers'],/ETag/);assert.match(r.headers['access-control-expose-headers'],/Retry-After/);});
 test('write rate limit isolates students sharing one IP and keeps a guarded fallback',()=>{
   const first={ip:'203.0.113.10',params:{sessionRef:uuid},body:{}};

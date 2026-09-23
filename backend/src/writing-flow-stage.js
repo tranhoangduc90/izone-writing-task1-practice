@@ -149,6 +149,11 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
           acknowledged_at=now() WHERE handoff_id=$1`, [handoffId]);
         return { status: 'already_finished', pairId, stageKey };
       }
+      // Tạm giữ riêng Test trước lời gọi AI cho tới khi bộ chấm chuyên môn cũ
+      // được nối lại và kiểm chứng. Giữ nguyên bàn giao để tiếp tục đúng bước.
+      if (pair.source_type === 'term_test' && stageKey === 'main') {
+        return { status: 'paused_test_grading', pairId, stageKey };
+      }
       if (handoff.from_stage === 'review') {
         const reviewResult = await client.query(`
           SELECT review_id, cycle_no, status, retry_command_key

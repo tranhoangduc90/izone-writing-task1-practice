@@ -10,6 +10,7 @@ export const writingFlowWorkStatusSql = `SELECT
   EXISTS (SELECT 1 FROM writing_flow.handoff h
     JOIN writing_flow.pair p ON p.pair_id=h.pair_id
     WHERE p.status<>'superseded'
+      AND NOT (p.source_type='term_test' AND h.to_stage='main')
       AND ((h.status='pending' AND h.next_send_at<=now())
         OR (h.status='sent' AND h.next_send_at<=now()
           AND h.last_sent_at<=now()-interval '6 hours'))
@@ -27,7 +28,9 @@ export const writingFlowWorkStatusSql = `SELECT
         AND s.next_dispatch_at<=now()) AS source_due,
   LEAST(
     (SELECT min(h.next_send_at) FROM writing_flow.handoff h
-      WHERE h.status IN ('pending','sent')),
+      JOIN writing_flow.pair p ON p.pair_id=h.pair_id
+      WHERE h.status IN ('pending','sent')
+        AND NOT (p.source_type='term_test' AND h.to_stage='main')),
     (SELECT min(s.lease_expires_at) FROM writing_flow.stage_result s
       WHERE s.status='running'),
     (SELECT min(i.next_send_at) FROM writing_flow.scan_item i

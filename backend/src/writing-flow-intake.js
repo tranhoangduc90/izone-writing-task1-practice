@@ -157,6 +157,13 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
       }
       const receipts = [];
       for (const pair of prepared) {
+        // Nhận vào: đúng tài liệu, ô bài và phiên bản Test đã đọc.
+        // Việc chính: khóa chung giữa các bài tập Classroom để hai nguồn không cùng gọi AI.
+        // Trả ra: chỉ một nguồn được tiếp nhận; nguồn trùng báo lỗi để người vận hành kiểm.
+        if (sourceType === 'term_test') {
+          await client.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)',
+            [JSON.stringify(['term_test', input.docId, pair.essaySlot, pair.revision])]);
+        }
         const scope = [input.appId, input.tableId, input.recordId,
           input.docId, input.linkIndex, pair.essaySlot];
         await client.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', [JSON.stringify(scope)]);
@@ -229,6 +236,20 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
           receipts.push({ essaySlot: pair.essaySlot, pairId: newest.pair_id,
             status: newest.status === 'superseded' ? 'stale_read' : 'existing' });
           continue;
+        }
+        if (sourceType === 'term_test') {
+          const otherSource = await client.query(`SELECT 1 AS duplicate_test_pair
+            FROM writing_flow.pair
+            WHERE source_type='term_test' AND homework_file_id=$1
+              AND essay_slot=$2 AND submission_revision=$3
+              AND NOT (source_app_id=$4 AND source_table_id=$5
+                AND source_record_id=$6 AND source_link_index=$7)
+            LIMIT 1`, [input.docId, pair.essaySlot, pair.revision,
+            input.appId, input.tableId, input.recordId, input.linkIndex]);
+          if (otherSource.rowCount > 0) {
+            throw new ApiError(409, 'TEST_DOCUMENT_PAIR_ALREADY_REGISTERED',
+              'Cùng bài Test đã được tiếp nhận từ một bài tập khác; cần kiểm tra nguồn.');
+          }
         }
         await client.query(`
           UPDATE writing_flow.pair SET status = 'superseded', updated_at = now()

@@ -24,6 +24,15 @@ function fakePool() {
           || b.lark_modified_ms - a.lark_modified_ms);
         return { rowCount: matching.length ? 1 : 0, rows: matching.slice(0, 1) };
       }
+      if (sql.includes('SELECT 1 AS duplicate_test_pair')
+        && sql.includes("source_type='term_test'")) {
+        const matching = pairs.filter(row => row.source_type === 'term_test'
+          && row.homework_file_id === values[0] && row.essay_slot === values[1]
+          && row.submission_revision === values[2]
+          && (row.source_app_id !== values[3] || row.source_table_id !== values[4]
+            || row.source_record_id !== values[5] || row.source_link_index !== values[6]));
+        return { rowCount: matching.length, rows: matching.slice(0, 1) };
+      }
       if (sql.includes('UPDATE writing_flow.pair SET status')) {
         for (const row of pairs) {
           if (row.source_app_id === values[0] && row.source_table_id === values[1]
@@ -46,7 +55,7 @@ function fakePool() {
           source_record_id: values[2], homework_file_id: values[3],
           source_link_index: values[4], essay_slot: values[5], submission_revision: values[6],
           source_modified_at: values[7], lark_modified_ms: values[8],
-          content_sha256: values[9], status: 'received' });
+          content_sha256: values[9], source_type: values[14], status: 'received' });
         return { rows: [{ pair_id }], rowCount: 1 };
       }
       if (sql.includes('INSERT INTO writing_flow.handoff')) {
@@ -290,4 +299,56 @@ test('quét lại đúng bài Test đã có kết quả không xóa trạng thá
   assert.equal(testPairs[0].status, 'delivered');
   assert.equal(testPairs[0].historicalEvidence, true);
   assert.equal(writes.filter(row => row.sql.includes('INSERT INTO writing_flow.handoff')).length, 0);
+});
+
+// Nhận vào: cùng tài liệu Test xuất hiện ở hai bài tập Classroom khác nhau.
+// Việc chính: lần nhận sau phải dừng trước AI, trong khi quét lại cùng nguồn vẫn idempotent.
+// Trả ra: một cặp và một bàn giao; khi lỗi, nguồn thứ hai được giữ để kiểm tra.
+test('cùng Docs, ô và phiên bản Test ở hai nguồn không được chấm lần hai', async () => {
+  const { pool, pairs, writes } = fakePool();
+  const intake = createWritingFlowIntake({ pool, encryptionKey: '11'.repeat(32) });
+  const source = input();
+  source.sourceType = 'term_test';
+  source.appId = 'google_classroom';
+  source.sourceMeta = { teacherNames: [], displayName: 'Term Test 1' };
+  delete source.larkMeta;
+  delete source.larkModifiedMs;
+  source.expectedCount = 1;
+  source.pairs = [{ essaySlot: 1, taskType: 'task_2', topic: 'Đề Test', image: '',
+    essay: 'Bài giả Test', trCcCheck: true, alreadyGraded: false }];
+  const first = await intake(source);
+  assert.equal(first.receipts[0].status, 'received');
+  const sameSource = await intake(source);
+  assert.equal(sameSource.receipts[0].status, 'existing');
+  const otherAssignment = { ...source, recordId: 'record-other' };
+  await assert.rejects(intake(otherAssignment),
+    error => error.code === 'TEST_DOCUMENT_PAIR_ALREADY_REGISTERED');
+  assert.equal(pairs.length, 1);
+  assert.equal(writes.filter(row => row.sql.includes('INSERT INTO writing_flow.handoff')).length, 1);
+});
+
+// Nhận vào: cùng Docs nhưng bài viết đã có phiên bản mới ở nguồn khác.
+// Việc chính: khóa chống chấm trùng không được chặn một bài thực sự đã đổi.
+// Trả ra: hai cặp và hai bàn giao độc lập; lỗi vẫn xuất hiện ở đúng nguồn.
+test('cùng Docs nhưng phiên bản Test mới được tiếp nhận riêng', async () => {
+  const { pool, pairs, writes } = fakePool();
+  const intake = createWritingFlowIntake({ pool, encryptionKey: '11'.repeat(32) });
+  const source = input();
+  source.sourceType = 'term_test';
+  source.appId = 'google_classroom';
+  source.sourceMeta = { teacherNames: [], displayName: 'Term Test 1' };
+  delete source.larkMeta;
+  delete source.larkModifiedMs;
+  source.expectedCount = 1;
+  source.pairs = [{ essaySlot: 1, taskType: 'task_2', topic: 'Đề Test', image: '',
+    essay: 'Bài giả Test', trCcCheck: true, alreadyGraded: false }];
+  const first = await intake(source);
+  const revised = { ...source, recordId: 'record-other',
+    sourceModifiedAt: '2026-09-17T09:00:00.000Z',
+    pairs: [{ ...source.pairs[0], essay: 'Bài giả Test đã sửa nội dung' }] };
+  const second = await intake(revised);
+  assert.equal(second.receipts[0].status, 'received');
+  assert.notEqual(first.receipts[0].revision, second.receipts[0].revision);
+  assert.equal(pairs.length, 2);
+  assert.equal(writes.filter(row => row.sql.includes('INSERT INTO writing_flow.handoff')).length, 2);
 });

@@ -493,10 +493,16 @@ test('bàn giao và cứu bước quá hạn chỉ mở bằng token nội bộ'
 
 test('ghi lần gọi AI chỉ nhận lượt chấm hợp lệ qua token nội bộ', async () => {
   let received;
-  const app = makeApp(null, {}, {}, { start: async input => {
-    received = input;
-    return { status: 'sent', operationKey: 'writing:demo:0' };
-  } });
+  const app = makeApp(null, {}, {}, {
+    start: async input => {
+      received = input;
+      return { status: 'sent', operationKey: 'writing:demo:0' };
+    },
+    finish: async input => {
+      received = input;
+      return { status: input.outcome, operationKey: input.operationKey };
+    },
+  });
   const url = '/api/v1/internal/writing-flow/ai-calls/start';
   const body = { pairId: reviewId, revision: 'a'.repeat(64), stageKey: 'main',
     attemptId: requestId, batchIndex: 0, prompt: 'Đề và bài giả lập' };
@@ -506,6 +512,26 @@ test('ghi lần gọi AI chỉ nhận lượt chấm hợp lệ qua token nội 
   assert.equal(accepted.status, 200);
   assert.equal(received.pairId, reviewId);
   assert.equal(received.prompt, 'Đề và bài giả lập');
+  const repair = await request(app).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`)
+    .send({ ...body, batchIndex: 1_000_000 });
+  assert.equal(repair.status, 200);
+  assert.equal(received.batchIndex, 1_000_000);
+  const repairFinish = await request(app)
+    .post('/api/v1/internal/writing-flow/ai-calls/finish')
+    .set('Authorization', `Bearer ${config.internalApiToken}`)
+    .send({ ...body, batchIndex: 1_000_000,
+      operationKey: 'writing:demo:1000000', outcome: 'failed',
+      errorCode: 'AI_JSON_INVALID' });
+  assert.equal(repairFinish.status, 200);
+  assert.equal(received.batchIndex, 1_000_000);
+  assert.equal(received.outcome, 'failed');
+  assert.equal((await request(app).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`)
+    .send({ ...body, batchIndex: 101 })).status, 400);
+  assert.equal((await request(app).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`)
+    .send({ ...body, batchIndex: 1_000_101 })).status, 400);
   assert.equal((await request(app).post(url)
     .set('Authorization', `Bearer ${config.internalApiToken}`)
     .send({ ...body, stageKey: 'deliver' })).status, 400);

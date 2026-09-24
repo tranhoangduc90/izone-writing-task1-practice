@@ -198,8 +198,14 @@ const writingTrccRepairFail=z.object({pairId:uuid,
  revision:z.string().regex(/^[0-9a-f]{64}$/),repairAttemptId:uuid,
  errorCode:z.string().trim().min(1).max(100),unknown:z.boolean().default(false)});
 const writingAiStage=z.enum(['precheck','main','critic','arbiter']);
+// Nhóm chấm thường dùng 0–100; lượt sửa JSON dùng 1.000.000 + chỉ số nhóm gốc.
+// Giữ hai dải tách biệt để mã lỗi hoặc giá trị ngoài phạm vi không lọt vào database.
+const writingAiBatchIndex=z.union([
+ z.number().int().min(0).max(100),
+ z.number().int().min(1_000_000).max(1_000_100)
+]);
 const writingAiBase={pairId:uuid,revision:z.string().regex(/^[0-9a-f]{64}$/),
- stageKey:writingAiStage,attemptId:uuid,batchIndex:z.number().int().min(0).max(100)};
+ stageKey:writingAiStage,attemptId:uuid,batchIndex:writingAiBatchIndex};
 const writingAiStart=z.object({...writingAiBase,prompt:z.string().min(1).max(100000)});
 const writingAiFinish=z.object({...writingAiBase,operationKey:z.string().trim().min(1).max(160),
  outcome:z.enum(['succeeded','failed','unknown']),gatewayOperationId:uuid.nullable().optional(),

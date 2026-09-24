@@ -19,15 +19,16 @@ const NEXT = { precheck: ['main'], main: ['critic'], critic: ['arbiter', 'render
   arbiter: ['render'], render: ['deliver'], deliver: [null] };
 
 // Google có thể yêu cầu giảm nhịp khi nhiều homework được ghi cùng lúc.
-// Lỗi quota được giữ trong hàng đợi 90 giây rồi scheduler phát lại; lỗi khác vẫn
-// thử ngay như trước và giữ mốc cứu hộ sáu giờ nếu bàn giao trực tiếp bị mất.
+// Lỗi quota Google khi ghi tài liệu chờ 90 giây; revision đổi chờ 30 giây.
+// Lỗi khác được backend giao lại ngay. Sau khi bỏ node gọi trực tiếp, hẹn sáu giờ
+// ở đây sẽ khiến một bài chờ sáu giờ mới có lần chấm thứ hai.
 export function stageRetryPolicy(stageKey, errorCode) {
   const googleRateLimited = stageKey === 'deliver' && errorCode === 'GOOGLE_API_RATE_LIMIT';
   const googleRevisionChanged = stageKey === 'deliver'
     && errorCode === 'GOOGLE_DOC_REVISION_CHANGED';
   return {
     retryImmediately: !(googleRateLimited || googleRevisionChanged),
-    handoffDelaySeconds: googleRateLimited ? 90 : googleRevisionChanged ? 30 : 6 * 60 * 60,
+    handoffDelaySeconds: googleRateLimited ? 90 : googleRevisionChanged ? 30 : 0,
   };
 }
 

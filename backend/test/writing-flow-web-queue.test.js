@@ -36,13 +36,16 @@ async function fixture() {
     );
     INSERT INTO assessment_k56.term_test_roster VALUES
       ('term-test-1-k56',1252,1001,
-       '11111111-1111-4111-8111-111111111111','Học viên thử',true);
+       '11111111-1111-4111-8111-111111111111','Học viên thử',true),
+      ('term-test-1-k56',1253,1002,
+       '22222222-2222-4222-8222-222222222222','Học viên thử',true);
     GRANT USAGE ON SCHEMA writing_flow TO writing_practice_api;
   `);
   for (const url of migrationUrls) await db.exec(await readFile(url, 'utf8'));
   await db.exec(`INSERT INTO writing_flow.web_substitute_access
     (test_slug,cohort,erp_course_class_id,rubric_version,enabled)
-    VALUES ('substitute-test-2-k56',56,1252,'pizza-v1',true);
+    VALUES ('substitute-test-2-k56',56,1252,'pizza-v1',true),
+      ('substitute-test-2-k56',56,1253,'pizza-v1',true);
     SET ROLE writing_practice_api;`);
   const pool = {
     connect: async () => ({ query: (...args) => db.query(...args), release() {} }),
@@ -298,6 +301,47 @@ test('hàng chờ web lấy một việc và callback đúng identity một lầ
     const count = await db.query(`SELECT count(*)::int AS n FROM
       writing_flow.web_substitute_submission WHERE status='completed'`);
     assert.equal(count.rows[0].n, 1);
+  } finally {
+    await db.close();
+  }
+});
+
+// Dữ liệu vào: hai lớp cùng có một tên hiển thị và hai bài giả đã được lưu.
+// Việc chính: lấy hai phiếu, trả kết quả đảo thứ tự và thử tráo mã lớp.
+// Kết quả: mỗi lớp chỉ thấy bài/điểm của mình; Portal thí điểm không nhận lớp thứ hai.
+// Khi lỗi: callback sai lớp phải bị từ chối trước khi lưu điểm.
+test('hai lớp cùng tên được chấm xen kẽ mà không ghép nhầm bài hoặc Portal', async () => {
+  const { db, intake, queue } = await fixture();
+  const second = { ...identity, classId: 1253 };
+  try {
+    const firstAttempt = await intake.openAttempt(identity);
+    const secondAttempt = await intake.openAttempt(second);
+    const firstReceipt = await intake.submitWriting({ ...identity,
+      attemptId: firstAttempt.attemptId, essay: 'First class synthetic answer.' });
+    const secondReceipt = await intake.submitWriting({ ...second,
+      attemptId: secondAttempt.attemptId, essay: 'Second class synthetic answer.' });
+    const jobs = await queue.claimDue({ limit: 2 });
+    assert.equal(jobs.length, 2);
+    const byClass = new Map(jobs.map(job => [job.classId, job]));
+    assert.deepEqual(new Set(byClass.keys()), new Set([1252, 1253]));
+    assert.equal(byClass.get(1252).submissionId, firstReceipt.submissionId);
+    assert.equal(byClass.get(1253).submissionId, secondReceipt.submissionId);
+    await assert.rejects(queue.completeWork({ ...byClass.get(1253),
+      classId: 1252, result: task1Result(7) }),
+    error => error.code === 'WEB_WORK_IDENTITY_MISMATCH');
+    await queue.completeWork({ ...byClass.get(1253), result: task1Result(7) });
+    await queue.completeWork({ ...byClass.get(1252), result: task1Result(6) });
+    const firstStatus = await intake.getStatusByName(identity);
+    const secondStatus = await intake.getStatusByName(second);
+    assert.equal(firstStatus.submissionId, firstReceipt.submissionId);
+    assert.equal(firstStatus.taskScore, 6);
+    assert.equal(secondStatus.submissionId, secondReceipt.submissionId);
+    assert.equal(secondStatus.taskScore, 7);
+    const outbox = await db.query(`SELECT s.submission_id,a.erp_course_class_id
+      FROM writing_flow.web_substitute_portal_outbox AS o
+      JOIN writing_flow.web_substitute_submission AS s USING (submission_id)
+      JOIN writing_flow.web_substitute_attempt AS a USING (attempt_id)`);
+    assert.deepEqual(outbox.rows.map(row => Number(row.erp_course_class_id)), [1252]);
   } finally {
     await db.close();
   }

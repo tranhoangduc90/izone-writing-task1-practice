@@ -3,6 +3,7 @@ import { withTransaction } from './db.js';
 import { ApiError } from './service.js';
 import { keyFromHex, open, seal, sha256 } from './writing-flow-crypto.js';
 import { storeWritingTestDelivery, storeWritingTestMainResult } from './writing-flow-test.js';
+import { requireCompletedTestComponents } from './writing-flow-test-components.js';
 
 const STAGES = ['precheck', 'main', 'critic', 'arbiter', 'render', 'deliver'];
 export const LEASE_SECONDS = { precheck: 600, main: 600, critic: 600, arbiter: 600, render: 300, deliver: 180 };
@@ -367,7 +368,7 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
         throw new ApiError(409, 'PAIR_REVISION_CHANGED', 'Bài đã có phiên bản khác.');
       }
       const stageResult = await client.query(`
-        SELECT status,cycle_no,selected_attempt_no
+        SELECT status,cycle_no,selected_attempt_no,input_sha256
           FROM writing_flow.stage_result
          WHERE pair_id=$1 AND stage_key=$2 FOR UPDATE`, [pairId, stageKey]);
       const attemptResult = await client.query(`
@@ -411,6 +412,10 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
         verifyWritingDeliveryResult(result, savedResult, pair, pair.source_type);
       }
       if (pair.source_type === 'term_test' && stageKey === 'main') {
+        // Khi bộ chấm từng thành phần đã bắt đầu, không cho bản tổng hợp đi tắt
+        // nếu thiếu một khía cạnh hoặc một trong bốn tiêu chí.
+        await requireCompletedTestComponents(client, {
+          pairId, inputSha256: stage.input_sha256 });
         const linked = await client.query(`SELECT task_number FROM writing_flow.test_pair
           WHERE pair_id=$1 FOR UPDATE`, [pairId]);
         if (linked.rowCount !== 1) {

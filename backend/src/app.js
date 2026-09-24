@@ -185,6 +185,16 @@ const writingComplete=z.object({pairId:uuid,revision:z.string().regex(/^[0-9a-f]
 const writingFail=z.object({pairId:uuid,revision:z.string().regex(/^[0-9a-f]{64}$/),
  stageKey:writingStage,attemptId:uuid,errorCode:z.string().trim().min(1).max(100),
  unknown:z.boolean().default(false)});
+const writingTestComponentCode=z.string().regex(/^[a-z][a-z0-9_]{1,63}$/);
+const writingTestComponentBase=z.object({pairId:uuid,
+ revision:z.string().regex(/^[0-9a-f]{64}$/),stageAttemptId:uuid});
+const writingTestComponentStart=writingTestComponentBase.extend({phase:z.enum(['detail','criterion'])});
+const writingTestComponentCallback=writingTestComponentBase.extend({
+ componentCode:writingTestComponentCode,inputSha256:z.string().regex(/^[0-9a-f]{64}$/),runKey:uuid});
+const writingTestComponentComplete=writingTestComponentCallback.extend({
+ result:z.record(z.string(),z.unknown())});
+const writingTestComponentFail=writingTestComponentCallback.extend({
+ errorCode:z.string().regex(/^[A-Z][A-Z0-9_]{2,99}$/)});
 const writingTrccRepairClaim=z.object({pairId:uuid,
  revision:z.string().regex(/^[0-9a-f]{64}$/),handoffId:uuid,
  executionId:z.string().trim().min(1).max(80)});
@@ -297,7 +307,7 @@ export function writingWriteRateLimit(req) {
 function cors(config){return(req,res,next)=>{const origin=req.get('origin');if(origin&&!config.allowedOrigins.has(origin))return res.status(403).json({ok:false,error:'ORIGIN_NOT_ALLOWED'});if(origin){res.set('Access-Control-Allow-Origin',origin);res.set('Vary','Origin');}res.set('Access-Control-Allow-Credentials','true');res.set('Access-Control-Allow-Methods','GET, POST, PUT, DELETE, OPTIONS');res.set('Access-Control-Allow-Headers','Authorization, Content-Type, If-None-Match, If-Match, x-izone-csrf');res.set('Access-Control-Expose-Headers','ETag, Retry-After, X-Writing-Request-Id');res.set('Cache-Control','no-store');return req.method==='OPTIONS'?res.status(204).end():next();};}
 function csvCell(value){const text=String(value??'');return /[",\r\n]/.test(text)?`"${text.replaceAll('"','""')}"`:text;}
 
-export function createApp({config,pool,service,lessonService=service,provisionalService=null,lmsResultService=null,teacherCommentService=null,teacherClassAccess=null,writingFlowService=null,writingFlowStage=null,writingFlowHandoff=null,writingFlowAiCall=null,writingFlowScan=null,writingFlowTrccRepair=null,teacherAuth=null,adminAuth=(_q,r)=>r.status(503).json({ok:false,error:'ADMIN_AUTH_NOT_CONFIGURED'})}){
+export function createApp({config,pool,service,lessonService=service,provisionalService=null,lmsResultService=null,teacherCommentService=null,teacherClassAccess=null,writingFlowService=null,writingFlowStage=null,writingFlowHandoff=null,writingFlowAiCall=null,writingFlowScan=null,writingFlowTrccRepair=null,writingTestComponents=null,teacherAuth=null,adminAuth=(_q,r)=>r.status(503).json({ok:false,error:'ADMIN_AUTH_NOT_CONFIGURED'})}){
  const app=express();app.disable('x-powered-by');app.set('trust proxy',config.trustProxyHops);
  // Ghi mã truy vết trước khi CORS hoặc giới hạn tốc độ chặn yêu cầu Writing.
  app.use('/api/v1/internal/writing-flow',writingFlowRequestLog());
@@ -312,6 +322,7 @@ export function createApp({config,pool,service,lessonService=service,provisional
  const writingAiReady=(q,r,next)=>writingFlowAiCall?next():r.status(503).json({ok:false,error:'WRITING_AI_CALL_NOT_READY'});
  const writingScanReady=(q,r,next)=>writingFlowScan?next():r.status(503).json({ok:false,error:'WRITING_SCAN_NOT_READY'});
  const writingTrccRepairReady=(q,r,next)=>writingFlowTrccRepair?next():r.status(503).json({ok:false,error:'WRITING_TRCC_REPAIR_NOT_READY'});
+ const writingTestComponentsReady=(q,r,next)=>writingTestComponents?next():r.status(503).json({ok:false,error:'WRITING_TEST_COMPONENTS_NOT_READY'});
  const dashboardScope=q=>({reviewerEmail:q.reviewer.email,canAccessAllClasses:reviewerIsAdmin(q.reviewer)});
  // Một lớp có thể dùng chung một địa chỉ mạng. Ngưỡng đọc này vẫn chịu được 40 học viên polling 2 giây/lần.
  app.use(rateLimit({windowMs:60_000,limit:2400,standardHeaders:'draft-8',legacyHeaders:false,message:{ok:false,error:'RATE_LIMITED'}}));
@@ -451,6 +462,22 @@ export function createApp({config,pool,service,lessonService=service,provisional
  app.post('/api/v1/internal/writing-flow/stages/fail',internal,writingStageReady,asyncRoute(async(q,r)=>{
    r.json({ok:true,failure:await writingFlowStage.fail(parse(writingFail,q.body))});
  }));
+ // Mỗi thành phần chuyên môn Test có biên nhận riêng; chỉ backend mở cổng tổng hợp khi đủ.
+ app.post('/api/v1/internal/writing-flow/test-components/start',internal,writingTestComponentsReady,
+   asyncRoute(async(q,r)=>{
+     r.json({ok:true,phase:await writingTestComponents.startPhase(
+       parse(writingTestComponentStart,q.body))});
+   }));
+ app.post('/api/v1/internal/writing-flow/test-components/complete',internal,writingTestComponentsReady,
+   asyncRoute(async(q,r)=>{
+     r.json({ok:true,completion:await writingTestComponents.complete(
+       parse(writingTestComponentComplete,q.body))});
+   }));
+ app.post('/api/v1/internal/writing-flow/test-components/fail',internal,writingTestComponentsReady,
+   asyncRoute(async(q,r)=>{
+     r.json({ok:true,failure:await writingTestComponents.fail(
+       parse(writingTestComponentFail,q.body))});
+   }));
  app.post('/api/v1/internal/writing-flow/trcc-repairs/seed',internal,writingTrccRepairReady,asyncRoute(async(q,r)=>{
    const input=parse(z.object({batchRequestId:uuid,
      pairIds:z.array(uuid).min(1).max(5000)}),q.body);

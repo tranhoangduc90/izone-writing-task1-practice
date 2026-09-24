@@ -215,3 +215,84 @@ test('HTTP đầy đủ Substitute dùng cùng phiếu và trả đúng kết qu
     await db.close();
   }
 });
+
+// Dữ liệu vào: hai lớp có học viên cùng tên, nộp hai bài giả khác nhau.
+// Việc chính: nhận việc chung rồi trả kết quả theo thứ tự đảo ngược.
+// Kết quả: chọn lại tên chỉ mở đúng bài/kết quả của lớp tương ứng.
+// Khi lỗi: callback tráo lớp bị chặn, không ghi đè hoặc lộ bài lớp khác.
+test('Substitute cùng tên ở hai lớp không tráo bài khi chấm đảo thứ tự', async () => {
+  const { db, app } = await fixture();
+  try {
+    await db.exec(`RESET ROLE;
+      INSERT INTO assessment_k56.term_test_roster VALUES
+        ('term-test-1-k56',1253,1002,
+         '22222222-2222-4222-8222-222222222222','Học viên thử',true);
+      INSERT INTO writing_flow.web_substitute_access
+        (test_slug,cohort,erp_course_class_id,rubric_version,enabled)
+      VALUES ('substitute-test-2-k56',56,1253,
+        'substitute-test2-k56-isolated-20260917-v1',true);
+      SET ROLE writing_practice_api;`);
+    const entries = [
+      { identity: { ...selected }, studentId: 1001, essay: 'Bài giả riêng của lớp 1252.' },
+      { identity: { ...selected, classId: 1253 }, studentId: 1002,
+        essay: 'Bài giả riêng của lớp 1253.' },
+    ];
+    for (const entry of entries) {
+      const opened = await request(app).post(`${base}/attempts`)
+        .set('Authorization', `Bearer ${gatewayToken}`).send(entry.identity);
+      assert.equal(opened.status, 200);
+      entry.attemptId = opened.body.attempt.attemptId;
+      const accepted = await request(app).post(`${base}/submissions`)
+        .set('Authorization', `Bearer ${gatewayToken}`)
+        .send({ ...entry.identity, attemptId: entry.attemptId,
+          taskNumber: 1, essay: entry.essay, sectionResults: syntheticSections() });
+      assert.equal(accepted.status, 202);
+      entry.submissionId = accepted.body.receipt.submissionId;
+    }
+    assert.notEqual(entries[0].attemptId, entries[1].attemptId);
+    assert.notEqual(entries[0].submissionId, entries[1].submissionId);
+    const claimed = await request(app).post(`${base}/work/claim`)
+      .set('Authorization', `Bearer ${graderToken}`).send({ limit: 2 });
+    assert.equal(claimed.status, 200);
+    assert.equal(claimed.body.jobs.length, 2);
+    const jobs = new Map(claimed.body.jobs.map(job => [job.classId, job]));
+    for (const entry of entries) {
+      const job = jobs.get(entry.identity.classId);
+      assert.equal(job.submissionId, entry.submissionId);
+      assert.equal(job.attemptId, entry.attemptId);
+      assert.equal(job.erpStudentId, entry.studentId);
+      assert.equal(job.essay, entry.essay);
+    }
+    const crossed = await request(app).post(`${base}/work/complete`)
+      .set('Authorization', `Bearer ${graderToken}`)
+      .send({ ...jobs.get(1252), classId: 1253, result: syntheticTask1Result() });
+    assert.equal(crossed.status, 409);
+    for (const entry of [...entries].reverse()) {
+      const result = syntheticTask1Result();
+      result.report = `Kết quả giả riêng của lớp ${entry.identity.classId}.`;
+      const completed = await request(app).post(`${base}/work/complete`)
+        .set('Authorization', `Bearer ${graderToken}`)
+        .send({ ...jobs.get(entry.identity.classId), result });
+      assert.equal(completed.status, 200);
+    }
+    for (const entry of entries) {
+      const reopened = await request(app).post(`${base}/status-by-name`)
+        .set('Authorization', `Bearer ${gatewayToken}`).send(entry.identity);
+      assert.equal(reopened.status, 200);
+      assert.equal(reopened.body.status.attemptId, entry.attemptId);
+      assert.equal(reopened.body.status.submissionId, entry.submissionId);
+      assert.equal(reopened.body.status.submittedEssay, entry.essay);
+      assert.equal(reopened.body.status.result.report,
+        `Kết quả giả riêng của lớp ${entry.identity.classId}.`);
+    }
+    const crossedRead = await request(app).post(`${base}/status`)
+      .set('Authorization', `Bearer ${gatewayToken}`)
+      .send({ ...entries[1].identity, attemptId: entries[0].attemptId });
+    assert.equal(crossedRead.status, 404);
+    const count = await db.query(`SELECT count(*)::int AS n
+      FROM writing_flow.web_substitute_submission`);
+    assert.equal(count.rows[0].n, 2);
+  } finally {
+    await db.close();
+  }
+});

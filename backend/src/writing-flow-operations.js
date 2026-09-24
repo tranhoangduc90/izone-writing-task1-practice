@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { withTransaction } from './db.js';
 import { ApiError } from './service.js';
+import { resetFailedTestComponentsForRetry } from './writing-flow-test-components.js';
 import { keyFromHex, open, seal, sha256 } from './writing-flow-crypto.js';
 
 const STAGES = ['intake', 'precheck', 'main', 'critic', 'arbiter', 'render', 'deliver'];
@@ -465,7 +466,7 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
       });
       let test = null;
       if (pair.rows[0].source_type === 'term_test') {
-        const [summary, criteria, components, deliveries] = await Promise.all([
+        const [summary, criteria, components, deliveries, componentWork] = await Promise.all([
           pool.query(`SELECT test_group.display_name,test_group.test_config,test_group.topology,
               test_group.evidence_status,test_group.status AS group_status,
               test_pair.task_number,test_pair.status AS task_status,test_pair.component_count,
@@ -487,6 +488,26 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
             ORDER BY criterion_code,component_code`, [pairId]),
           pool.query(`SELECT destination,status,result_url,readback_ok,error_code,completed_at
             FROM writing_flow.test_delivery WHERE pair_id=$1 ORDER BY destination`, [pairId]),
+          pool.query(`SELECT work.phase,work.criterion_code,work.component_code,
+              work.status,work.retry_cycle,work.attempt_count,
+              work.updated_at,work.completed_at,
+              last_attempt.status AS last_attempt_status,
+              last_attempt.error_code AS last_error_code,
+              last_attempt.started_at AS last_started_at,
+              last_attempt.finished_at AS last_finished_at
+            FROM writing_flow.test_component_work AS work
+            LEFT JOIN LATERAL (
+              SELECT status,error_code,started_at,finished_at
+              FROM writing_flow.test_component_attempt AS attempt
+              WHERE attempt.pair_id=work.pair_id
+                AND attempt.input_sha256=work.input_sha256
+                AND attempt.component_code=work.component_code
+              ORDER BY attempt.retry_cycle DESC,attempt.attempt_no DESC LIMIT 1
+            ) AS last_attempt ON true
+            WHERE work.pair_id=$1
+              AND work.input_sha256=(SELECT input_sha256 FROM writing_flow.stage_result
+                WHERE pair_id=$1 AND stage_key='main')
+            ORDER BY work.phase,work.criterion_code,work.component_code`, [pairId]),
         ]);
         const safeOpen = value => {
           try { return open(value, key); } catch { return null; }
@@ -499,7 +520,8 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
               .map(item => ({ component_code: item.component_code,label: item.label,
                 summary: safeOpen(item.summary_ciphertext),feedback: safeOpen(item.feedback_ciphertext),
                 completed_at: item.completed_at })) })),
-          deliveries: deliveries.rows } : null;
+          deliveries: deliveries.rows,
+          componentWork: componentWork.rows } : null;
         if (test?.historical_evidence?.source === 'restored_legacy_result') {
           // Bài cũ đã được khôi phục trong Docs. Giữ dấu vết các bước nhưng
           // không trình bày điểm và link của lượt chấm sai như kết quả hiện hành.
@@ -511,7 +533,7 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
           }
           test = { ...test, task_score: null, task_1_score: null,
             task_2_score: null, writing_score: null, criteria: [], deliveries: [],
-            result_origin: 'legacy_restored' };
+            componentWork: [],result_origin: 'legacy_restored' };
         }
         if (test) delete test.historical_evidence;
       }
@@ -569,7 +591,7 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
       return withTransaction(pool, async client => {
         const duplicate = await existingEvent(client, requestId);
         if (duplicate) return { pairId, stageKey, status: 'retry_requested', requestId };
-        const pair = await client.query(`SELECT pair_id,status,skipped_at
+        const pair = await client.query(`SELECT pair_id,status,source_type,skipped_at
           FROM writing_flow.pair WHERE pair_id=$1 FOR UPDATE`, [pairId]);
         if (!pair.rowCount) throw new ApiError(404, 'WRITING_PAIR_NOT_FOUND', 'Không tìm thấy bài này.');
         if (pair.rows[0].skipped_at) throw new ApiError(409, 'PAIR_SKIPPED', 'Hãy khôi phục bài trước khi retry.');
@@ -588,6 +610,12 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
         if (!['succeeded','needs_review'].includes(target.status)) {
           throw new ApiError(409, 'STAGE_STILL_AUTOMATIC', 'Bước này đang chờ hệ thống tự xử lý.');
         }
+        // Với Test, ba lỗi của một khía cạnh mở mục Cần kiểm tra. Sau khi quản trị viên
+        // bấm Retry, chỉ khía cạnh đó có ba lượt mới; thành quả khác vẫn được tái dùng.
+        const resetComponents = pair.rows[0].source_type === 'term_test'
+          && stageKey === 'main' && target.status === 'needs_review'
+          ? await resetFailedTestComponentsForRetry(client, {
+            pairId, inputSha256: target.input_sha256 }) : [];
         const commandHash = crypto.createHash('sha256').update(requestId).digest('hex');
         const invalidated = stages.rows.filter(row => STAGES.indexOf(row.stage_key) >= stageIndex)
           .map(row => ({ stageKey: row.stage_key, status: row.status, cycleNo: row.cycle_no }));
@@ -615,7 +643,8 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
         [pairId, actorRef, requestId, reason, JSON.stringify({ invalidated }),
           JSON.stringify({ stageKey, status: 'retry_requested' })]);
         return { pairId, stageKey, status: 'retry_requested', requestId,
-          invalidatedStages: invalidated.map(item => item.stageKey) };
+          invalidatedStages: invalidated.map(item => item.stageKey),
+          resetComponents };
       });
     },
   };

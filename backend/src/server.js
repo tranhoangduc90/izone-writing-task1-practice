@@ -13,6 +13,7 @@ import { createWritingFlowHandoff } from './writing-flow-handoff.js';
 import { createWritingFlowAiCall } from './writing-flow-ai-call.js';
 import { createWritingFlowScan } from './writing-flow-scan.js';
 import { createWritingFlowTrccRepair } from './writing-flow-trcc-repair.js';
+import { createWritingTestComponentService } from './writing-flow-test-components.js';
 import { createWritingFlowNotifier } from './writing-flow-notifier.js';
 import { createWebSubstituteIntake } from './writing-flow-web-intake.js';
 import { createWebSubstituteQueue } from './writing-flow-web-queue.js';
@@ -51,6 +52,8 @@ const app = createApp({
   writingFlowAiCall: createWritingFlowAiCall({ pool, encryptionKey: config.writingFlowEncryptionKey }),
   writingFlowScan: createWritingFlowScan({ pool }),
   writingFlowTrccRepair: createWritingFlowTrccRepair({
+    pool, encryptionKey: config.writingFlowEncryptionKey }),
+  writingTestComponents: createWritingTestComponentService({
     pool, encryptionKey: config.writingFlowEncryptionKey }),
   teacherCommentService: createTeacherCommentService({ pool }),
   teacherAuth,

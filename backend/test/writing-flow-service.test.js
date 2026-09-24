@@ -334,6 +334,28 @@ test('dashboard không còn phụ thuộc view phân công Lark', async () => {
   assert.equal(calls.every(call => !call.sql.includes('lark_export_teacher_assignments')), true);
 });
 
+test('bài kiểm thử giả không xuất hiện trong danh sách và số liệu vận hành', async () => {
+  const calls = [];
+  const pool = { query: async (sql, values = []) => {
+    calls.push({ sql, values });
+    return { rows: [] };
+  } };
+  const service = createWritingFlowService({ pool });
+  await service.summary();
+  await service.dashboardCounts({ sourceKind: 'test' });
+  await service.dailyStats({ sourceKind: 'test' });
+  await service.listPairs({ sourceKind: 'test' });
+  await service.listReviews();
+  await service.listSourceIssues();
+  assert.equal(calls.length, 7);
+  for (const { sql } of calls) {
+    assert.match(sql, /IS DISTINCT FROM 'codex_fixture'/u);
+  }
+  assert.equal((calls[1].sql.match(/IS DISTINCT FROM 'codex_fixture'/gu) || []).length, 1);
+  assert.equal((calls[2].sql.match(/IS DISTINCT FROM 'codex_fixture'/gu) || []).length, 2);
+  assert.equal((calls[3].sql.match(/IS DISTINCT FROM 'codex_fixture'/gu) || []).length, 3);
+});
+
 test('mọi tab dashboard giải mã đúng khóa hex như production và trả đủ dữ liệu hiển thị', async () => {
   const encryptionKey = Buffer.alloc(32, 7).toString('hex');
   const binaryKey = Buffer.from(encryptionKey, 'hex');

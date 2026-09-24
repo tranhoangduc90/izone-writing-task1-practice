@@ -5,17 +5,17 @@ import { bindWebSubstituteAttempt, findNamedRosterStudent, WEB_SUBSTITUTE_PROFIL
 
 const stored = Object.freeze({
   source: 'substitute_web', cohort: 56, classId: 1252,
-  studentRef: '11111111-1111-4111-8111-111111111111',
+  erpStudentId: 1001,
   testSlug: 'substitute-test-2-k56',
   attemptId: '22222222-2222-4222-8222-222222222222',
   taskNumber: 1, rubricVersion: 'substitute-2-k56-v1',
   runKey: 'run-opaque-1',
 });
 const roster = Object.freeze({
-  classId: 1252, studentRef: stored.studentRef, eligible: true,
+  classId: 1252, erpStudentId: stored.erpStudentId, eligible: true,
 });
 const request = Object.freeze({
-  classId: stored.classId, studentRef: stored.studentRef,
+  classId: stored.classId, erpStudentId: stored.erpStudentId,
   testSlug: stored.testSlug, attemptId: stored.attemptId,
   taskNumber: stored.taskNumber, rubricVersion: stored.rubricVersion,
   runKey: stored.runKey,
@@ -34,7 +34,7 @@ test('bốn trang Substitute ghim đúng cohort và Task từ Pages', () => {
 test('chỉ phiếu backend trùng roster và đủ khóa mới được xử lý', () => {
   assert.deepEqual(bindWebSubstituteAttempt({ stored, roster, request }), {
     source: 'substitute_web', cohort: 56, classId: 1252,
-    studentRef: stored.studentRef, testSlug: stored.testSlug,
+    erpStudentId: stored.erpStudentId, testSlug: stored.testSlug,
     attemptId: stored.attemptId, taskNumber: 1,
     rubricVersion: stored.rubricVersion, runKey: stored.runKey,
   });
@@ -43,13 +43,13 @@ test('chỉ phiếu backend trùng roster và đủ khóa mới được xử l�
 for (const [name, mutation] of Object.entries({
   'mã lượt do trình duyệt tự chế': { request: { attemptId: '33333333-3333-4333-8333-333333333333' } },
   'lớp khác': { request: { classId: 9999 } },
-  'học viên khác': { request: { studentRef: '44444444-4444-4444-8444-444444444444' } },
+  'học viên khác': { request: { erpStudentId: 1002 } },
   'đề khác': { request: { testSlug: 'substitute-test-1-k56' } },
   'Task khác': { request: { taskNumber: 2 } },
   'rubric khác': { request: { rubricVersion: 'other' } },
   'run khác': { request: { runKey: 'other' } },
   'roster sai lớp': { roster: { classId: 9999 } },
-  'roster sai học viên': { roster: { studentRef: '44444444-4444-4444-8444-444444444444' } },
+  'roster sai học viên': { roster: { erpStudentId: 1002 } },
   'roster không đủ điều kiện': { roster: { eligible: false } },
   'nguồn không phải web': { stored: { source: 'term_test' } },
   'cohort không khớp': { stored: { cohort: 67 } },
@@ -89,8 +89,8 @@ test('chọn lại cùng tên chỉ khôi phục định danh roster, không xá
 
 test('tên chọn lại trên thiết bị khác ánh xạ về đúng một mã roster trong lớp', () => {
   const rows = [
-    { classId: 1252, studentRef: stored.studentRef, studentName: 'Học viên A', eligible: true },
-    { classId: 1253, studentRef: '55555555-5555-4555-8555-555555555555',
+    { classId: 1252, erpStudentId: stored.erpStudentId, studentName: 'Học viên A', eligible: true },
+    { classId: 1253, erpStudentId: 1002,
       studentName: 'Học viên A', eligible: true },
   ];
   assert.deepEqual(findNamedRosterStudent({
@@ -100,8 +100,8 @@ test('tên chọn lại trên thiết bị khác ánh xạ về đúng một mã
 
 test('tên trùng trong cùng lớp hoặc không đủ điều kiện phải dừng', () => {
   const rows = [
-    { classId: 1252, studentRef: stored.studentRef, studentName: 'Học viên A', eligible: true },
-    { classId: 1252, studentRef: '55555555-5555-4555-8555-555555555555',
+    { classId: 1252, erpStudentId: stored.erpStudentId, studentName: 'Học viên A', eligible: true },
+    { classId: 1252, erpStudentId: 1002,
       studentName: 'Học viên A', eligible: true },
   ];
   assert.throws(() => findNamedRosterStudent({

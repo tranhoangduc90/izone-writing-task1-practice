@@ -11,10 +11,12 @@ export const WEB_SUBSTITUTE_PROFILES = Object.freeze({
   'substitute-test-2-k67': Object.freeze({ cohort: 67, tasks: Object.freeze([2]) }),
 });
 
+function validPositiveId(value) {
+  return Number.isSafeInteger(Number(value)) && Number(value) > 0;
+}
+
 function sameNumber(left, right) {
-  return Number.isSafeInteger(Number(left))
-    && Number.isSafeInteger(Number(right))
-    && Number(left) > 0
+  return validPositiveId(left) && validPositiveId(right)
     && Number(left) === Number(right);
 }
 
@@ -36,13 +38,12 @@ export function findNamedRosterStudent({ rosterRows, classId, selectedName }) {
     ? rosterRows.filter(row => sameNumber(row.classId, classId)
       && row.eligible === true && normalizedName(row.studentName) === name)
     : [];
-  if (matches.length !== 1 || typeof matches[0].studentRef !== 'string'
-    || matches[0].studentRef.length === 0) {
+  if (matches.length !== 1 || !validPositiveId(matches[0].erpStudentId)) {
     throw new ApiError(409, matches.length > 1 ? 'ROSTER_NAME_AMBIGUOUS' : 'ROSTER_NAME_NOT_FOUND',
       'Không thể xác định duy nhất học viên trong lớp.');
   }
   return Object.freeze({
-    classId: Number(matches[0].classId), studentRef: matches[0].studentRef,
+    classId: Number(matches[0].classId), erpStudentId: Number(matches[0].erpStudentId),
     eligible: true,
   });
 }
@@ -63,8 +64,8 @@ export function bindWebSubstituteAttempt({ stored, roster, request }) {
     || !sameText(stored.attemptId, request.attemptId)
     || !sameNumber(stored.classId, request.classId)
     || !sameNumber(stored.classId, roster.classId)
-    || !sameText(stored.studentRef, request.studentRef)
-    || !sameText(stored.studentRef, roster.studentRef)
+    || !sameNumber(stored.erpStudentId, request.erpStudentId)
+    || !sameNumber(stored.erpStudentId, roster.erpStudentId)
     || roster.eligible !== true
     || !sameNumber(request.taskNumber, stored.taskNumber)
     || !profile.tasks.includes(Number(stored.taskNumber))
@@ -77,7 +78,7 @@ export function bindWebSubstituteAttempt({ stored, roster, request }) {
     source: stored.source,
     cohort: profile.cohort,
     classId: Number(stored.classId),
-    studentRef: stored.studentRef,
+    erpStudentId: Number(stored.erpStudentId),
     testSlug: stored.testSlug,
     attemptId: stored.attemptId,
     taskNumber: Number(stored.taskNumber),

@@ -86,6 +86,27 @@ test('webhook lỗi không làm mất việc và hẹn thử lại 30 giây', as
   await notifier.close();
 });
 
+test('hai tín hiệu trùng được gộp thành một lượt đánh thức', async () => {
+  const pool = listenerPool([{ handoff_due: true, source_due: false,
+    next_at: null, server_now: new Date() }]);
+  const timers = [];
+  let sent = 0;
+  const notifier = createWritingFlowNotifier({ pool,
+    handoffUrl: 'https://example.test/handoff', secret: 's'.repeat(32),
+    now: () => 10_000,
+    setTimer(handler, delay) { const timer = { handler, delay }; timers.push(timer); return timer; },
+    clearTimer(timer) { timer.cleared = true; },
+    setRecurringTimer() { return 1; }, clearRecurringTimer() {},
+    async fetchImpl() { sent += 1; return { ok: true }; }, log() {} });
+  await notifier.start();
+  pool.listeners.get('notification')();
+  pool.listeners.get('notification')();
+  assert.equal(timers.filter(timer => !timer.cleared).length, 1);
+  await timers.findLast(timer => !timer.cleared).handler();
+  assert.equal(sent, 1);
+  await notifier.close();
+});
+
 for (const failure of ['http_500', 'timeout']) {
   test(`n8n ${failure} vẫn gửi lại tín hiệu khi việc còn trong database`, async () => {
     const rows = Array.from({ length: 2 }, () => ({ handoff_due: true,

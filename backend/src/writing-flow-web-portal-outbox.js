@@ -9,6 +9,7 @@ const FIELDS = {
   reading: 'Term Test 2 Reading (Thi lại)',
   writing: 'Term Test 2 Writing (Thi lại)',
 };
+const MAX_SCORE = { listening: 40, reading: 40, writing: 9 };
 
 function readbackMatches(result, request) {
   if (result?.ok !== true || result.status !== 'synced'
@@ -21,8 +22,10 @@ function readbackMatches(result, request) {
       || result.portalScores[skill] !== result.portalFields[field]
       || typeof result.portalFields[field] !== 'number'
       || !Number.isFinite(result.portalFields[field])
-      || result.portalFields[field] < 0 || result.portalFields[field] > 9
-      || !Number.isInteger(result.portalFields[field] * 10)) return false;
+      || result.portalFields[field] < 0
+      || result.portalFields[field] > MAX_SCORE[skill]
+      || !Number.isInteger(result.portalFields[field]
+        * (skill === 'writing' ? 10 : 1))) return false;
   }
   return true;
 }

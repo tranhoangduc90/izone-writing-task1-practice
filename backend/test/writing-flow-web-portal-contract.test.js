@@ -7,7 +7,10 @@ const completed = {
   attemptId: '22222222-2222-4222-8222-222222222222',
   testSlug: 'substitute-test-2-k56', classId: 1252, erpStudentId: 1001,
   taskNumber: 1, submissionStatus: 'completed',
-  sectionResults: { listening: { band: 6.5 }, reading: { band: 7 } },
+  sectionResults: {
+    listening: { correct: 30, total: 40, band: 6.5 },
+    reading: { correct: 32, total: 40, band: 7 },
+  },
   taskScore: 7.5,
 };
 
@@ -17,7 +20,7 @@ test('chỉ dựng ba điểm Portal Thi lại từ phiếu hoàn tất đúng I
     version: 1, testSlug: 'substitute-test-2-k56', classCode: 'IC2264',
     classId: 1252, studentId: 1001,
     attemptToken: completed.attemptId,
-    grades: { listening: 6.5, reading: 7, writing: 7.5 }, commit: false,
+    grades: { listening: 30, reading: 32, writing: 7.5 }, commit: false,
   });
   assert.equal(buildSubstitutePortalRequest(completed, { commit: true }).commit, true);
 });
@@ -33,15 +36,25 @@ test('chặn sai nguồn, lớp, học viên, Task hoặc lượt trước khi g
   }
 });
 
-test('chặn điểm thiếu, quá biên hoặc không theo thang 0,1', () => {
+test('chặn số câu thô thiếu/sai thang và Writing sai bước 0,1', () => {
   for (const patch of [
-    { sectionResults: { listening: {}, reading: { band: 7 } } },
-    { sectionResults: { listening: { band: 6.5 }, reading: { band: 9.5 } } },
-    { sectionResults: { listening: { band: 6.55 }, reading: { band: 7 } } },
+    { sectionResults: { listening: {}, reading: { correct: 32, total: 40 } } },
+    { sectionResults: { listening: { correct: 40.5, total: 40 }, reading: { correct: 32, total: 40 } } },
+    { sectionResults: { listening: { correct: 30, total: 39 }, reading: { correct: 32, total: 40 } } },
+    { sectionResults: { listening: { correct: 30, total: 40 }, reading: { correct: 41, total: 40 } } },
     { taskScore: null }, { taskScore: 7.25 },
   ]) {
     assert.throws(() => buildSubstitutePortalRequest({ ...completed, ...patch }));
   }
+});
+
+test('band chỉ để hiển thị: đổi band không được đổi điểm thô gửi Portal', () => {
+  const changed = { ...completed, sectionResults: {
+    listening: { ...completed.sectionResults.listening, band: 5 },
+    reading: { ...completed.sectionResults.reading, band: 8 },
+  } };
+  assert.deepEqual(buildSubstitutePortalRequest(changed).grades,
+    { listening: 30, reading: 32, writing: 7.5 });
 });
 
 test('không mặc định ghi thật nếu tham số commit bị truyền sai kiểu', () => {

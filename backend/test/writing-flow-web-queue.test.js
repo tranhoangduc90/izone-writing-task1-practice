@@ -69,10 +69,13 @@ function task1Result(score = 6.5) {
 }
 
 function portalSections() {
-  const make = band => ({ correct: 1, band, total: 1, answered: 1,
-    details: [{ number: 1, studentAnswer: 'A', correctAnswer: 'A', result: 'correct' }],
-    typeStats: [{ type: 'synthetic', correct: 1, total: 1, percentage: 1 }] });
-  return { listening: make(6.5), reading: make(7) };
+  const make = (correct, band) => ({ correct, band, total: 40, answered: 40,
+    details: Array.from({ length: 40 }, (_, index) => ({ number: index + 1,
+      studentAnswer: index < correct ? 'A' : 'B', correctAnswer: 'A',
+      result: index < correct ? 'correct' : 'incorrect' })),
+    typeStats: [{ type: 'synthetic', correct, total: 40,
+      percentage: correct / 40 }] });
+  return { listening: make(30, 6.5), reading: make(32, 7) };
 }
 
 function provenPizzaTask1Result(score = 6.5) {
@@ -130,19 +133,26 @@ test('Portal chỉ lấy phiếu hoàn tất, xem trước rồi xác nhận rea
     assert.equal(claim.request.commit, false);
     assert.equal(claim.request.attemptToken, attempt.attemptId);
     assert.deepEqual(claim.request.grades,
-      { listening: 6.5, reading: 7, writing: 7.5 });
+      { listening: 30, reading: 32, writing: 7.5 });
     assert.deepEqual(await portal.claimDue(), []);
     const result = { ok: true, status: 'synced', externalWrite: true,
       classCode: 'IC2264', attemptToken: attempt.attemptId,
       actualScores: claim.request.grades,
       // Bộ ghi Portal cũ có thể hạ điểm theo chính sách Thi lại;
       // điểm thực tế phải giữ nguyên, ba cột đọc lại phải khớp điểm Portal.
-      portalScores: { listening: 5, reading: 5, writing: 5 },
+      portalScores: { listening: 20, reading: 22, writing: 5 },
       portalFields: {
-        'Term Test 2 Listening (Thi lại)': 5,
-        'Term Test 2 Reading (Thi lại)': 5,
+        'Term Test 2 Listening (Thi lại)': 20,
+        'Term Test 2 Reading (Thi lại)': 22,
         'Term Test 2 Writing (Thi lại)': 5,
       } };
+    const fractionalRaw = { ...result,
+      portalScores: { ...result.portalScores, listening: 20.5 },
+      portalFields: { ...result.portalFields,
+        'Term Test 2 Listening (Thi lại)': 20.5 } };
+    await assert.rejects(portal.completeSync({ submissionId: job.submissionId,
+      leaseToken: claim.leaseToken, result: fractionalRaw }),
+    error => error.code === 'WEB_PORTAL_READBACK_MISMATCH');
     const synced = await portal.completeSync({ submissionId: job.submissionId,
       leaseToken: claim.leaseToken, result });
     assert.equal(synced.status, 'synced');

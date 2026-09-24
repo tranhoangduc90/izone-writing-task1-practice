@@ -7,6 +7,11 @@ function validBand(value) {
     && value >= 0 && value <= 9 && Number.isInteger(value * 10);
 }
 
+function validRawSection(section) {
+  return section?.total === 40 && Number.isInteger(section.correct)
+    && section.correct >= 0 && section.correct <= 40;
+}
+
 // Dữ liệu vào: phiếu backend đã chấm xong cùng điểm Nghe, Đọc và Writing đã lưu.
 // Việc chính: khóa đúng đề/lớp/Task/học viên, rồi dựng hợp đồng của bộ ghi Portal cũ.
 // Kết quả: mặc định chỉ xem trước; ghi thật phải được yêu cầu bằng commit=true rõ ràng.
@@ -27,11 +32,13 @@ export function buildSubstitutePortalRequest(receipt, { commit = false } = {}) {
       'Phiếu không khớp đề, lớp, học viên, lượt hoặc chưa hoàn tất.');
   }
   const grades = {
-    listening: receipt.sectionResults?.listening?.band,
-    reading: receipt.sectionResults?.reading?.band,
+    listening: receipt.sectionResults?.listening?.correct,
+    reading: receipt.sectionResults?.reading?.correct,
     writing: receipt.taskScore,
   };
-  if (!Object.values(grades).every(validBand)) {
+  if (!validRawSection(receipt.sectionResults?.listening)
+    || !validRawSection(receipt.sectionResults?.reading)
+    || !validBand(grades.writing)) {
     throw new ApiError(409, 'SUBSTITUTE_PORTAL_GRADES_INVALID',
       'Phiếu chưa có đủ ba điểm hợp lệ để ghi Portal.');
   }

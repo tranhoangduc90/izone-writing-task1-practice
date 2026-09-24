@@ -85,11 +85,13 @@ function provenOldTask1Result() {
 }
 
 function syntheticSections() {
-  const make = type => ({ correct: 1, band: 5, total: 1, answered: 1,
-    details: [{ number: 1, studentAnswer: 'A', correctAnswer: 'A', result: 'correct' }],
-    typeStats: [{ type, correct: 1, total: 1, percentage: 1 }],
+  const make = (type, correct) => ({ correct, band: 5, total: 40, answered: 40,
+    details: Array.from({ length: 40 }, (_, index) => ({ number: index + 1,
+      studentAnswer: index < correct ? 'A' : 'B', correctAnswer: 'A',
+      result: index < correct ? 'correct' : 'incorrect' })),
+    typeStats: [{ type, correct, total: 40, percentage: correct / 40 }],
   });
-  return { listening: make('Nghe'), reading: make('Đọc') };
+  return { listening: make('Nghe', 26), reading: make('Đọc', 28) };
 }
 
 // Dữ liệu vào: tên và bài viết giả; database in-process, không gọi n8n/Portal thật.
@@ -174,15 +176,15 @@ test('HTTP đầy đủ Substitute dùng cùng phiếu và trả đúng kết qu
     assert.equal(portalJob.request.attemptToken, attemptId);
     assert.equal(portalJob.request.commit, false);
     assert.deepEqual(portalJob.request.grades,
-      { listening: 5, reading: 5, writing: 6.5 });
+      { listening: 26, reading: 28, writing: 6.5 });
     assert.equal(JSON.stringify(portalJob).includes(submission.essay), false);
     const portalResult = { ok: true, status: 'synced', externalWrite: true,
       classCode: 'IC2264', attemptToken: attemptId,
       actualScores: portalJob.request.grades,
       portalScores: portalJob.request.grades,
       portalFields: {
-        'Term Test 2 Listening (Thi lại)': 5,
-        'Term Test 2 Reading (Thi lại)': 5,
+        'Term Test 2 Listening (Thi lại)': 26,
+        'Term Test 2 Reading (Thi lại)': 28,
         'Term Test 2 Writing (Thi lại)': 6.5,
       } };
     const portalDone = await request(app).post(`${base}/portal/complete`)

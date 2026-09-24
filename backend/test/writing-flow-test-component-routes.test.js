@@ -40,19 +40,28 @@ test('API thành phần Test chỉ nhận token nội bộ và đúng định da
     .send({ ...base, phase: 'detail', componentCode: 'tr_position',
       contractHashes: { tr_position: 'd'.repeat(64) } })).status, 200);
   assert.equal(received[1].componentCode, 'tr_position');
+  assert.equal((await request(target).post(`${root}/start`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ ...base, phase: 'criterion', componentCode: 'aggregate_TA',
+      contractHashes: { aggregate_TA: 'd'.repeat(64) } })).status, 200);
+  assert.equal(received[2].componentCode, 'aggregate_TA');
+  assert.equal((await request(target).post(`${root}/start`)
+    .set('Authorization', `Bearer ${token}`)
+    .send({ ...base, phase: 'criterion', componentCode: 'aggregate_BAD',
+      contractHashes: { aggregate_BAD: 'd'.repeat(64) } })).status, 400);
   assert.equal((await request(target).post(`${root}/complete`)
     .set('Authorization', `Bearer ${token}`)
     .send({ ...callback, result: { feedback: 'Bài giả' } })).status, 200);
-  assert.equal(received[2].runKey, runKey);
+  assert.equal(received[3].runKey, runKey);
   assert.equal((await request(target).post(`${root}/fail`)
     .set('Authorization', `Bearer ${token}`)
     .send({ ...callback, errorCode: 'AI_FAILED' })).status, 200);
-  assert.equal(received[3].errorCode, 'AI_FAILED');
+  assert.equal(received[4].errorCode, 'AI_FAILED');
   assert.equal((await request(target).post(`${root}/complete`)
     .set('Authorization', `Bearer ${token}`)
     .send({ ...callback, inputSha256: 'wrong', result: {} })).status, 400);
   assert.equal((await request(target).post(`${root}/fail`)
     .set('Authorization', `Bearer ${token}`)
     .send({ ...callback, errorCode: 'private failure text' })).status, 400);
-  assert.equal(received.length, 4);
+  assert.equal(received.length, 5);
 });

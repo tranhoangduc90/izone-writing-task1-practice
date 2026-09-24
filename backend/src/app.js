@@ -185,7 +185,8 @@ const writingComplete=z.object({pairId:uuid,revision:z.string().regex(/^[0-9a-f]
 const writingFail=z.object({pairId:uuid,revision:z.string().regex(/^[0-9a-f]{64}$/),
  stageKey:writingStage,attemptId:uuid,errorCode:z.string().trim().min(1).max(100),
  unknown:z.boolean().default(false)});
-const writingTestComponentCode=z.string().regex(/^[a-z][a-z0-9_]{1,63}$/);
+// Bộ chấm cũ dùng mã chữ thường cho từng khía cạnh và chữ hoa cho bốn tiêu chí tổng hợp.
+const writingTestComponentCode=z.string().regex(/^(?:[a-z][a-z0-9_]{1,63}|aggregate_(?:TA|TR|CC|LR|GRA))$/);
 const writingTestComponentBase=z.object({pairId:uuid,
  revision:z.string().regex(/^[0-9a-f]{64}$/),stageAttemptId:uuid});
 const writingTestComponentStart=writingTestComponentBase.extend({

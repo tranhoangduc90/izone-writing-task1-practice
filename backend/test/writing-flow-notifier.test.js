@@ -86,6 +86,38 @@ test('webhook lỗi không làm mất việc và hẹn thử lại 30 giây', as
   await notifier.close();
 });
 
+for (const failure of ['http_500', 'timeout']) {
+  test(`n8n ${failure} vẫn gửi lại tín hiệu khi việc còn trong database`, async () => {
+    const rows = Array.from({ length: 2 }, () => ({ handoff_due: true,
+      source_due: false, next_at: null, server_now: new Date() }));
+    const pool = listenerPool(rows);
+    const timers = [];
+    let sent = 0;
+    let currentTime = 10_000;
+    const notifier = createWritingFlowNotifier({ pool,
+      handoffUrl: 'https://example.test/handoff', secret: 's'.repeat(32),
+      now: () => currentTime,
+      setTimer(handler, delay) { const timer = { handler, delay }; timers.push(timer); return timer; },
+      clearTimer(timer) { timer.cleared = true; },
+      setRecurringTimer() { return 1; }, clearRecurringTimer() {},
+      async fetchImpl() {
+        sent += 1;
+        if (sent === 1 && failure === 'timeout') throw new Error('timeout');
+        if (sent === 1) return { ok: false, body: { async cancel() {} } };
+        return { ok: true, body: { async cancel() {} } };
+      },
+      log() {} });
+    assert.equal(await notifier.start(), true);
+    await timers.shift().handler();
+    assert.equal(sent, 1);
+    assert.equal(timers.at(-1).delay, 30_000);
+    currentTime += 30_000;
+    await timers.at(-1).handler();
+    assert.equal(sent, 2);
+    await notifier.close();
+  });
+}
+
 test('mất kết nối giữ khóa phải dừng gửi và hẹn thử nhận lại vai trò điều phối', async () => {
   const pool = listenerPool([{ handoff_due: true, source_due: false,
     next_at: null, server_now: new Date() }]);

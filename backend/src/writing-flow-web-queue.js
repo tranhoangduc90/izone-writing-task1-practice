@@ -47,7 +47,7 @@ export function createWebSubstituteQueue({ pool, encryptionKey, getPinnedPrompt 
     if (!Number.isInteger(limit) || limit < 1 || limit > 4) {
       throw new ApiError(400, 'WEB_CLAIM_LIMIT_INVALID', 'Số bài lấy không hợp lệ.');
     }
-    const jobs = await withTransaction(pool, async client => {
+    const claim = await withTransaction(pool, async client => {
       // Khóa ngắn bảo đảm nhiều poller không cùng vượt trần bốn bài web đang chạy.
       await client.query(`SELECT pg_advisory_xact_lock(
         hashtext('writing_flow_web_substitute_claim_capacity'))`);
@@ -55,13 +55,14 @@ export function createWebSubstituteQueue({ pool, encryptionKey, getPinnedPrompt 
         FROM writing_flow.web_substitute_submission
         WHERE status='running' AND lease_expires_at>now()`);
       const available = Math.max(0, 4 - Number(active.rows[0].n));
-      if (available === 0) return [];
+      if (available === 0) return { jobs: [], reviewIds: [] };
       const due = await client.query(`SELECT submission_id
         FROM writing_flow.web_substitute_submission
         WHERE status='pending' AND next_attempt_at<=now() AND attempt_count<3
         ORDER BY next_attempt_at,created_at,submission_id
         FOR UPDATE SKIP LOCKED LIMIT $1`, [Math.min(limit, available)]);
       const claimed = [];
+      const reviewIds = [];
       for (const dueRow of due.rows) {
         const result = await client.query(`SELECT s.*,a.test_slug,a.cohort,
             a.erp_course_class_id,a.erp_student_contact_id,a.rubric_version
@@ -70,28 +71,39 @@ export function createWebSubstituteQueue({ pool, encryptionKey, getPinnedPrompt 
             ON a.attempt_id=s.attempt_id
           WHERE s.submission_id=$1`, [dueRow.submission_id]);
         const row = result.rows[0];
-        const profile = WEB_SUBSTITUTE_PROFILES[row?.test_slug];
-        if (!row || !profile || Number(row.cohort) !== profile.cohort
-          || !profile.tasks.includes(Number(row.task_number))) {
-          throw new ApiError(409, 'WEB_WORK_IDENTITY_MISMATCH',
-            'Bài chờ không khớp đề và Task.');
-        }
-        const contentText = open(row.content_ciphertext, key);
-        if (sha256(contentText) !== row.content_sha256.trim()) {
-          throw new ApiError(409, 'WEB_WORK_CONTENT_MISMATCH',
-            'Bài chờ không khớp bản đã lưu.');
-        }
-        const content = JSON.parse(contentText);
-        const pinned = pinnedWebPrompt(getPinnedPrompt,
-          { testSlug: row.test_slug }, Number(row.task_number), row.rubric_version);
-        if (Number(content.taskNumber) !== Number(row.task_number)
-          || content.topic !== pinned.topic
-          || content.imageUrl !== (pinned.imageUrl || '')
-          || typeof content.essay !== 'string'
-          || row.prompt_sha256.trim() !== pinned.promptSha256
-          || (row.image_sha256?.trim() || null) !== (pinned.imageSha256 || null)) {
-          throw new ApiError(409, 'WEB_WORK_PROMPT_MISMATCH',
-            'Bài chờ không khớp đề hoặc ảnh đã ghim.');
+        if (!row) throw new ApiError(503, 'WEB_WORK_ROW_MISSING',
+          'Chưa đọc lại được bài chờ đã chọn.');
+        let content;
+        let pinned;
+        try {
+          const profile = WEB_SUBSTITUTE_PROFILES[row.test_slug];
+          if (!profile || Number(row.cohort) !== profile.cohort
+            || !profile.tasks.includes(Number(row.task_number))) {
+            throw new Error('WEB_WORK_IDENTITY_MISMATCH');
+          }
+          const contentText = open(row.content_ciphertext, key);
+          if (sha256(contentText) !== row.content_sha256.trim()) {
+            throw new Error('WEB_WORK_CONTENT_MISMATCH');
+          }
+          content = JSON.parse(contentText);
+          pinned = pinnedWebPrompt(getPinnedPrompt,
+            { testSlug: row.test_slug }, Number(row.task_number), row.rubric_version);
+          if (Number(content.taskNumber) !== Number(row.task_number)
+            || content.topic !== pinned.topic
+            || content.imageUrl !== (pinned.imageUrl || '')
+            || typeof content.essay !== 'string'
+            || row.prompt_sha256.trim() !== pinned.promptSha256
+            || (row.image_sha256?.trim() || null) !== (pinned.imageSha256 || null)) {
+            throw new Error('WEB_WORK_PROMPT_MISMATCH');
+          }
+        } catch {
+          // Một bài hỏng không chặn các bài hợp lệ phía sau trong hàng chờ.
+          await client.query(`UPDATE writing_flow.web_substitute_submission
+            SET status='needs_review',last_error_code='WEB_WORK_VALIDATION_FAILED',
+              updated_at=now()
+            WHERE submission_id=$1 AND status='pending'`, [row.submission_id]);
+          reviewIds.push(row.submission_id);
+          continue;
         }
         const lease = await client.query(`UPDATE writing_flow.web_substitute_submission
           SET status='running',attempt_count=attempt_count+1,
@@ -116,9 +128,9 @@ export function createWebSubstituteQueue({ pool, encryptionKey, getPinnedPrompt 
           essay: content.essay,
           wordCount: content.essay.trim().split(/\s+/u).length });
       }
-      return claimed;
+      return { jobs: claimed, reviewIds };
     });
-    for (const job of jobs) {
+    for (const job of claim.jobs) {
       const readback = await pool.query(`SELECT status,lease_token,run_key
         FROM writing_flow.web_substitute_submission WHERE submission_id=$1`,
       [job.submissionId]);
@@ -129,7 +141,17 @@ export function createWebSubstituteQueue({ pool, encryptionKey, getPinnedPrompt 
           'Chưa xác nhận được quyền xử lý bài chờ.');
       }
     }
-    return jobs;
+    if (claim.reviewIds.length) {
+      const readback = await pool.query(`SELECT count(*)::int AS n
+        FROM writing_flow.web_substitute_submission
+        WHERE submission_id=ANY($1::uuid[]) AND status='needs_review'
+          AND last_error_code='WEB_WORK_VALIDATION_FAILED'`, [claim.reviewIds]);
+      if (Number(readback.rows[0]?.n) !== claim.reviewIds.length) {
+        throw new ApiError(503, 'WEB_REVIEW_READBACK_UNKNOWN',
+          'Chưa xác nhận được bài cần kiểm tra.');
+      }
+    }
+    return claim.jobs;
   }
 
   // Dữ liệu vào: kết quả bốn tiêu chí từ đúng job/lease của bộ chấm cũ.

@@ -213,3 +213,38 @@ test('hai lượt lấy việc xen kẽ không vượt bốn bài web đang ch�
     await db.close();
   }
 });
+
+test('một bài mã hóa hỏng vào Cần kiểm tra, bài hợp lệ phía sau vẫn được lấy', async () => {
+  const { db, intake, queue } = await fixture();
+  try {
+    await db.exec(`RESET ROLE; INSERT INTO assessment_k56.term_test_roster VALUES
+      ('term-test-1-k56',1252,1002,
+       '22222222-2222-4222-8222-222222222222','Học viên Hai',true);
+      SET ROLE writing_practice_api;`);
+    const first = await intake.openAttempt(identity);
+    const corrupt = await intake.submitWriting({ ...identity,
+      attemptId: first.attemptId, essay: 'Synthetic first answer.' });
+    const secondIdentity = { ...identity, studentName: 'Học viên Hai' };
+    const second = await intake.openAttempt(secondIdentity);
+    const healthy = await intake.submitWriting({ ...secondIdentity,
+      attemptId: second.attemptId, essay: 'Synthetic second answer.' });
+    await db.query(`UPDATE writing_flow.web_substitute_submission
+      SET next_attempt_at=now()-interval '1 minute'
+      WHERE submission_id=$1`, [corrupt.submissionId]);
+    await db.exec(`RESET ROLE;`);
+    await db.query(`UPDATE writing_flow.web_substitute_submission
+      SET content_ciphertext=decode('abcd','hex')
+      WHERE submission_id=$1`, [corrupt.submissionId]);
+    await db.exec('SET ROLE writing_practice_api;');
+    const jobs = await queue.claimDue({ limit: 2 });
+    assert.equal(jobs.length, 1);
+    assert.equal(jobs[0].submissionId, healthy.submissionId);
+    const states = await db.query(`SELECT submission_id,status,last_error_code
+      FROM writing_flow.web_substitute_submission`);
+    const bad = states.rows.find(row => row.submission_id === corrupt.submissionId);
+    assert.equal(bad.status, 'needs_review');
+    assert.equal(bad.last_error_code, 'WEB_WORK_VALIDATION_FAILED');
+  } finally {
+    await db.close();
+  }
+});

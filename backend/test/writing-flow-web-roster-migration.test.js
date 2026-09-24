@@ -21,6 +21,7 @@ test('tra roster Substitute bằng quyền tối thiểu, không phụ thuộc C
       CREATE SCHEMA writing_flow;
       CREATE SCHEMA assessment;
       CREATE SCHEMA assessment_k56;
+      CREATE TABLE writing_flow.pair (pair_id uuid PRIMARY KEY);
       CREATE TABLE assessment.term_test_roster (
         test_slug text NOT NULL, erp_course_class_id bigint NOT NULL,
         erp_student_contact_id bigint NOT NULL, student_ref uuid NOT NULL,
@@ -64,7 +65,10 @@ test('tra roster Substitute bằng quyền tối thiểu, không phụ thuộc C
     const defaultClosed = await db.query(`SELECT bool_and(enabled = false) AS all_closed
       FROM writing_flow.web_substitute_access`);
     assert.equal(defaultClosed.rows[0].all_closed, true);
-    await db.exec(`UPDATE writing_flow.web_substitute_access SET enabled=true;`);
+    await assert.rejects(db.exec(`UPDATE writing_flow.web_substitute_access
+      SET enabled=true;`), /web_substitute_access_rubric_check/u);
+    await db.exec(`UPDATE writing_flow.web_substitute_access
+      SET rubric_version='test-rubric-v1', enabled=true;`);
     await db.exec(`SET ROLE writing_practice_api;`);
 
     const k56 = await db.query(`SELECT * FROM writing_flow.resolve_web_substitute_student(
@@ -72,6 +76,7 @@ test('tra roster Substitute bằng quyền tối thiểu, không phụ thuộc C
     assert.equal(k56.rows.length, 1);
     assert.equal(Number(k56.rows[0].cohort), 56);
     assert.equal(Number(k56.rows[0].erp_student_contact_id), 1001);
+    assert.equal(k56.rows[0].rubric_version, 'test-rubric-v1');
     const k67 = await db.query(`SELECT * FROM writing_flow.resolve_web_substitute_student(
       'substitute-test-1-k67',2207,'Học viên Hai')`);
     assert.equal(Number(k67.rows[0].erp_student_contact_id), 2001);
@@ -95,6 +100,57 @@ test('tra roster Substitute bằng quyền tối thiểu, không phụ thuộc C
       (SELECT count(*)::int FROM assessment_k56.term_test_roster) AS k56,
       (SELECT count(*)::int FROM assessment.term_test_roster) AS k67`);
     assert.deepEqual(unchanged.rows[0], { k56: 5, k67: 1 });
+
+    const intakeMigration = await readFile(new URL(
+      '../../docs/migrations/2026-09-24-writing-flow-web-substitute-intake-v17.sql',
+      import.meta.url,
+    ), 'utf8');
+    await db.exec(intakeMigration);
+    await db.exec(intakeMigration);
+    await db.exec(`SET ROLE writing_practice_api;`);
+    const issued = await db.query(`INSERT INTO writing_flow.web_substitute_attempt
+      (test_slug,cohort,erp_course_class_id,erp_student_contact_id,task_number,rubric_version)
+      VALUES ('substitute-test-2-k56',56,1252,1001,1,'test-rubric-v1')
+      RETURNING attempt_id,status`);
+    const attemptId = issued.rows[0].attempt_id;
+    assert.match(attemptId, /^[0-9a-f-]{36}$/u);
+    assert.equal(issued.rows[0].status, 'open');
+    await assert.rejects(db.query(`INSERT INTO writing_flow.web_substitute_attempt
+      (test_slug,cohort,erp_course_class_id,erp_student_contact_id,task_number,rubric_version)
+      VALUES ('substitute-test-2-k56',56,1252,1001,1,'test-rubric-v1')`), /duplicate key/u);
+    await assert.rejects(db.query(`UPDATE writing_flow.web_substitute_attempt
+      SET erp_student_contact_id=1002 WHERE attempt_id=$1`, [attemptId]),
+    /permission denied/u);
+    await assert.rejects(db.query(`INSERT INTO writing_flow.web_substitute_submission
+      (attempt_id,task_number,content_ciphertext,content_sha256,prompt_sha256)
+      VALUES ($1,2,decode('abcd','hex'),repeat('a',64),repeat('b',64))`, [attemptId]),
+    /foreign key/u);
+    const receipt = await db.query(`INSERT INTO writing_flow.web_substitute_submission
+      (attempt_id,task_number,content_ciphertext,content_sha256,prompt_sha256)
+      VALUES ($1,1,decode('abcd','hex'),repeat('a',64),repeat('b',64))
+      RETURNING submission_id,run_key,status`, [attemptId]);
+    assert.match(receipt.rows[0].submission_id, /^[0-9a-f-]{36}$/u);
+    assert.match(receipt.rows[0].run_key, /^[0-9a-f-]{36}$/u);
+    assert.equal(receipt.rows[0].status, 'pending');
+    await assert.rejects(db.query(`INSERT INTO writing_flow.web_substitute_submission
+      (attempt_id,task_number,content_ciphertext,content_sha256,prompt_sha256)
+      VALUES ($1,1,decode('abce','hex'),repeat('c',64),repeat('b',64))`, [attemptId]),
+    /duplicate key/u);
+    await assert.rejects(db.query(`UPDATE writing_flow.web_substitute_submission
+      SET content_ciphertext=decode('abce','hex') WHERE attempt_id=$1`, [attemptId]),
+    /permission denied/u);
+    await assert.rejects(db.query(`UPDATE writing_flow.web_substitute_submission
+      SET status='registered' WHERE attempt_id=$1`, [attemptId]),
+    /web_substitute_submission_pair_check/u);
+    await db.exec(`RESET ROLE;`);
+    await db.exec(`INSERT INTO writing_flow.pair VALUES
+      ('77777777-7777-4777-8777-777777777777');`);
+    await db.exec(`SET ROLE writing_practice_api;`);
+    const registered = await db.query(`UPDATE writing_flow.web_substitute_submission
+      SET status='registered',pair_id='77777777-7777-4777-8777-777777777777'
+      WHERE attempt_id=$1 RETURNING pair_id,status`, [attemptId]);
+    assert.equal(registered.rows[0].status, 'registered');
+    await db.exec(`RESET ROLE;`);
   } finally {
     await db.close();
   }

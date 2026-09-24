@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS writing_flow.web_substitute_access (
   cohort smallint NOT NULL CHECK (cohort IN (56, 67)),
   erp_course_class_id bigint NOT NULL CHECK (erp_course_class_id > 0),
   enabled boolean NOT NULL DEFAULT false,
+  rubric_version text CHECK (rubric_version IS NULL OR
+    length(rubric_version) BETWEEN 3 AND 120),
   source text NOT NULL DEFAULT 'manual_review',
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
@@ -21,6 +23,9 @@ CREATE TABLE IF NOT EXISTS writing_flow.web_substitute_access (
   CONSTRAINT web_substitute_access_slug_cohort_check CHECK (
     (cohort = 56 AND right(test_slug, 3) = 'k56') OR
     (cohort = 67 AND right(test_slug, 3) = 'k67')
+  ),
+  CONSTRAINT web_substitute_access_rubric_check CHECK (
+    NOT enabled OR rubric_version IS NOT NULL
   )
 );
 
@@ -33,7 +38,8 @@ CREATE OR REPLACE FUNCTION writing_flow.resolve_web_substitute_student(
 ) RETURNS TABLE (
   cohort smallint,
   erp_course_class_id bigint,
-  erp_student_contact_id bigint
+  erp_student_contact_id bigint,
+  rubric_version text
 ) LANGUAGE plpgsql STABLE SECURITY DEFINER
 SET search_path = pg_catalog, writing_flow, assessment, assessment_k56
 AS $function$
@@ -46,7 +52,7 @@ BEGIN
     RAISE EXCEPTION 'WEB_ROSTER_INPUT_INVALID';
   END IF;
 
-  SELECT access.cohort INTO v_cohort
+  SELECT access.cohort, access.rubric_version INTO v_cohort, rubric_version
   FROM writing_flow.web_substitute_access AS access
   WHERE access.test_slug = p_test_slug
     AND access.erp_course_class_id = p_class_id

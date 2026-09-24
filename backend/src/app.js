@@ -42,6 +42,17 @@ const teacherCommentCreate=z.object({sectionKey:lessonSection,fieldKey:lessonSec
 const teacherCommentReply=z.object({body:teacherCommentBody,requestId:uuid});
 const teacherCommentStatus=z.object({status:z.enum(['open','addressed']),requestId:uuid});
 const writingSourceType=z.enum(['lark_homework','google_classroom','manual','term_test']);
+const webSubstituteIdentity=z.object({
+ testSlug:z.enum(['substitute-test-1-k56','substitute-test-2-k56',
+   'substitute-test-1-k67','substitute-test-2-k67']),
+ classId:z.number().int().positive(),
+ studentName:z.string().trim().min(2).max(120)
+});
+const webSubstituteSubmission=webSubstituteIdentity.extend({
+ attemptId:uuid,
+ taskNumber:z.number().int().min(1).max(2),
+ essay:z.string().min(1).max(40000)
+});
 const writingPairIntake=z.object({
  sourceType:writingSourceType.default('lark_homework'),
  sourceId:uuid.nullable().optional(),
@@ -297,7 +308,7 @@ export function writingWriteRateLimit(req) {
 function cors(config){return(req,res,next)=>{const origin=req.get('origin');if(origin&&!config.allowedOrigins.has(origin))return res.status(403).json({ok:false,error:'ORIGIN_NOT_ALLOWED'});if(origin){res.set('Access-Control-Allow-Origin',origin);res.set('Vary','Origin');}res.set('Access-Control-Allow-Credentials','true');res.set('Access-Control-Allow-Methods','GET, POST, PUT, DELETE, OPTIONS');res.set('Access-Control-Allow-Headers','Authorization, Content-Type, If-None-Match, If-Match, x-izone-csrf');res.set('Access-Control-Expose-Headers','ETag, Retry-After, X-Writing-Request-Id');res.set('Cache-Control','no-store');return req.method==='OPTIONS'?res.status(204).end():next();};}
 function csvCell(value){const text=String(value??'');return /[",\r\n]/.test(text)?`"${text.replaceAll('"','""')}"`:text;}
 
-export function createApp({config,pool,service,lessonService=service,provisionalService=null,lmsResultService=null,teacherCommentService=null,teacherClassAccess=null,writingFlowService=null,writingFlowStage=null,writingFlowHandoff=null,writingFlowAiCall=null,writingFlowScan=null,writingFlowTrccRepair=null,teacherAuth=null,adminAuth=(_q,r)=>r.status(503).json({ok:false,error:'ADMIN_AUTH_NOT_CONFIGURED'})}){
+export function createApp({config,pool,service,lessonService=service,provisionalService=null,lmsResultService=null,teacherCommentService=null,teacherClassAccess=null,writingFlowService=null,writingFlowWebIntake=null,writingFlowStage=null,writingFlowHandoff=null,writingFlowAiCall=null,writingFlowScan=null,writingFlowTrccRepair=null,teacherAuth=null,adminAuth=(_q,r)=>r.status(503).json({ok:false,error:'ADMIN_AUTH_NOT_CONFIGURED'})}){
  const app=express();app.disable('x-powered-by');app.set('trust proxy',config.trustProxyHops);
  // Ghi mã truy vết trước khi CORS hoặc giới hạn tốc độ chặn yêu cầu Writing.
  app.use('/api/v1/internal/writing-flow',writingFlowRequestLog());
@@ -307,6 +318,7 @@ export function createApp({config,pool,service,lessonService=service,provisional
  const teacherManage=(q,r,next)=>q.reviewer?.canManage===true?next():r.status(403).json({ok:false,error:'MANAGE_PERMISSION_REQUIRED'});
  const writingFlowAdmin=(q,r,next)=>reviewerIsAdmin(q.reviewer)?next():r.status(403).json({ok:false,error:'ADMIN_PERMISSION_REQUIRED'});
  const writingFlowReady=(q,r,next)=>writingFlowService?next():r.status(503).json({ok:false,error:'WRITING_FLOW_NOT_READY'});
+ const webIntakeReady=(q,r,next)=>writingFlowWebIntake?next():r.status(503).json({ok:false,error:'WEB_INTAKE_NOT_READY'});
  const writingStageReady=(q,r,next)=>writingFlowStage?next():r.status(503).json({ok:false,error:'WRITING_STAGE_NOT_READY'});
  const writingHandoffReady=(q,r,next)=>writingFlowHandoff?next():r.status(503).json({ok:false,error:'WRITING_HANDOFF_NOT_READY'});
  const writingAiReady=(q,r,next)=>writingFlowAiCall?next():r.status(503).json({ok:false,error:'WRITING_AI_CALL_NOT_READY'});
@@ -359,10 +371,24 @@ export function createApp({config,pool,service,lessonService=service,provisional
  app.get('/api/v1/attempts/:attemptRef',asyncRoute(async(q,r)=>{const attempt=await service.getAttempt(parse(uuid,q.params.attemptRef));const tag=`"attempt-${attempt.version}"`;if(q.get('if-none-match')===tag)return r.status(304).end();r.set('ETag',tag);return r.json({ok:true,attempt});}));
  app.post('/api/v1/attempts/:attemptRef/retry',writes,asyncRoute(async(q,r)=>r.status(202).json({ok:true,attempt:await service.retryAttempt(parse(uuid,q.params.attemptRef))})));
  const internal=(q,r,next)=>sameSecret((q.get('authorization')||'').replace(/^Bearer\s+/i,''),config.internalApiToken)?next():r.status(401).json({ok:false,error:'UNAUTHORIZED'});
+ const webInternal=(q,r,next)=>sameSecret((q.get('authorization')||'').replace(/^Bearer\s+/i,''),config.webSubstituteApiToken)?next():r.status(401).json({ok:false,error:'UNAUTHORIZED'});
  app.post('/api/v1/internal/writing-flow/intake',internal,writingFlowReady,asyncRoute(async(q,r)=>{
    const receipt=await writingFlowService.intakePairs(parse(writingPairIntake,q.body));
    r.status(202).json({ok:true,receipt});
  }));
+ // Chỉ gateway có khóa nội bộ được mở lượt và nhận bài Substitute.
+ // Bản server chưa cấu hình registry đề sẽ trả 503, không trả 202 giả.
+ app.post('/api/v1/internal/writing-flow/web-substitute/attempts',webInternal,
+   webIntakeReady,asyncRoute(async(q,r)=>{
+     const attempt=await writingFlowWebIntake.openAttempt(parse(webSubstituteIdentity,q.body));
+     r.json({ok:true,attempt});
+   }));
+ app.post('/api/v1/internal/writing-flow/web-substitute/submissions',webInternal,
+   webIntakeReady,asyncRoute(async(q,r)=>{
+     const receipt=await writingFlowWebIntake.submitWriting(
+       parse(webSubstituteSubmission,q.body));
+     r.status(202).json({ok:true,receipt});
+   }));
  app.post('/api/v1/internal/writing-flow/source-issues',internal,writingFlowReady,asyncRoute(async(q,r)=>{
    r.status(202).json({ok:true,issue:await writingFlowService.recordSourceIssue(
      parse(writingSourceIssue,q.body))});

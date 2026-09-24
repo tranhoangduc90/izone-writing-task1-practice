@@ -48,11 +48,19 @@ export function createWebSubstituteQueue({ pool, encryptionKey, getPinnedPrompt 
       throw new ApiError(400, 'WEB_CLAIM_LIMIT_INVALID', 'Số bài lấy không hợp lệ.');
     }
     const jobs = await withTransaction(pool, async client => {
+      // Khóa ngắn bảo đảm nhiều poller không cùng vượt trần bốn bài web đang chạy.
+      await client.query(`SELECT pg_advisory_xact_lock(
+        hashtext('writing_flow_web_substitute_claim_capacity'))`);
+      const active = await client.query(`SELECT count(*)::int AS n
+        FROM writing_flow.web_substitute_submission
+        WHERE status='running' AND lease_expires_at>now()`);
+      const available = Math.max(0, 4 - Number(active.rows[0].n));
+      if (available === 0) return [];
       const due = await client.query(`SELECT submission_id
         FROM writing_flow.web_substitute_submission
         WHERE status='pending' AND next_attempt_at<=now() AND attempt_count<3
         ORDER BY next_attempt_at,created_at,submission_id
-        FOR UPDATE SKIP LOCKED LIMIT $1`, [limit]);
+        FOR UPDATE SKIP LOCKED LIMIT $1`, [Math.min(limit, available)]);
       const claimed = [];
       for (const dueRow of due.rows) {
         const result = await client.query(`SELECT s.*,a.test_slug,a.cohort,
@@ -184,6 +192,63 @@ export function createWebSubstituteQueue({ pool, encryptionKey, getPinnedPrompt 
     return receipt;
   }
 
+  // Dữ liệu vào: báo lỗi của đúng lease, phân biệt lỗi chắc chắn với kết quả chưa rõ.
+  // Việc chính: chỉ thử lại lỗi xảy ra trước tác động AI; tối đa ba lượt có giãn cách.
+  // Kết quả: lỗi bất định/hết lượt vào Cần kiểm tra, không tự chấm trùng.
+  // Khi lỗi: callback cũ hoặc mã lỗi ngoài danh sách không đổi hàng chờ.
+  async function reportFailure(input) {
+    ready();
+    checkWorkInput(input);
+    const allowed = new Set(['WEB_GRADER_PRECHECK_FAILED',
+      'WEB_GRADER_RATE_LIMITED', 'WEB_GRADER_OUTPUT_INVALID',
+      'WEB_GRADER_RESULT_UNKNOWN']);
+    if (!allowed.has(input.errorCode) || typeof input.definiteFailure !== 'boolean') {
+      throw new ApiError(400, 'WEB_FAILURE_INVALID', 'Loại lỗi chấm chưa hợp lệ.');
+    }
+    const safeToRetry = input.definiteFailure === true
+      && ['WEB_GRADER_PRECHECK_FAILED', 'WEB_GRADER_RATE_LIMITED']
+        .includes(input.errorCode);
+    const receipt = await withTransaction(pool, async client => {
+      const found = await client.query(`SELECT s.*,a.test_slug,a.cohort,
+          a.erp_course_class_id,a.erp_student_contact_id,a.rubric_version
+        FROM writing_flow.web_substitute_submission AS s
+        JOIN writing_flow.web_substitute_attempt AS a ON a.attempt_id=s.attempt_id
+        WHERE s.submission_id=$1 FOR UPDATE OF s`, [input.submissionId]);
+      const row = found.rows[0];
+      if (found.rows.length !== 1 || !sameIdentity(row, input)) {
+        throw new ApiError(409, 'WEB_WORK_IDENTITY_MISMATCH',
+          'Lỗi không khớp công việc đã lưu.');
+      }
+      if (row.status !== 'running' || row.lease_token !== input.leaseToken
+        || row.lease_expires_at <= new Date()) {
+        throw new ApiError(409, 'WEB_WORK_LEASE_STALE',
+          'Lượt xử lý đã hết hạn hoặc không còn hiệu lực.');
+      }
+      const retry = safeToRetry && Number(row.attempt_count) < 3;
+      const nextSeconds = Number(row.attempt_count) === 1 ? 60 : 300;
+      const updated = await client.query(`UPDATE writing_flow.web_substitute_submission
+        SET status=$2,lease_token=NULL,lease_expires_at=NULL,
+          next_attempt_at=CASE WHEN $3::boolean THEN now()+($4::integer * interval '1 second')
+            ELSE next_attempt_at END,
+          last_error_code=$5,updated_at=now()
+        WHERE submission_id=$1 RETURNING submission_id,status,next_attempt_at`,
+      [row.submission_id, retry ? 'pending' : 'needs_review', retry,
+        nextSeconds, input.errorCode]);
+      return { submissionId: updated.rows[0].submission_id,
+        status: updated.rows[0].status,
+        nextAttemptAt: retry ? updated.rows[0].next_attempt_at : null };
+    });
+    const readback = await pool.query(`SELECT status,last_error_code
+      FROM writing_flow.web_substitute_submission WHERE submission_id=$1`,
+    [receipt.submissionId]);
+    if (readback.rows.length !== 1 || readback.rows[0].status !== receipt.status
+      || readback.rows[0].last_error_code !== input.errorCode) {
+      throw new ApiError(503, 'WEB_FAILURE_READBACK_UNKNOWN',
+        'Chưa xác nhận được trạng thái lỗi chấm.');
+    }
+    return receipt;
+  }
+
   // Dữ liệu vào: lease quá hạn, có thể là AI vẫn chạy hoặc mất callback.
   // Việc chính: dừng trạng thái vô hạn, giữ bài/phiếu để người vận hành đối chiếu.
   // Kết quả: số phiếu cần kiểm tra; không tự gọi AI lại khi kết quả còn bất định.
@@ -202,8 +267,19 @@ export function createWebSubstituteQueue({ pool, encryptionKey, getPinnedPrompt 
           last_error_code='WEB_WORK_LEASE_EXPIRED',updated_at=now()
         FROM expired WHERE s.submission_id=expired.submission_id
         RETURNING s.submission_id`, [limit]);
+    if (result.rows.length) {
+      const ids = result.rows.map(row => row.submission_id);
+      const readback = await pool.query(`SELECT count(*)::int AS n
+        FROM writing_flow.web_substitute_submission
+        WHERE submission_id=ANY($1::uuid[]) AND status='needs_review'
+          AND last_error_code='WEB_WORK_LEASE_EXPIRED'`, [ids]);
+      if (Number(readback.rows[0]?.n) !== ids.length) {
+        throw new ApiError(503, 'WEB_SWEEP_READBACK_UNKNOWN',
+          'Chưa xác nhận được trạng thái bài quá hạn.');
+      }
+    }
     return { needsReview: result.rows.length };
   }
 
-  return { claimDue, completeWork, markExpiredForReview };
+  return { claimDue, completeWork, reportFailure, markExpiredForReview };
 }

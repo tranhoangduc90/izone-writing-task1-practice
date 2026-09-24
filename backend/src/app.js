@@ -415,6 +415,15 @@ export function createApp({config,pool,service,lessonService=service,provisional
      const input=parse(webWorkIdentity.extend({result:z.unknown()}),q.body);
      r.json({ok:true,receipt:await writingFlowWebQueue.completeWork(input)});
    }));
+ app.post('/api/v1/internal/writing-flow/web-substitute/work/fail',webGrader,
+   webQueueReady,asyncRoute(async(q,r)=>{
+     const input=parse(webWorkIdentity.extend({
+       errorCode:z.enum(['WEB_GRADER_PRECHECK_FAILED','WEB_GRADER_RATE_LIMITED',
+         'WEB_GRADER_OUTPUT_INVALID','WEB_GRADER_RESULT_UNKNOWN']),
+       definiteFailure:z.boolean()
+     }),q.body);
+     r.json({ok:true,receipt:await writingFlowWebQueue.reportFailure(input)});
+   }));
  app.post('/api/v1/internal/writing-flow/web-substitute/work/expire',webGrader,
    webQueueReady,asyncRoute(async(q,r)=>{
      const {limit}=parse(z.object({limit:z.number().int().min(1).max(100).default(100)}),q.body);

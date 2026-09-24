@@ -98,6 +98,8 @@ test('khóa gateway không lấy việc chấm và khóa grader không mở lư�
       return [];
     },
     markExpiredForReview: async () => ({ needsReview: 0 }),
+    reportFailure: async input => ({ submissionId: input.submissionId,
+      status: 'needs_review' }),
   });
   const denied = await request(candidate).post(`${base}/work/claim`)
     .set('Authorization', `Bearer ${token}`).send({ limit: 1 });
@@ -114,4 +116,16 @@ test('khóa gateway không lấy việc chấm và khóa grader không mở lư�
     .set('Authorization', `Bearer ${graderToken}`).send({ limit: 1 });
   assert.equal(expired.status, 200);
   assert.equal(expired.body.summary.needsReview, 0);
+  const failure = await request(candidate).post(`${base}/work/fail`)
+    .set('Authorization', `Bearer ${graderToken}`).send({
+      submissionId: '22222222-2222-4222-8222-222222222222',
+      attemptId, runKey: '33333333-3333-4333-8333-333333333333',
+      leaseToken: '44444444-4444-4444-8444-444444444444',
+      testSlug: identity.testSlug, classId: identity.classId,
+      erpStudentId: 1001, taskNumber: 1, rubricVersion: 'pizza-v1',
+      promptSha256: 'a'.repeat(64), imageSha256: 'b'.repeat(64),
+      errorCode: 'WEB_GRADER_RESULT_UNKNOWN', definiteFailure: false,
+    });
+  assert.equal(failure.status, 200);
+  assert.equal(failure.body.receipt.status, 'needs_review');
 });

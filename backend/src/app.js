@@ -53,6 +53,7 @@ const webSubstituteSubmission=webSubstituteIdentity.extend({
  taskNumber:z.number().int().min(1).max(2),
  essay:z.string().min(1).max(40000)
 });
+const webSubstituteStatus=webSubstituteIdentity.extend({attemptId:uuid});
 const writingPairIntake=z.object({
  sourceType:writingSourceType.default('lark_homework'),
  sourceId:uuid.nullable().optional(),
@@ -388,6 +389,11 @@ export function createApp({config,pool,service,lessonService=service,provisional
      const receipt=await writingFlowWebIntake.submitWriting(
        parse(webSubstituteSubmission,q.body));
      r.status(202).json({ok:true,receipt});
+   }));
+ app.post('/api/v1/internal/writing-flow/web-substitute/status',webInternal,
+   webIntakeReady,asyncRoute(async(q,r)=>{
+     const status=await writingFlowWebIntake.getStatus(parse(webSubstituteStatus,q.body));
+     r.json({ok:true,status});
    }));
  app.post('/api/v1/internal/writing-flow/source-issues',internal,writingFlowReady,asyncRoute(async(q,r)=>{
    r.status(202).json({ok:true,issue:await writingFlowService.recordSourceIssue(

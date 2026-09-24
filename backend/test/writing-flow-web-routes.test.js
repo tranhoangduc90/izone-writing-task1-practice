@@ -47,6 +47,10 @@ test('route chỉ trả 202 sau biên nhận có đọc lại từ service', asy
       return { submissionId: '22222222-2222-4222-8222-222222222222',
         attemptId, taskNumber: 1, status: 'pending' };
     },
+    getStatus: async input => {
+      calls.push({ action: 'status', input });
+      return { attemptId, submissionStatus: 'pending', result: null };
+    },
   });
   const open = await request(candidate).post(`${base}/attempts`)
     .set('Authorization', `Bearer ${token}`).send(identity);
@@ -59,11 +63,15 @@ test('route chỉ trả 202 sau biên nhận có đọc lại từ service', asy
   assert.equal(receipt.status, 202);
   assert.equal(receipt.body.receipt.status, 'pending');
   assert.equal(Object.hasOwn(receipt.body.receipt, 'runKey'), false);
-  assert.deepEqual(calls.map(row => row.action), ['open', 'submit']);
+  const status = await request(candidate).post(`${base}/status`)
+    .set('Authorization', `Bearer ${token}`).send({ ...identity, attemptId });
+  assert.equal(status.status, 200);
+  assert.equal(status.body.status.submissionStatus, 'pending');
+  assert.deepEqual(calls.map(row => row.action), ['open', 'submit', 'status']);
   const invalid = await request(candidate).post(`${base}/submissions`)
     .set('Authorization', `Bearer ${token}`).send({ ...submission, taskNumber: 3 });
   assert.equal(invalid.status, 400);
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
 });
 
 test('lỗi đọc lại sau ghi không bị route đổi thành accepted', async () => {

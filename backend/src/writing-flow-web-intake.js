@@ -1,6 +1,6 @@
 import { withTransaction } from './db.js';
 import { ApiError } from './service.js';
-import { keyFromHex, seal, sha256 } from './writing-flow-crypto.js';
+import { keyFromHex, open, seal, sha256 } from './writing-flow-crypto.js';
 import { WEB_SUBSTITUTE_PROFILES } from './writing-flow-web-identity.js';
 
 const SHA256 = /^[0-9a-f]{64}$/u;
@@ -212,5 +212,62 @@ export function createWebSubstituteIntake({ pool, encryptionKey, getPinnedPrompt
       taskNumber: receipt.taskNumber, status: row.status };
   }
 
-  return { openAttempt, submitWriting };
+  // Dữ liệu vào: cùng tên/lớp/đề được chọn lại và mã lượt do backend cấp.
+  // Việc chính: đối chiếu roster và lượt trước khi đọc phiếu, giải mã kết quả nếu đã có.
+  // Kết quả: chỉ trạng thái/kết quả của đúng lượt; không biến phiếu thiếu thành “đang chấm”.
+  // Khi lỗi: không trả bài hoặc nhận xét của học viên khác.
+  async function getStatus(input) {
+    if (!key) throw new ApiError(503, 'WEB_INTAKE_NOT_READY',
+      'Nơi lưu bài web chưa sẵn sàng.');
+    const identity = requestIdentity(input);
+    if (typeof input.attemptId !== 'string' || !UUID.test(input.attemptId)) {
+      throw new ApiError(400, 'WEB_ATTEMPT_REQUEST_INVALID', 'Mã lượt chưa hợp lệ.');
+    }
+    const status = await withTransaction(pool, async client => {
+      const student = await resolveStudent(client, identity, true);
+      const found = await client.query(`SELECT a.attempt_id,a.status AS attempt_status,
+          a.task_number,a.rubric_version,s.submission_id,s.status AS submission_status,
+          s.result_ciphertext,s.result_sha256,s.task_score,
+          (s.status='running' AND s.lease_expires_at<=now()) AS lease_expired
+        FROM writing_flow.web_substitute_attempt AS a
+        LEFT JOIN writing_flow.web_substitute_submission AS s
+          ON s.attempt_id=a.attempt_id AND s.task_number=a.task_number
+        WHERE a.attempt_id=$1 AND a.test_slug=$2 AND a.cohort=$3
+          AND a.erp_course_class_id=$4 AND a.erp_student_contact_id=$5`,
+      [input.attemptId, identity.testSlug, identity.profile.cohort,
+        identity.classId, student.erpStudentId]);
+      const row = found.rows[0];
+      if (found.rows.length !== 1) {
+        throw new ApiError(404, 'WEB_ATTEMPT_NOT_FOUND',
+          'Không tìm thấy lượt của học viên trong lớp/đề này.');
+      }
+      if (row.attempt_status !== 'open' && !row.submission_id) {
+        throw new ApiError(503, 'WEB_RECEIPT_MISSING',
+          'Lượt đã nộp nhưng chưa xác nhận được phiếu nhận bài.');
+      }
+      const submissionStatus = row.lease_expired === true ? 'needs_review'
+        : row.submission_status;
+      const resultText = submissionStatus === 'completed'
+        || submissionStatus === 'delivered'
+        ? open(row.result_ciphertext, key) : null;
+      if (resultText !== null && sha256(resultText) !== row.result_sha256.trim()) {
+        throw new ApiError(503, 'WEB_RESULT_READBACK_MISMATCH',
+          'Chưa xác nhận được kết quả bài thi.');
+      }
+      const result = resultText === null ? null : JSON.parse(resultText);
+      if (result && (Number(result.taskNumber) !== Number(row.task_number)
+        || Number(result.taskScore) !== Number(row.task_score))) {
+        throw new ApiError(503, 'WEB_RESULT_READBACK_MISMATCH',
+          'Kết quả không khớp Task hoặc điểm đã lưu.');
+      }
+      return { attemptId: row.attempt_id, testSlug: identity.testSlug,
+        classId: identity.classId, taskNumber: Number(row.task_number),
+        rubricVersion: row.rubric_version, attemptStatus: row.attempt_status,
+        submissionId: row.submission_id || null, submissionStatus,
+        taskScore: result ? Number(row.task_score) : null, result };
+    });
+    return status;
+  }
+
+  return { openAttempt, submitWriting, getStatus };
 }

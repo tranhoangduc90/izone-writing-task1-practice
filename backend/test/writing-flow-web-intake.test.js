@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { PGlite } from '@electric-sql/pglite';
-import { open, sha256 } from '../src/writing-flow-crypto.js';
+import { open, seal, sha256 } from '../src/writing-flow-crypto.js';
 import { createWebSubstituteIntake } from '../src/writing-flow-web-intake.js';
 
 const key = '11'.repeat(32);
@@ -103,6 +103,13 @@ test('lượt do server cấp và phiếu nhận bài mã hóa sống qua gửi 
     assert.equal(afterClose.attemptId, first.attemptId);
     assert.equal(afterClose.status, 'submitted');
     assert.equal((await service.submitWriting(request)).submissionId, receipt.submissionId);
+    const status = await service.getStatus({ ...identity(), attemptId: first.attemptId });
+    assert.equal(status.submissionId, receipt.submissionId);
+    assert.equal(status.submissionStatus, 'pending');
+    assert.equal(status.result, null);
+    await assert.rejects(service.getStatus({ ...identity(),
+      studentName: 'Học viên khác', attemptId: first.attemptId }),
+    error => error.code === 'WEB_ROSTER_NAME_NOT_FOUND');
     await db.exec(`RESET ROLE; INSERT INTO assessment_k56.term_test_roster VALUES
       ('term-test-1-k56',1252,1002,
        '22222222-2222-4222-8222-222222222222','Học viên khác',true);
@@ -110,6 +117,63 @@ test('lượt do server cấp và phiếu nhận bài mã hóa sống qua gửi 
     await assert.rejects(service.openAttempt({ ...identity(),
       studentName: 'Học viên khác' }),
     error => error.code === 'WEB_TEST_ACCESS_CLOSED');
+  } finally {
+    await db.close();
+  }
+});
+
+test('đọc lại kết quả mã hóa chỉ qua đúng lớp và lượt', async () => {
+  const { db, pool, getPinnedPrompt } = await fixture();
+  try {
+    const service = createWebSubstituteIntake({ pool, encryptionKey: key, getPinnedPrompt });
+    const attempt = await service.openAttempt(identity());
+    const receipt = await service.submitWriting({ ...identity(),
+      attemptId: attempt.attemptId, essay: 'Synthetic answer for result readback.' });
+    const result = { taskNumber: 1, taskScore: 6.5,
+      report: 'Synthetic result, not a student grade.' };
+    await db.query(`UPDATE writing_flow.web_substitute_submission
+      SET status='completed',result_ciphertext=$2,result_sha256=$3,
+        task_score=6.5,completed_at=now()
+      WHERE submission_id=$1`, [receipt.submissionId,
+      seal(JSON.stringify(result), Buffer.from(key, 'hex')),
+      sha256(JSON.stringify(result))]);
+    const viewed = await service.getStatus({ ...identity(),
+      attemptId: attempt.attemptId });
+    assert.equal(viewed.submissionStatus, 'completed');
+    assert.equal(viewed.taskScore, 6.5);
+    assert.deepEqual(viewed.result, result);
+    await assert.rejects(service.getStatus({ ...identity(), classId: 9999,
+      attemptId: attempt.attemptId }),
+    error => error.code === 'WEB_TEST_ACCESS_CLOSED');
+    await assert.rejects(service.getStatus({ ...identity(),
+      attemptId: '33333333-3333-4333-8333-333333333333' }),
+    error => error.code === 'WEB_ATTEMPT_NOT_FOUND');
+    await db.query(`UPDATE writing_flow.web_substitute_submission
+      SET task_score=7 WHERE submission_id=$1`, [receipt.submissionId]);
+    await assert.rejects(service.getStatus({ ...identity(),
+      attemptId: attempt.attemptId }),
+    error => error.code === 'WEB_RESULT_READBACK_MISMATCH');
+  } finally {
+    await db.close();
+  }
+});
+
+test('lượt chấm quá hạn hiện cần kiểm tra, không giả đang chấm mãi', async () => {
+  const { db, pool, getPinnedPrompt } = await fixture();
+  try {
+    const service = createWebSubstituteIntake({ pool, encryptionKey: key, getPinnedPrompt });
+    const attempt = await service.openAttempt(identity());
+    const receipt = await service.submitWriting({ ...identity(),
+      attemptId: attempt.attemptId, essay: 'Synthetic expired work.' });
+    await db.query(`UPDATE writing_flow.web_substitute_submission
+      SET status='running',attempt_count=1,
+        lease_token='77777777-7777-4777-8777-777777777777',
+        lease_expires_at=now()-interval '1 minute'
+      WHERE submission_id=$1`, [receipt.submissionId]);
+    const status = await service.getStatus({ ...identity(),
+      attemptId: attempt.attemptId });
+    assert.equal(status.submissionStatus, 'needs_review');
+    assert.equal(status.result, null);
   } finally {
     await db.close();
   }

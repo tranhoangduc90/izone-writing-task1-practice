@@ -140,16 +140,25 @@ test('tra roster Substitute bằng quyền tối thiểu, không phụ thuộc C
       SET content_ciphertext=decode('abce','hex') WHERE attempt_id=$1`, [attemptId]),
     /permission denied/u);
     await assert.rejects(db.query(`UPDATE writing_flow.web_substitute_submission
-      SET status='registered' WHERE attempt_id=$1`, [attemptId]),
-    /web_substitute_submission_pair_check/u);
-    await db.exec(`RESET ROLE;`);
-    await db.exec(`INSERT INTO writing_flow.pair VALUES
-      ('77777777-7777-4777-8777-777777777777');`);
-    await db.exec(`SET ROLE writing_practice_api;`);
-    const registered = await db.query(`UPDATE writing_flow.web_substitute_submission
-      SET status='registered',pair_id='77777777-7777-4777-8777-777777777777'
-      WHERE attempt_id=$1 RETURNING pair_id,status`, [attemptId]);
-    assert.equal(registered.rows[0].status, 'registered');
+      SET status='running' WHERE attempt_id=$1`, [attemptId]),
+    /web_substitute_submission_lease_check/u);
+    await assert.rejects(db.query(`UPDATE writing_flow.web_substitute_submission
+      SET status='completed' WHERE attempt_id=$1`, [attemptId]),
+    /web_substitute_submission_result_check/u);
+    const running = await db.query(`UPDATE writing_flow.web_substitute_submission
+      SET status='running',attempt_count=1,
+        lease_token='77777777-7777-4777-8777-777777777777',
+        lease_expires_at=now()+interval '30 minutes'
+      WHERE attempt_id=$1 RETURNING status,attempt_count`, [attemptId]);
+    assert.equal(running.rows[0].status, 'running');
+    assert.equal(running.rows[0].attempt_count, 1);
+    const completed = await db.query(`UPDATE writing_flow.web_substitute_submission
+      SET status='completed',lease_token=NULL,lease_expires_at=NULL,
+        result_ciphertext=decode('abcd','hex'),result_sha256=repeat('c',64),
+        task_score=6.5,completed_at=now()
+      WHERE attempt_id=$1 RETURNING status,task_score`, [attemptId]);
+    assert.equal(completed.rows[0].status, 'completed');
+    assert.equal(Number(completed.rows[0].task_score), 6.5);
     await db.exec(`RESET ROLE;`);
   } finally {
     await db.close();

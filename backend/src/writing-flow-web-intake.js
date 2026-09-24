@@ -227,6 +227,7 @@ export function createWebSubstituteIntake({ pool, encryptionKey, getPinnedPrompt
       const student = await resolveStudent(client, identity, true);
       const found = await client.query(`SELECT a.attempt_id,a.status AS attempt_status,
           a.task_number,a.rubric_version,s.submission_id,s.status AS submission_status,
+          s.content_ciphertext,s.content_sha256,s.prompt_sha256,
           s.result_ciphertext,s.result_sha256,s.task_score,
           (s.status='running' AND s.lease_expires_at<=now()) AS lease_expired
         FROM writing_flow.web_substitute_attempt AS a
@@ -247,6 +248,29 @@ export function createWebSubstituteIntake({ pool, encryptionKey, getPinnedPrompt
       }
       const submissionStatus = row.lease_expired === true ? 'needs_review'
         : row.submission_status;
+      let submittedEssay = null;
+      if (row.submission_id) {
+        let content;
+        try {
+          const contentText = open(row.content_ciphertext, key);
+          if (sha256(contentText) !== row.content_sha256.trim()) {
+            throw new Error('WEB_CONTENT_HASH_MISMATCH');
+          }
+          content = JSON.parse(contentText);
+        } catch {
+          throw new ApiError(503, 'WEB_CONTENT_READBACK_MISMATCH',
+            'Chưa xác nhận được bài Writing đã lưu.');
+        }
+        if (Number(content.taskNumber) !== Number(row.task_number)
+          || typeof content.essay !== 'string'
+          || typeof content.topic !== 'string'
+          || sha256(content.topic.normalize('NFC').replace(/\s+/gu, ' ').trim())
+            !== row.prompt_sha256.trim()) {
+          throw new ApiError(503, 'WEB_CONTENT_READBACK_MISMATCH',
+            'Bài Writing đã lưu không khớp đề hoặc Task.');
+        }
+        submittedEssay = content.essay;
+      }
       const resultText = submissionStatus === 'completed'
         || submissionStatus === 'delivered'
         ? open(row.result_ciphertext, key) : null;
@@ -264,7 +288,7 @@ export function createWebSubstituteIntake({ pool, encryptionKey, getPinnedPrompt
         classId: identity.classId, taskNumber: Number(row.task_number),
         rubricVersion: row.rubric_version, attemptStatus: row.attempt_status,
         submissionId: row.submission_id || null, submissionStatus,
-        taskScore: result ? Number(row.task_score) : null, result };
+        submittedEssay, taskScore: result ? Number(row.task_score) : null, result };
     });
     return status;
   }

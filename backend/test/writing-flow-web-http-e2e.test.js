@@ -96,6 +96,7 @@ test('HTTP đầy đủ Substitute dùng cùng phiếu và trả đúng kết qu
       .set('Authorization', `Bearer ${gatewayToken}`)
       .send({ ...selected, attemptId });
     assert.equal(before.body.status.submissionStatus, 'pending');
+    assert.equal(before.body.status.submittedEssay, submission.essay);
     const deniedClaim = await request(app).post(`${base}/work/claim`)
       .set('Authorization', `Bearer ${gatewayToken}`).send({ limit: 1 });
     assert.equal(deniedClaim.status, 401);
@@ -121,6 +122,7 @@ test('HTTP đầy đủ Substitute dùng cùng phiếu và trả đúng kết qu
       .send({ ...selected, attemptId });
     assert.equal(viewed.status, 200);
     assert.equal(viewed.body.status.submissionStatus, 'completed');
+    assert.equal(viewed.body.status.submittedEssay, submission.essay);
     assert.equal(viewed.body.status.result.criteria.length, 4);
     const other = await request(app).post(`${base}/status`)
       .set('Authorization', `Bearer ${gatewayToken}`)

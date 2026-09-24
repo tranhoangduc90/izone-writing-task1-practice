@@ -106,6 +106,7 @@ test('lượt do server cấp và phiếu nhận bài mã hóa sống qua gửi 
     const status = await service.getStatus({ ...identity(), attemptId: first.attemptId });
     assert.equal(status.submissionId, receipt.submissionId);
     assert.equal(status.submissionStatus, 'pending');
+    assert.equal(status.submittedEssay, request.essay);
     assert.equal(status.result, null);
     await assert.rejects(service.getStatus({ ...identity(),
       studentName: 'Học viên khác', attemptId: first.attemptId }),
@@ -140,6 +141,7 @@ test('đọc lại kết quả mã hóa chỉ qua đúng lớp và lượt', asy
     const viewed = await service.getStatus({ ...identity(),
       attemptId: attempt.attemptId });
     assert.equal(viewed.submissionStatus, 'completed');
+    assert.equal(viewed.submittedEssay, 'Synthetic answer for result readback.');
     assert.equal(viewed.taskScore, 6.5);
     assert.deepEqual(viewed.result, result);
     await assert.rejects(service.getStatus({ ...identity(), classId: 9999,
@@ -153,6 +155,36 @@ test('đọc lại kết quả mã hóa chỉ qua đúng lớp và lượt', asy
     await assert.rejects(service.getStatus({ ...identity(),
       attemptId: attempt.attemptId }),
     error => error.code === 'WEB_RESULT_READBACK_MISMATCH');
+  } finally {
+    await db.close();
+  }
+});
+
+test('mở lại bằng tên chỉ trả bài đúng lượt; bài lưu hỏng không được hiển thị', async () => {
+  const { db, pool, getPinnedPrompt } = await fixture();
+  try {
+    const service = createWebSubstituteIntake({ pool, encryptionKey: key, getPinnedPrompt });
+    const first = await service.openAttempt(identity());
+    const receipt = await service.submitWriting({ ...identity(),
+      attemptId: first.attemptId, essay: 'Synthetic reopened essay.' });
+    await db.exec(`RESET ROLE; INSERT INTO assessment_k56.term_test_roster VALUES
+      ('term-test-1-k56',1252,1002,
+       '22222222-2222-4222-8222-222222222222','Học viên Hai',true);
+      SET ROLE writing_practice_api;`);
+    const other = { ...identity(), studentName: 'Học viên Hai' };
+    await assert.rejects(service.getStatus({ ...other, attemptId: first.attemptId }),
+      error => error.code === 'WEB_ATTEMPT_NOT_FOUND');
+    const reopened = await service.openAttempt(identity());
+    assert.equal(reopened.attemptId, first.attemptId);
+    const status = await service.getStatus({ ...identity(), attemptId: reopened.attemptId });
+    assert.equal(status.submittedEssay, 'Synthetic reopened essay.');
+    await db.exec('RESET ROLE;');
+    await db.query(`UPDATE writing_flow.web_substitute_submission
+      SET content_ciphertext=decode('abcd','hex') WHERE submission_id=$1`,
+    [receipt.submissionId]);
+    await db.exec('SET ROLE writing_practice_api;');
+    await assert.rejects(service.getStatus({ ...identity(), attemptId: first.attemptId }),
+      error => error.code === 'WEB_CONTENT_READBACK_MISMATCH');
   } finally {
     await db.close();
   }

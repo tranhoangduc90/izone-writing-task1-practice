@@ -84,6 +84,8 @@ const HIDDEN_CLASS_REASONS = ['excluded', 'excluded_ic_before_2065', 'excluded_i
 const visibleRegistrySql = alias => `(${alias}.class_code IS NULL
   OR coalesce(${alias}.eligibility_reason,'') <> ALL($VISIBLE_CLASS_REASONS$::text[]))`
   .replace('$VISIBLE_CLASS_REASONS$', `ARRAY[${HIDDEN_CLASS_REASONS.map(value => `'${value}'`).join(',')}]`);
+// Bài giả vẫn giữ trong database để xem nhật ký kiểm thử, nhưng không được tính là bài học viên.
+const visibleOperationalSourceSql = alias => `${alias}.source_app_id IS DISTINCT FROM 'codex_fixture'`;
 
 // Nhận vào: tối đa ba quy tắc sort từ dashboard, ví dụ finished:desc,student:asc.
 // Việc chính: chỉ đổi các khóa đã duyệt thành biểu thức SQL cố định; không đưa text người dùng vào SQL.
@@ -476,6 +478,7 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
           LEFT JOIN writing_flow.class_registry AS registry
             ON registry.class_code=coalesce(i.class_code,s.class_code)
          WHERE i.status=$6
+           AND ${visibleOperationalSourceSql('i')}
            AND registry.class_status IS DISTINCT FROM 'completed'
            AND ${visibleRegistrySql('registry')}
            AND ($1::text IS NULL OR coalesce(i.class_code,s.class_code)=$1)
@@ -570,6 +573,7 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
           LEFT JOIN writing_flow.class_registry AS registry ON registry.class_code=p.class_code
          WHERE registry.class_status IS DISTINCT FROM 'completed'
            AND ${visibleRegistrySql('registry')}
+           AND ${visibleOperationalSourceSql('p')}
          GROUP BY p.class_code,p.status,t.teacher_names
          ORDER BY p.class_code,p.status`);
       return result.rows;
@@ -594,6 +598,7 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
             ORDER BY array_position($3::text[],sr.stage_key) LIMIT 1
           ) AS active ON true
           WHERE p.status<>'superseded'
+            AND ${visibleOperationalSourceSql('p')}
             AND registry.class_status IS DISTINCT FROM 'completed'
             AND ${visibleRegistrySql('registry')}
             AND ($1::text IS NULL OR p.class_code=$1)
@@ -618,6 +623,7 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
             LEFT JOIN writing_flow.class_registry AS registry
               ON registry.class_code=coalesce(issue.class_code,source.class_code)
             WHERE issue.status='open'
+              AND ${visibleOperationalSourceSql('issue')}
               AND registry.class_status IS DISTINCT FROM 'completed'
               AND ${visibleRegistrySql('registry')}
               AND ($1::text IS NULL OR coalesce(issue.class_code,source.class_code)=$1)
@@ -635,6 +641,7 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
             LEFT JOIN teacher_assignments AS teachers ON teachers.class_code=pair.class_code
             LEFT JOIN writing_flow.class_registry AS registry ON registry.class_code=pair.class_code
             WHERE review.status<>'resolved'
+              AND ${visibleOperationalSourceSql('pair')}
               AND review_stage.status='needs_review'
               AND pair.skipped_at IS NULL
               AND pair.status<>'superseded'
@@ -750,6 +757,7 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
           LEFT JOIN writing_flow.class_registry AS registry ON registry.class_code=p.class_code
           WHERE coalesce(task.historical_evidence->>'source','') NOT IN
               ('restored_legacy_result','google_docs_result_link')
+            AND ${visibleOperationalSourceSql('p')}
             AND ${visibleRegistrySql('registry')}
             AND ($1::text IS NULL OR p.class_code=$1)
             AND ($2::text IS NULL OR $2=ANY(coalesce(nullif(source.teacher_names,ARRAY[]::text[]),
@@ -785,6 +793,7 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
           LEFT JOIN writing_flow.class_registry AS registry ON registry.class_code=p.class_code
           WHERE task.historical_evidence->>'source' IN
               ('restored_legacy_result','google_docs_result_link')
+            AND ${visibleOperationalSourceSql('p')}
             AND task.task_score IS NOT NULL AND task.delivered_at IS NOT NULL
             AND ${visibleRegistrySql('registry')}
             AND ($1::text IS NULL OR p.class_code=$1)
@@ -806,6 +815,7 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
           LEFT JOIN teacher_assignments AS teachers ON teachers.class_code=p.class_code
           LEFT JOIN writing_flow.class_registry AS registry ON registry.class_code=p.class_code
           WHERE p.status='delivered' AND p.skipped_at IS NULL
+            AND ${visibleOperationalSourceSql('p')}
             AND ${visibleRegistrySql('registry')}
             AND ($1::text IS NULL OR p.class_code=$1)
             AND ($2::text IS NULL OR $2=ANY(coalesce(nullif(source.teacher_names,ARRAY[]::text[]),
@@ -906,6 +916,7 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
              LIMIT 1
           ) AS current_stage ON true
          WHERE ($1::text IS NULL OR p.class_code = $1)
+           AND ${visibleOperationalSourceSql('p')}
            AND ($2::text IS NULL OR $2 = ANY(coalesce(nullif(s.teacher_names,ARRAY[]::text[]),t.teacher_names,ARRAY[]::text[])))
            AND p.status<>'superseded'
            AND ${visibleRegistrySql('registry')}
@@ -1044,6 +1055,7 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
           JOIN writing_flow.stage_result AS s
             ON s.pair_id = r.pair_id AND s.stage_key = r.stage_key
          WHERE r.status <> 'resolved'
+           AND ${visibleOperationalSourceSql('p')}
            AND s.status='needs_review'
            AND s.cycle_no=r.cycle_no
            AND p.skipped_at IS NULL

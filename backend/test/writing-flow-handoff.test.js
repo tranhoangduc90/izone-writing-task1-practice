@@ -127,6 +127,40 @@ test('mỗi lượt dành tối đa hai mươi chỗ cho bước ghi Google và 
   assert.doesNotMatch(claims[1].sql, /sibling_pair\.homework_file_id/u);
 });
 
+test('một trăm bàn giao giữ đúng cặp và phiên bản khi cấp đồng thời nhiều bước', async () => {
+  const client = {
+    async query(sql, params = []) {
+      if (!sql.includes('RETURNING h.handoff_id')) return { rows: [], rowCount: 0 };
+      const delivery = sql.includes("h.to_stage='deliver'");
+      const firstIndex = delivery ? 0 : 20;
+      const rows = Array.from({ length: params[0] }, (_, offset) => {
+        const index = firstIndex + offset;
+        return {
+          handoff_id: `handoff-${index}`,
+          pair_id: `pair-${index}`,
+          to_stage: delivery ? 'deliver' : (index % 2 ? 'main' : 'critic'),
+          send_count: 1,
+          submission_revision: index.toString(16).padStart(64, '0'),
+        };
+      });
+      return { rows, rowCount: rows.length };
+    },
+    release() {},
+  };
+  const pool = { async connect() { return client; } };
+  const rows = await createWritingFlowHandoff({ pool }).due(100);
+  assert.equal(rows.length, 100);
+  assert.equal(new Set(rows.map(row => row.handoffId)).size, 100);
+  assert.equal(new Set(rows.map(row => row.pairId)).size, 100);
+  for (let index = 0; index < rows.length; index += 1) {
+    assert.equal(rows[index].handoffId, `handoff-${index}`);
+    assert.equal(rows[index].pairId, `pair-${index}`);
+    assert.equal(rows[index].revision, index.toString(16).padStart(64, '0'));
+    assert.equal(rows[index].stageKey, index < 20 ? 'deliver'
+      : (index % 2 ? 'main' : 'critic'));
+  }
+});
+
 test('backend nhận bàn giao mới ngay; chỉ lượt đã gửi mới chờ sáu giờ để cứu hộ', () => {
   const intakeSource = fs.readFileSync(new URL('../src/writing-flow-intake.js', import.meta.url), 'utf8');
   const stageSource = fs.readFileSync(new URL('../src/writing-flow-stage.js', import.meta.url), 'utf8');

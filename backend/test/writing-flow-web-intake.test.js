@@ -9,6 +9,7 @@ const key = '11'.repeat(32);
 const migrationUrls = [
   '../../docs/migrations/2026-09-24-writing-flow-web-substitute-roster-v16.sql',
   '../../docs/migrations/2026-09-24-writing-flow-web-substitute-intake-v17.sql',
+  '../../docs/migrations/2026-09-24-writing-flow-web-substitute-portal-v18.sql',
 ].map(path => new URL(path, import.meta.url));
 
 async function fixture() {

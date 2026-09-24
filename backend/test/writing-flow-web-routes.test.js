@@ -6,20 +6,42 @@ import { ApiError } from '../src/service.js';
 
 const token = 'w'.repeat(32);
 const graderToken = 'g'.repeat(32);
+const portalToken = 't'.repeat(32);
 const base = '/api/v1/internal/writing-flow/web-substitute';
 const identity = { testSlug: 'substitute-test-2-k56', classId: 1252,
   studentName: 'Học viên thử' };
 const attemptId = '11111111-1111-4111-8111-111111111111';
 
-function app(writingFlowWebIntake = null, writingFlowWebQueue = null) {
+function app(writingFlowWebIntake = null, writingFlowWebQueue = null,
+  writingFlowWebPortal = null) {
   return createApp({
     config: { trustProxyHops: 0, allowedOrigins: new Set(),
       internalApiToken: 'i'.repeat(32), webSubstituteApiToken: token,
-      webSubstituteGraderToken: graderToken },
+      webSubstituteGraderToken: graderToken,
+      webSubstitutePortalToken: portalToken },
     pool: { query: async () => ({ rows: [] }) },
     service: {}, writingFlowWebIntake, writingFlowWebQueue,
+    writingFlowWebPortal,
   });
 }
+
+test('route Portal dùng khóa riêng; chưa bật adapter thì không lấy phiếu', async () => {
+  const path = `${base}/portal/claim`;
+  const gateway = await request(app()).post(path)
+    .set('Authorization', `Bearer ${token}`).send({ limit: 1 });
+  assert.equal(gateway.status, 401);
+  const grader = await request(app()).post(path)
+    .set('Authorization', `Bearer ${graderToken}`).send({ limit: 1 });
+  assert.equal(grader.status, 401);
+  const unavailable = await request(app()).post(path)
+    .set('Authorization', `Bearer ${portalToken}`).send({ limit: 1 });
+  assert.equal(unavailable.status, 503);
+  const candidate = app(null, null, { claimDue: async () => [] });
+  const claimed = await request(candidate).post(path)
+    .set('Authorization', `Bearer ${portalToken}`).send({ limit: 1 });
+  assert.equal(claimed.status, 200);
+  assert.deepEqual(claimed.body.jobs, []);
+});
 
 // Dữ liệu vào: yêu cầu gateway giả; không gửi bài hoặc thông tin học viên thật.
 // Việc chính: kiểm Bearer, schema, 503 khi chưa cấu hình và 202 sau phiếu nhận.

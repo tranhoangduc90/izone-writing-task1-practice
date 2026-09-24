@@ -6,12 +6,14 @@ import request from 'supertest';
 import { createApp } from '../src/app.js';
 import { createWebSubstituteIntake } from '../src/writing-flow-web-intake.js';
 import { createWebSubstituteQueue } from '../src/writing-flow-web-queue.js';
+import { createWebSubstitutePortalOutbox } from '../src/writing-flow-web-portal-outbox.js';
 import { getPinnedWebPrompt, WEB_SUBSTITUTE_REGISTRY } from '../src/writing-flow-web-registry.js';
 import { TEST_TASK_DEFINITIONS } from '../src/writing-flow-test.js';
 
 const base = '/api/v1/internal/writing-flow/web-substitute';
 const gatewayToken = 'w'.repeat(32);
 const graderToken = 'g'.repeat(32);
+const portalToken = 't'.repeat(32);
 const key = '11'.repeat(32);
 const pinned = WEB_SUBSTITUTE_REGISTRY['substitute-test-2-k56'];
 const selected = { testSlug: pinned.testSlug, classId: 1252,
@@ -40,6 +42,7 @@ async function fixture() {
   for (const path of [
     '../../docs/migrations/2026-09-24-writing-flow-web-substitute-roster-v16.sql',
     '../../docs/migrations/2026-09-24-writing-flow-web-substitute-intake-v17.sql',
+    '../../docs/migrations/2026-09-24-writing-flow-web-substitute-portal-v18.sql',
   ]) await db.exec(await readFile(new URL(path, import.meta.url), 'utf8'));
   await db.query(`INSERT INTO writing_flow.web_substitute_access
     (test_slug,cohort,erp_course_class_id,rubric_version,enabled)
@@ -52,12 +55,15 @@ async function fixture() {
   const app = createApp({
     config: { trustProxyHops: 0, allowedOrigins: new Set(),
       internalApiToken: 'i'.repeat(32), webSubstituteApiToken: gatewayToken,
-      webSubstituteGraderToken: graderToken },
+      webSubstituteGraderToken: graderToken,
+      webSubstitutePortalToken: portalToken },
     pool, service: {},
     writingFlowWebIntake: createWebSubstituteIntake({ pool,
       encryptionKey: key, getPinnedPrompt: getPinnedWebPrompt }),
     writingFlowWebQueue: createWebSubstituteQueue({ pool,
       encryptionKey: key, getPinnedPrompt: getPinnedWebPrompt }),
+    writingFlowWebPortal: createWebSubstitutePortalOutbox({ pool,
+      encryptionKey: key }),
   });
   return { db, app };
 }
@@ -151,11 +157,46 @@ test('HTTP đầy đủ Substitute dùng cùng phiếu và trả đúng kết qu
       .send({ ...selected, attemptId });
     assert.equal(viewed.status, 200);
     assert.equal(viewed.body.status.submissionStatus, 'completed');
+    assert.equal(viewed.body.status.portalSyncStatus, 'pending');
     assert.equal(viewed.body.status.submittedEssay, submission.essay);
     assert.deepEqual(viewed.body.status.sectionResults, submission.sectionResults);
     assert.equal(viewed.body.status.result.criteria.length, 4);
     assert.deepEqual(viewed.body.status.result.criteria[0].components.map(item => item.code),
       ['ta_key_features_overview', 'ta_data_support']);
+    const deniedPortal = await request(app).post(`${base}/portal/claim`)
+      .set('Authorization', `Bearer ${graderToken}`).send({ limit: 1 });
+    assert.equal(deniedPortal.status, 401);
+    const portalClaim = await request(app).post(`${base}/portal/claim`)
+      .set('Authorization', `Bearer ${portalToken}`).send({ limit: 1 });
+    assert.equal(portalClaim.status, 200);
+    assert.equal(portalClaim.body.jobs.length, 1);
+    const portalJob = portalClaim.body.jobs[0];
+    assert.equal(portalJob.request.attemptToken, attemptId);
+    assert.equal(portalJob.request.commit, false);
+    assert.deepEqual(portalJob.request.grades,
+      { listening: 5, reading: 5, writing: 6.5 });
+    assert.equal(JSON.stringify(portalJob).includes(submission.essay), false);
+    const portalResult = { ok: true, status: 'synced', externalWrite: true,
+      classCode: 'IC2264', attemptToken: attemptId,
+      actualScores: portalJob.request.grades,
+      portalScores: portalJob.request.grades,
+      portalFields: {
+        'Term Test 2 Listening (Thi lại)': 5,
+        'Term Test 2 Reading (Thi lại)': 5,
+        'Term Test 2 Writing (Thi lại)': 6.5,
+      } };
+    const portalDone = await request(app).post(`${base}/portal/complete`)
+      .set('Authorization', `Bearer ${portalToken}`)
+      .send({ submissionId: job.submissionId,
+        leaseToken: portalJob.leaseToken, result: portalResult });
+    assert.equal(portalDone.status, 200);
+    assert.equal(portalDone.body.receipt.status, 'synced');
+    assert.equal((await db.query(`SELECT status FROM
+      writing_flow.web_substitute_portal_outbox WHERE submission_id=$1`,
+    [job.submissionId])).rows[0].status, 'synced');
+    const afterPortal = await request(app).post(`${base}/status-by-name`)
+      .set('Authorization', `Bearer ${gatewayToken}`).send(selected);
+    assert.equal(afterPortal.body.status.portalSyncStatus, 'synced');
     const other = await request(app).post(`${base}/status`)
       .set('Authorization', `Bearer ${gatewayToken}`)
       .send({ ...selected, studentName: 'Người khác', attemptId });

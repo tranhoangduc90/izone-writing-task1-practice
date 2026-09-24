@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { PGlite } from '@electric-sql/pglite';
@@ -6,6 +7,7 @@ import { sha256 } from '../src/writing-flow-crypto.js';
 import { createWebSubstituteIntake } from '../src/writing-flow-web-intake.js';
 import { createWebSubstituteQueue,
   normalizeWebSubstituteGradingResult } from '../src/writing-flow-web-queue.js';
+import { createWebSubstitutePortalOutbox } from '../src/writing-flow-web-portal-outbox.js';
 import { TEST_TASK_DEFINITIONS } from '../src/writing-flow-test.js';
 
 const key = '11'.repeat(32);
@@ -14,6 +16,7 @@ const identity = { testSlug: 'substitute-test-2-k56', classId: 1252,
 const migrationUrls = [
   '../../docs/migrations/2026-09-24-writing-flow-web-substitute-roster-v16.sql',
   '../../docs/migrations/2026-09-24-writing-flow-web-substitute-intake-v17.sql',
+  '../../docs/migrations/2026-09-24-writing-flow-web-substitute-portal-v18.sql',
 ].map(path => new URL(path, import.meta.url));
 
 async function fixture() {
@@ -53,7 +56,8 @@ async function fixture() {
   });
   const intake = createWebSubstituteIntake({ pool, encryptionKey: key, getPinnedPrompt });
   const queue = createWebSubstituteQueue({ pool, encryptionKey: key, getPinnedPrompt });
-  return { db, pool, intake, queue };
+  const portal = createWebSubstitutePortalOutbox({ pool, encryptionKey: key });
+  return { db, pool, intake, queue, portal };
 }
 
 function task1Result(score = 6.5) {
@@ -62,6 +66,13 @@ function task1Result(score = 6.5) {
       components: componentCodes.map(componentCode => ({ code: componentCode,
         summary: 'Synthetic summary.', feedback: 'Synthetic feedback.' })) }));
   return { criteria, taskScore: score, report: 'Synthetic report.' };
+}
+
+function portalSections() {
+  const make = band => ({ correct: 1, band, total: 1, answered: 1,
+    details: [{ number: 1, studentAnswer: 'A', correctAnswer: 'A', result: 'correct' }],
+    typeStats: [{ type: 'synthetic', correct: 1, total: 1, percentage: 1 }] });
+  return { listening: make(6.5), reading: make(7) };
 }
 
 function provenPizzaTask1Result(score = 6.5) {
@@ -83,6 +94,117 @@ test('mã TA cũ chỉ được chuyển cho Substitute 2 K56 Task 1', () => {
     testSlug: 'substitute-test-2-k56', taskNumber: 1, result: task1Result(),
   }).criteria[0].components.map(item => item.code),
   ['ta_key_features_overview', 'ta_data_support']);
+});
+
+test('chấm xong tạo đúng một phiếu chờ Portal cùng transaction', async () => {
+  const { db, intake, queue } = await fixture();
+  try {
+    const attempt = await intake.openAttempt(identity);
+    const submitted = await intake.submitWriting({ ...identity,
+      attemptId: attempt.attemptId, essay: 'Synthetic portal outbox essay.' });
+    const [job] = await queue.claimDue();
+    const input = { ...job, result: task1Result(7) };
+    await queue.completeWork(input);
+    await queue.completeWork(input);
+    const rows = await db.query(`SELECT submission_id,status,attempt_count
+      FROM writing_flow.web_substitute_portal_outbox`);
+    assert.equal(rows.rows.length, 1);
+    assert.equal(rows.rows[0].submission_id, submitted.submissionId);
+    assert.equal(rows.rows[0].status, 'pending');
+    assert.equal(Number(rows.rows[0].attempt_count), 0);
+  } finally {
+    await db.close();
+  }
+});
+
+test('Portal chỉ lấy phiếu hoàn tất, xem trước rồi xác nhận readback đúng lượt', async () => {
+  const { db, intake, queue, portal } = await fixture();
+  try {
+    const attempt = await intake.openAttempt(identity);
+    await intake.submitWriting({ ...identity, attemptId: attempt.attemptId,
+      essay: 'Synthetic portal status essay.',
+      sectionResults: portalSections() });
+    const [job] = await queue.claimDue();
+    await queue.completeWork({ ...job, result: task1Result(7.5) });
+    const [claim] = await portal.claimDue();
+    assert.equal(claim.request.commit, false);
+    assert.equal(claim.request.attemptToken, attempt.attemptId);
+    assert.deepEqual(claim.request.grades,
+      { listening: 6.5, reading: 7, writing: 7.5 });
+    assert.deepEqual(await portal.claimDue(), []);
+    const result = { ok: true, status: 'synced', externalWrite: true,
+      classCode: 'IC2264', attemptToken: attempt.attemptId,
+      actualScores: claim.request.grades,
+      // Bộ ghi Portal cũ có thể hạ điểm theo chính sách Thi lại;
+      // điểm thực tế phải giữ nguyên, ba cột đọc lại phải khớp điểm Portal.
+      portalScores: { listening: 5, reading: 5, writing: 5 },
+      portalFields: {
+        'Term Test 2 Listening (Thi lại)': 5,
+        'Term Test 2 Reading (Thi lại)': 5,
+        'Term Test 2 Writing (Thi lại)': 5,
+      } };
+    const synced = await portal.completeSync({ submissionId: job.submissionId,
+      leaseToken: claim.leaseToken, result });
+    assert.equal(synced.status, 'synced');
+    assert.deepEqual((await db.query(`SELECT portal_fields FROM
+      writing_flow.web_substitute_portal_outbox WHERE submission_id=$1`,
+    [job.submissionId])).rows[0].portal_fields, result.portalFields);
+    assert.equal((await portal.completeSync({ submissionId: job.submissionId,
+      leaseToken: claim.leaseToken, result })).status, 'synced');
+    await assert.rejects(portal.completeSync({ submissionId: job.submissionId,
+      leaseToken: crypto.randomUUID(), result }),
+    error => error.code === 'WEB_PORTAL_RESULT_CONFLICT');
+    assert.deepEqual(await portal.claimDue(), []);
+  } finally {
+    await db.close();
+  }
+});
+
+test('Portal không xác nhận kết quả thiếu đọc lại hoặc sai lượt, lỗi mơ hồ cần kiểm tra', async () => {
+  const { db, intake, queue, portal } = await fixture();
+  try {
+    const attempt = await intake.openAttempt(identity);
+    await intake.submitWriting({ ...identity, attemptId: attempt.attemptId,
+      essay: 'Synthetic uncertain Portal essay.', sectionResults: portalSections() });
+    const [job] = await queue.claimDue();
+    await queue.completeWork({ ...job, result: task1Result(7) });
+    const [claim] = await portal.claimDue();
+    await assert.rejects(portal.completeSync({ submissionId: job.submissionId,
+      leaseToken: claim.leaseToken, result: { ok: true, status: 'synced',
+        externalWrite: true, attemptToken: crypto.randomUUID() } }),
+    error => error.code === 'WEB_PORTAL_READBACK_MISMATCH');
+    assert.equal((await db.query(`SELECT status FROM
+      writing_flow.web_substitute_portal_outbox WHERE submission_id=$1`,
+    [job.submissionId])).rows[0].status, 'running');
+    assert.equal((await portal.markForReview({ submissionId: job.submissionId,
+      leaseToken: claim.leaseToken, errorCode: 'WEB_PORTAL_WRITE_UNKNOWN' })).status,
+    'needs_review');
+    assert.deepEqual(await portal.claimDue(), []);
+  } finally {
+    await db.close();
+  }
+});
+
+test('lease Portal quá hạn không tự ghi lại hoặc cấp lượt thứ hai', async () => {
+  const { db, intake, queue, portal } = await fixture();
+  try {
+    const attempt = await intake.openAttempt(identity);
+    await intake.submitWriting({ ...identity, attemptId: attempt.attemptId,
+      essay: 'Synthetic expired Portal essay.', sectionResults: portalSections() });
+    const [job] = await queue.claimDue();
+    await queue.completeWork({ ...job, result: task1Result(7) });
+    const [claim] = await portal.claimDue();
+    await db.query(`UPDATE writing_flow.web_substitute_portal_outbox
+      SET lease_expires_at=now()-interval '1 minute' WHERE submission_id=$1`,
+    [job.submissionId]);
+    assert.equal((await portal.markExpiredForReview()).reviewed, 1);
+    assert.deepEqual(await portal.claimDue(), []);
+    await assert.rejects(portal.completeSync({ submissionId: job.submissionId,
+      leaseToken: claim.leaseToken, result: {} }),
+    error => error.code === 'WEB_PORTAL_LEASE_STALE');
+  } finally {
+    await db.close();
+  }
 });
 
 // Dữ liệu vào: mã khía cạnh từ bộ chấm pizza đã được kiểm bằng bài giả.

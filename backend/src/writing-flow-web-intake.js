@@ -303,10 +303,14 @@ export function createWebSubstituteIntake({ pool, encryptionKey, getPinnedPrompt
           a.task_number,a.rubric_version,s.submission_id,s.status AS submission_status,
           s.content_ciphertext,s.content_sha256,s.prompt_sha256,
           s.result_ciphertext,s.result_sha256,s.task_score,
+          o.status AS portal_status,
+          (o.status='running' AND o.lease_expires_at<=now()) AS portal_lease_expired,
           (s.status='running' AND s.lease_expires_at<=now()) AS lease_expired
         FROM writing_flow.web_substitute_attempt AS a
         LEFT JOIN writing_flow.web_substitute_submission AS s
           ON s.attempt_id=a.attempt_id AND s.task_number=a.task_number
+        LEFT JOIN writing_flow.web_substitute_portal_outbox AS o
+          ON o.submission_id=s.submission_id
         WHERE a.attempt_id=$1 AND a.test_slug=$2 AND a.cohort=$3
           AND a.erp_course_class_id=$4 AND a.erp_student_contact_id=$5`,
       [input.attemptId, identity.testSlug, identity.profile.cohort,
@@ -360,12 +364,18 @@ export function createWebSubstituteIntake({ pool, encryptionKey, getPinnedPrompt
         throw new ApiError(503, 'WEB_RESULT_READBACK_MISMATCH',
           'Kết quả không khớp Task hoặc điểm đã lưu.');
       }
+      const portalEligible = identity.testSlug === 'substitute-test-2-k56'
+        && identity.classId === 1252;
+      const portalSyncStatus = !portalEligible ? 'not_applicable'
+        : row.portal_lease_expired === true ? 'needs_review'
+          : row.portal_status || (result ? 'needs_review' : 'not_ready');
       return { attemptId: row.attempt_id, testSlug: identity.testSlug,
         classId: identity.classId, taskNumber: Number(row.task_number),
         rubricVersion: row.rubric_version, attemptStatus: row.attempt_status,
         submissionId: row.submission_id || null, submissionStatus,
         submittedEssay, sectionResults,
-        taskScore: result ? Number(row.task_score) : null, result };
+        taskScore: result ? Number(row.task_score) : null, result,
+        portalSyncStatus };
     });
     return status;
   }

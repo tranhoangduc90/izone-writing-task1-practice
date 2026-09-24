@@ -30,6 +30,24 @@ function checkWorkInput(input) {
   }
 }
 
+function isPilotPortalTarget(row) {
+  return row.test_slug === 'substitute-test-2-k56'
+    && Number(row.erp_course_class_id) === 1252
+    && Number(row.task_number) === 1;
+}
+
+// Dữ liệu vào: bài IC2264 đã có kết quả Writing hợp lệ trong transaction hiện tại.
+// Việc chính: bảo đảm đúng một phiếu chờ đồng bộ Portal, kể cả callback lặp.
+// Kết quả: phiếu chỉ được tạo khi bài đã chấm xong, chưa ghi điểm ra ngoài.
+// Khi lỗi: transaction chấm rollback để không có kết quả mà thiếu phiếu đồng bộ.
+async function ensurePilotPortalOutbox(client, row) {
+  if (!isPilotPortalTarget(row)) return false;
+  await client.query(`INSERT INTO writing_flow.web_substitute_portal_outbox
+    (submission_id) VALUES ($1) ON CONFLICT (submission_id) DO NOTHING`,
+  [row.submission_id]);
+  return true;
+}
+
 // Dữ liệu vào: kết quả Task 1 từ bộ chấm Substitute 2 K56 đã dùng lâu nay.
 // Việc chính: đổi đúng hai mã TA cũ sang tên chuẩn mà backend lưu, không sửa nhận xét/điểm.
 // Kết quả: bộ kiểm chung vẫn đòi đủ bốn tiêu chí và chín khía cạnh.
@@ -212,8 +230,9 @@ export function createWebSubstituteQueue({ pool, encryptionKey, getPinnedPrompt 
           throw new ApiError(409, 'WEB_RESULT_CONFLICT',
             'Bài đã có kết quả khác.');
         }
+        const portalOutboxRequired = await ensurePilotPortalOutbox(client, row);
         return { submissionId: row.submission_id, taskScore: Number(row.task_score),
-          status: row.status };
+          status: row.status, portalOutboxRequired };
       }
       if (row.status !== 'running' || row.lease_token !== input.leaseToken
         || row.lease_expires_at <= new Date()) {
@@ -230,9 +249,10 @@ export function createWebSubstituteQueue({ pool, encryptionKey, getPinnedPrompt 
       await client.query(`UPDATE writing_flow.web_substitute_attempt
         SET status='completed',updated_at=now() WHERE attempt_id=$1`,
       [row.attempt_id]);
+      const portalOutboxRequired = await ensurePilotPortalOutbox(client, row);
       return { submissionId: updated.rows[0].submission_id,
         status: updated.rows[0].status,
-        taskScore: Number(updated.rows[0].task_score) };
+        taskScore: Number(updated.rows[0].task_score), portalOutboxRequired };
     });
     const readback = await pool.query(`SELECT status,result_sha256,task_score
       FROM writing_flow.web_substitute_submission WHERE submission_id=$1`,
@@ -242,6 +262,15 @@ export function createWebSubstituteQueue({ pool, encryptionKey, getPinnedPrompt 
       || Number(readback.rows[0].task_score) !== receipt.taskScore) {
       throw new ApiError(503, 'WEB_RESULT_READBACK_UNKNOWN',
         'Chưa xác nhận được kết quả đã lưu.');
+    }
+    if (receipt.portalOutboxRequired) {
+      const outbox = await pool.query(`SELECT submission_id FROM
+        writing_flow.web_substitute_portal_outbox WHERE submission_id=$1`,
+      [receipt.submissionId]);
+      if (outbox.rows.length !== 1) {
+        throw new ApiError(503, 'WEB_PORTAL_OUTBOX_READBACK_UNKNOWN',
+          'Chưa xác nhận được phiếu chờ đồng bộ Portal.');
+      }
     }
     return receipt;
   }

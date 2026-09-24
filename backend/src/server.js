@@ -16,6 +16,7 @@ import { createWritingFlowTrccRepair } from './writing-flow-trcc-repair.js';
 import { createWritingFlowNotifier } from './writing-flow-notifier.js';
 import { createWebSubstituteIntake } from './writing-flow-web-intake.js';
 import { createWebSubstituteQueue } from './writing-flow-web-queue.js';
+import { createWebSubstitutePortalOutbox } from './writing-flow-web-portal-outbox.js';
 import { getPinnedWebPrompt } from './writing-flow-web-registry.js';
 
 const config = loadConfig();
@@ -42,6 +43,9 @@ const app = createApp({
   writingFlowWebQueue: config.webSubstituteEnabled
     ? createWebSubstituteQueue({ pool, encryptionKey: config.writingFlowEncryptionKey,
       getPinnedPrompt: getPinnedWebPrompt }) : null,
+  writingFlowWebPortal: config.webSubstitutePortalEnabled
+    ? createWebSubstitutePortalOutbox({ pool,
+      encryptionKey: config.writingFlowEncryptionKey }) : null,
   writingFlowStage: createWritingFlowStage({ pool, encryptionKey: config.writingFlowEncryptionKey }),
   writingFlowHandoff: createWritingFlowHandoff({ pool }),
   writingFlowAiCall: createWritingFlowAiCall({ pool, encryptionKey: config.writingFlowEncryptionKey }),

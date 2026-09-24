@@ -318,7 +318,7 @@ export function writingWriteRateLimit(req) {
 function cors(config){return(req,res,next)=>{const origin=req.get('origin');if(origin&&!config.allowedOrigins.has(origin))return res.status(403).json({ok:false,error:'ORIGIN_NOT_ALLOWED'});if(origin){res.set('Access-Control-Allow-Origin',origin);res.set('Vary','Origin');}res.set('Access-Control-Allow-Credentials','true');res.set('Access-Control-Allow-Methods','GET, POST, PUT, DELETE, OPTIONS');res.set('Access-Control-Allow-Headers','Authorization, Content-Type, If-None-Match, If-Match, x-izone-csrf');res.set('Access-Control-Expose-Headers','ETag, Retry-After, X-Writing-Request-Id');res.set('Cache-Control','no-store');return req.method==='OPTIONS'?res.status(204).end():next();};}
 function csvCell(value){const text=String(value??'');return /[",\r\n]/.test(text)?`"${text.replaceAll('"','""')}"`:text;}
 
-export function createApp({config,pool,service,lessonService=service,provisionalService=null,lmsResultService=null,teacherCommentService=null,teacherClassAccess=null,writingFlowService=null,writingFlowWebIntake=null,writingFlowWebQueue=null,writingFlowStage=null,writingFlowHandoff=null,writingFlowAiCall=null,writingFlowScan=null,writingFlowTrccRepair=null,teacherAuth=null,adminAuth=(_q,r)=>r.status(503).json({ok:false,error:'ADMIN_AUTH_NOT_CONFIGURED'})}){
+export function createApp({config,pool,service,lessonService=service,provisionalService=null,lmsResultService=null,teacherCommentService=null,teacherClassAccess=null,writingFlowService=null,writingFlowWebIntake=null,writingFlowWebQueue=null,writingFlowWebPortal=null,writingFlowStage=null,writingFlowHandoff=null,writingFlowAiCall=null,writingFlowScan=null,writingFlowTrccRepair=null,teacherAuth=null,adminAuth=(_q,r)=>r.status(503).json({ok:false,error:'ADMIN_AUTH_NOT_CONFIGURED'})}){
  const app=express();app.disable('x-powered-by');app.set('trust proxy',config.trustProxyHops);
  // Ghi mã truy vết trước khi CORS hoặc giới hạn tốc độ chặn yêu cầu Writing.
  app.use('/api/v1/internal/writing-flow',writingFlowRequestLog());
@@ -330,6 +330,7 @@ export function createApp({config,pool,service,lessonService=service,provisional
  const writingFlowReady=(q,r,next)=>writingFlowService?next():r.status(503).json({ok:false,error:'WRITING_FLOW_NOT_READY'});
  const webIntakeReady=(q,r,next)=>writingFlowWebIntake?next():r.status(503).json({ok:false,error:'WEB_INTAKE_NOT_READY'});
  const webQueueReady=(q,r,next)=>writingFlowWebQueue?next():r.status(503).json({ok:false,error:'WEB_QUEUE_NOT_READY'});
+ const webPortalReady=(q,r,next)=>writingFlowWebPortal?next():r.status(503).json({ok:false,error:'WEB_PORTAL_NOT_READY'});
  const writingStageReady=(q,r,next)=>writingFlowStage?next():r.status(503).json({ok:false,error:'WRITING_STAGE_NOT_READY'});
  const writingHandoffReady=(q,r,next)=>writingFlowHandoff?next():r.status(503).json({ok:false,error:'WRITING_HANDOFF_NOT_READY'});
  const writingAiReady=(q,r,next)=>writingFlowAiCall?next():r.status(503).json({ok:false,error:'WRITING_AI_CALL_NOT_READY'});
@@ -384,6 +385,7 @@ export function createApp({config,pool,service,lessonService=service,provisional
  const internal=(q,r,next)=>sameSecret((q.get('authorization')||'').replace(/^Bearer\s+/i,''),config.internalApiToken)?next():r.status(401).json({ok:false,error:'UNAUTHORIZED'});
  const webInternal=(q,r,next)=>sameSecret((q.get('authorization')||'').replace(/^Bearer\s+/i,''),config.webSubstituteApiToken)?next():r.status(401).json({ok:false,error:'UNAUTHORIZED'});
  const webGrader=(q,r,next)=>sameSecret((q.get('authorization')||'').replace(/^Bearer\s+/i,''),config.webSubstituteGraderToken)?next():r.status(401).json({ok:false,error:'UNAUTHORIZED'});
+ const webPortal=(q,r,next)=>sameSecret((q.get('authorization')||'').replace(/^Bearer\s+/i,''),config.webSubstitutePortalToken)?next():r.status(401).json({ok:false,error:'UNAUTHORIZED'});
  app.post('/api/v1/internal/writing-flow/intake',internal,writingFlowReady,asyncRoute(async(q,r)=>{
    const receipt=await writingFlowService.intakePairs(parse(writingPairIntake,q.body));
    r.status(202).json({ok:true,receipt});
@@ -435,6 +437,30 @@ export function createApp({config,pool,service,lessonService=service,provisional
    webQueueReady,asyncRoute(async(q,r)=>{
      const {limit}=parse(z.object({limit:z.number().int().min(1).max(100).default(100)}),q.body);
      r.json({ok:true,summary:await writingFlowWebQueue.markExpiredForReview({limit})});
+   }));
+ // Bộ đồng bộ Portal dùng khóa riêng và chỉ mở khi cờ của nguồn mới được bật.
+ app.post('/api/v1/internal/writing-flow/web-substitute/portal/claim',webPortal,
+   webPortalReady,asyncRoute(async(q,r)=>{
+     const {limit}=parse(z.object({limit:z.number().int().min(1).max(4).default(1)}),q.body);
+     r.json({ok:true,jobs:await writingFlowWebPortal.claimDue({limit})});
+   }));
+ app.post('/api/v1/internal/writing-flow/web-substitute/portal/complete',webPortal,
+   webPortalReady,asyncRoute(async(q,r)=>{
+     const input=parse(z.object({submissionId:uuid,leaseToken:uuid,
+       result:z.unknown()}),q.body);
+     r.json({ok:true,receipt:await writingFlowWebPortal.completeSync(input)});
+   }));
+ app.post('/api/v1/internal/writing-flow/web-substitute/portal/review',webPortal,
+   webPortalReady,asyncRoute(async(q,r)=>{
+     const input=parse(z.object({submissionId:uuid,leaseToken:uuid,
+       errorCode:z.enum(['WEB_PORTAL_PREVIEW_BLOCKED','WEB_PORTAL_WRITE_UNKNOWN',
+         'WEB_PORTAL_READBACK_FAILED'])}),q.body);
+     r.json({ok:true,receipt:await writingFlowWebPortal.markForReview(input)});
+   }));
+ app.post('/api/v1/internal/writing-flow/web-substitute/portal/expire',webPortal,
+   webPortalReady,asyncRoute(async(q,r)=>{
+     const {limit}=parse(z.object({limit:z.number().int().min(1).max(100).default(100)}),q.body);
+     r.json({ok:true,summary:await writingFlowWebPortal.markExpiredForReview({limit})});
    }));
  app.post('/api/v1/internal/writing-flow/source-issues',internal,writingFlowReady,asyncRoute(async(q,r)=>{
    r.status(202).json({ok:true,issue:await writingFlowService.recordSourceIssue(

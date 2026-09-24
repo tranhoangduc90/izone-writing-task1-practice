@@ -2,6 +2,7 @@
 
 import json
 import sys
+from urllib.parse import urlparse
 
 import paramiko
 import win32cred
@@ -24,6 +25,9 @@ def remote(client, command, stdin_text=None):
 
 
 def main():
+    expect_migrated = sys.argv[1:] == ["--expect-migrated"]
+    if sys.argv[1:] not in ([], ["--expect-migrated"]):
+        raise RuntimeError("STAGING_PREFLIGHT_ARGUMENT_INVALID")
     credential = win32cred.CredRead("Codex/SSH/vps_1", win32cred.CRED_TYPE_GENERIC, 0)
     username = (credential.get("UserName") or "root").strip().split("@", 1)[0]
     password = credential["CredentialBlob"].decode("utf-16-le")
@@ -38,7 +42,11 @@ def main():
                        "'{{.State.Health.Status}}|{{.RestartCount}}|{{.Image}}' " + stage)
         health, restart, image = state.split("|", 2)
         env_raw = remote(client, "docker inspect --format '{{json .Config.Env}}' " + stage)
-        env_names = {value.split("=", 1)[0] for value in json.loads(env_raw)}
+        env = dict(value.split("=", 1) for value in json.loads(env_raw))
+        env_names = set(env)
+        stage_url_db = urlparse(env.get("DATABASE_URL", "")).path.lstrip("/")
+        stage_database_url_matched = stage_url_db == "writing_practice_staging"
+        stage_encryption_key_ready = len(env.get("WRITING_FLOW_ENCRYPTION_KEY", "")) == 64
         sql = """BEGIN READ ONLY;
 SELECT current_database(),
   to_regnamespace('writing_flow') IS NOT NULL,
@@ -60,19 +68,34 @@ COMMIT;
         if len(parts) != 8:
             raise RuntimeError("STAGING_METADATA_FORMAT_INVALID")
         target_db = parts[0] == "writing_practice_staging"
-        expected = all(value == "t" for value in parts[1:])
+        expected_flags = ["t", "t", "f", "f", "f", "f", "t"] \
+            if expect_migrated else ["t"] * 7
+        expected = parts[1:] == expected_flags
+        if expect_migrated and expected:
+            migrated = remote(client, command, """BEGIN READ ONLY;
+SELECT (SELECT count(*)::int FROM assessment.term_test_roster),
+  (SELECT count(*)::int FROM assessment_k56.term_test_roster),
+  (SELECT count(*)::int FROM writing_flow.web_substitute_access),
+  (SELECT count(*)::int FROM writing_flow.web_substitute_attempt),
+  (SELECT count(*)::int FROM writing_flow.web_substitute_submission);
+COMMIT;
+""").splitlines()
+            expected = migrated == ["1|1|4|0|0"]
         image_has_web = remote(client,
                                "docker exec " + stage + " sh -lc "
                                "'test -f /app/src/writing-flow-web-queue.js "
                                "&& echo yes || echo no'") == "yes"
-        outcome = "ready_for_backup" if (
-            target_db and expected and health == "healthy"
+        outcome = ("ready_for_canary" if expect_migrated else "ready_for_backup") if (
+            target_db and expected and stage_database_url_matched
+            and stage_encryption_key_ready and health == "healthy"
             and not image_has_web and "DATABASE_URL" in env_names
             and "WRITING_FLOW_ENCRYPTION_KEY" in env_names
         ) else "prerequisite_changed"
         print(json.dumps({
             "toolOutcome": "success", "businessOutcome": outcome,
             "databaseMatched": target_db, "schemaPreconditionsMatched": expected,
+            "stageDatabaseUrlMatched": stage_database_url_matched,
+            "stageEncryptionKeyReady": stage_encryption_key_ready,
             "stageHealth": health, "stageRestartCount": int(restart),
             "stageImage": image, "webModuleInImage": image_has_web,
             "envKeysPresent": {
@@ -83,7 +106,7 @@ COMMIT;
                 )
             }, "productionWrites": 0,
         }, ensure_ascii=False))
-        return 0 if outcome == "ready_for_backup" else 2
+        return 0 if outcome in ("ready_for_backup", "ready_for_canary") else 2
     except (paramiko.SSHException, OSError, ValueError, RuntimeError,
             json.JSONDecodeError) as error:
         print(json.dumps({"toolOutcome": "failure", "businessOutcome": "unknown",

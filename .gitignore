@@ -7,6 +7,8 @@ playwright-report/
 output/
 tmp/
 *.log
+__pycache__/
+*.pyc
 *.tgz
 .DS_Store
 backend/.env.example.production

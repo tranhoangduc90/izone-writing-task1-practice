@@ -82,6 +82,26 @@ test('roster staging chỉ tạo khi kho và schema đúng, tra tên giả qua v
       `'${rows[0].db_name}'`);
     await assert.rejects(db.exec(rollback), /WEB_STAGING_DATABASE_REQUIRED/u);
     await db.exec('ROLLBACK;');
+    const trial = await db.query(`INSERT INTO writing_flow.web_substitute_attempt
+      (test_slug, cohort, erp_course_class_id, erp_student_contact_id,
+       task_number, rubric_version)
+      VALUES ('substitute-test-2-k56', 56, 990056001, 990056101, 1,
+        'substitute-test2-k56-isolated-20260917-v1') RETURNING attempt_id`);
+    await db.query(`INSERT INTO writing_flow.web_substitute_submission
+      (attempt_id, task_number, content_ciphertext, content_sha256, prompt_sha256)
+      VALUES ($1, 1, decode('abcd','hex'), repeat('a',64), repeat('b',64))`,
+    [trial.rows[0].attempt_id]);
+    await db.query(`UPDATE writing_flow.web_substitute_submission
+      SET status='running', attempt_count=1,
+        lease_token='77777777-7777-4777-8777-777777777777',
+        lease_expires_at=now()+interval '10 minutes'
+      WHERE attempt_id=$1`, [trial.rows[0].attempt_id]);
+    await assert.rejects(db.exec(localRollback),
+      /WEB_STAGING_ROLLBACK_SCOPE_MISMATCH/u);
+    await db.exec('ROLLBACK;');
+    await db.query(`UPDATE writing_flow.web_substitute_submission
+      SET status='pending', lease_token=NULL, lease_expires_at=NULL
+      WHERE attempt_id=$1`, [trial.rows[0].attempt_id]);
     await db.exec(`INSERT INTO writing_flow.web_substitute_access
       (test_slug, cohort, erp_course_class_id)
       VALUES ('substitute-test-1-k56', 56, 1234);`);

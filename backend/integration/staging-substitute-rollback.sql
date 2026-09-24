@@ -34,6 +34,10 @@ BEGIN
       SELECT 1 FROM writing_flow.web_substitute_attempt
       WHERE erp_course_class_id NOT IN (990056001, 990067001)
         OR erp_student_contact_id NOT IN (990056101, 990067101)
+    )
+    OR EXISTS (
+      SELECT 1 FROM writing_flow.web_substitute_submission
+      WHERE status = 'running'
     ) THEN
     RAISE EXCEPTION 'WEB_STAGING_ROLLBACK_SCOPE_MISMATCH';
   END IF;

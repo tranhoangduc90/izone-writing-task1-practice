@@ -48,6 +48,7 @@ export function createWritingFlowNotifier({ pool, handoffUrl, sourceUrl, secret,
   if (enabled && String(secret || '').length < 32) throw new Error('WRITING_FLOW_NOTIFY_CONFIG_INVALID');
   let listener = null;
   let timer = null;
+  let timerDueAt = null;
   let fallback = null;
   let running = false;
   let pending = false;
@@ -60,15 +61,17 @@ export function createWritingFlowNotifier({ pool, handoffUrl, sourceUrl, secret,
   function schedule(delay = 100) {
     if (!enabled || closed || !isLeader) return;
     if (timer) clearTimer(timer);
-    timer = setTimer(async () => { timer = null; await pump(); },
-      Math.max(100, Math.min(delay, 2_147_000_000)));
+    const boundedDelay = Math.max(100, Math.min(delay, 2_147_000_000));
+    timerDueAt = now() + boundedDelay;
+    timer = setTimer(async () => { timer = null; timerDueAt = null; await pump(); }, boundedDelay);
     timer?.unref?.();
   }
 
   function kick() {
     if (!isLeader || closed) return;
     if (running) pending = true;
-    else if (!timer) schedule(DIRECT_HANDOFF_GRACE_MS);
+    // Bài mới phải rút lịch kiểm xa về gần; tín hiệu trùng không đẩy lùi lịch đã hẹn.
+    else if (!timer || timerDueAt > now() + DIRECT_HANDOFF_GRACE_MS) schedule(DIRECT_HANDOFF_GRACE_MS);
   }
 
   async function send(kind) {
@@ -129,6 +132,7 @@ export function createWritingFlowNotifier({ pool, handoffUrl, sourceUrl, secret,
     if (timer) clearTimer(timer);
     if (fallback) clearRecurringTimer(fallback);
     timer = null;
+    timerDueAt = null;
     fallback = null;
     try { candidate.release(true); } catch { /* Kết nối đã đóng. */ }
     log(JSON.stringify({ event: 'writing_flow_notify_listener_failed' }));
@@ -194,7 +198,7 @@ export function createWritingFlowNotifier({ pool, handoffUrl, sourceUrl, secret,
       try { await listener.query('SELECT pg_advisory_unlock($1)', [LEADER_LOCK_ID]); } catch { /* Đang tắt. */ }
       listener.release();
     }
-    listener = null; timer = null; fallback = null; standby = null; isLeader = false;
+    listener = null; timer = null; timerDueAt = null; fallback = null; standby = null; isLeader = false;
   }
 
   return { enabled, start, pump, kick, close };

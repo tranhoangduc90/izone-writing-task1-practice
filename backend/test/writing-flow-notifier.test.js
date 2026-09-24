@@ -2,6 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createWritingFlowNotifier, WRITING_FLOW_FALLBACK_MS } from '../src/writing-flow-notifier.js';
 
+test('thiếu khóa webhook hợp lệ thì không khởi động điều phối', () => {
+  assert.throws(() => createWritingFlowNotifier({ pool: listenerPool([]),
+    handoffUrl: 'https://example.test/handoff', secret: 'too-short' }),
+  /WRITING_FLOW_NOTIFY_CONFIG_INVALID/u);
+});
+
 function listenerPool(rows, { leader = true } = {}) {
   const listeners = new Map();
   const client = {

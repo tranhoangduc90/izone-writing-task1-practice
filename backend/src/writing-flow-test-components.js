@@ -3,12 +3,20 @@ import { ApiError } from './service.js';
 import { keyFromHex, open, seal, sha256 } from './writing-flow-crypto.js';
 import { TEST_TASK_DEFINITIONS } from './writing-flow-test.js';
 
+// Bộ chấm Task 1 cũ dùng hai mã ngắn trong lúc chấm; bản báo cáo cuối đổi
+// chúng thành tên đầy đủ. Sổ từng phần phải theo mã của workflow đang chạy.
+const SPECIALIST_CODES = Object.freeze({
+  1: Object.freeze({ ...TEST_TASK_DEFINITIONS[1].criteria,
+    TA: Object.freeze(['ta_overview', 'ta_data']) }),
+  2: TEST_TASK_DEFINITIONS[2].criteria,
+});
+
 // Nhận vào: một cặp Test, phiên bản bài, lượt chấm chính và mã thành phần.
 // Việc chính: khóa đúng cặp, lưu riêng từng lượt AI và chỉ mở cổng khi đủ kết quả.
 // Trả ra: những thành phần còn phải chạy hoặc thành quả đã lưu để tiếp tục sau lỗi.
 // Khi lỗi: transaction hoàn tác; không ghi bài viết hay kết quả AI vào log thường.
 function expected(taskNumber, phase) {
-  const criteria = TEST_TASK_DEFINITIONS[Number(taskNumber)]?.criteria;
+  const criteria = SPECIALIST_CODES[Number(taskNumber)];
   if (!criteria || !['detail', 'criterion'].includes(phase)) {
     throw new ApiError(400, 'TEST_COMPONENT_PHASE_INVALID', 'Loại bài hoặc bước thành phần không hợp lệ.');
   }

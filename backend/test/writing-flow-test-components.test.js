@@ -78,7 +78,8 @@ async function setup() {
   const service = { ...rawService, startPhase: input => {
     const taskNumber = input.pairId === SECOND_PAIR ? 1 : 2;
     const codes = input.phase === 'detail'
-      ? Object.values(TEST_TASK_DEFINITIONS[taskNumber].criteria).flat()
+      ? Object.values({ ...TEST_TASK_DEFINITIONS[taskNumber].criteria,
+        ...(taskNumber === 1 ? { TA: ['ta_overview', 'ta_data'] } : {}) }).flat()
       : Object.keys(TEST_TASK_DEFINITIONS[taskNumber].criteria)
         .map(code => `aggregate_${code}`);
     return rawService.startPhase({ ...input,
@@ -93,6 +94,25 @@ function request(job, pairId = PAIR, stageAttemptId = STAGE_ATTEMPT) {
     runKey: job.runKey, result: { sourceHash: job.contractSha256,
       feedback: `Nhận xét giả cho ${job.componentCode}` } };
 }
+
+test('Task 1 cấp đúng hai mã thành phần của workflow Test cũ', async () => {
+  const { db, rawService } = await setup();
+  try {
+    for (const componentCode of ['ta_overview', 'ta_data']) {
+      const started = await rawService.startPhase({ pairId: SECOND_PAIR,
+        revision: 'rev-one', stageAttemptId: NEXT_STAGE_ATTEMPT,
+        phase: 'detail', componentCode,
+        contractHashes: { [componentCode]: CONTRACT_SHA } });
+      assert.equal(started.jobs.length, 1);
+      assert.equal(started.jobs[0].componentCode, componentCode);
+    }
+    await assert.rejects(rawService.startPhase({ pairId: SECOND_PAIR,
+      revision: 'rev-one', stageAttemptId: NEXT_STAGE_ATTEMPT,
+      phase: 'detail', componentCode: 'ta_key_features_overview',
+      contractHashes: { ta_key_features_overview: CONTRACT_SHA } }),
+    error => error.code === 'TEST_COMPONENT_CODE_MISMATCH');
+  } finally { await db.close(); }
+});
 
 test('Task 2 nhận 10 thành phần đảo thứ tự, chặn tổng hợp sớm và chỉ mở một cổng', async () => {
   const { db, pool, service } = await setup();

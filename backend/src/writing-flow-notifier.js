@@ -4,6 +4,7 @@
 // Khi lỗi: log chỉ loại hàng và mã lỗi, không ghi bài viết, tên học viên, URL riêng hay credential.
 export const WRITING_FLOW_NOTIFY_CHANNEL = 'writing_flow_work_ready';
 export const WRITING_FLOW_FALLBACK_MS = 5 * 60 * 1000;
+const DIRECT_HANDOFF_GRACE_MS = 2_000;
 const LEADER_LOCK_ID = 79202367;
 
 export const writingFlowWorkStatusSql = `SELECT
@@ -67,7 +68,7 @@ export function createWritingFlowNotifier({ pool, handoffUrl, sourceUrl, secret,
   function kick() {
     if (!isLeader || closed) return;
     if (running) pending = true;
-    else schedule(100);
+    else schedule(DIRECT_HANDOFF_GRACE_MS);
   }
 
   async function send(kind) {
@@ -110,7 +111,7 @@ export function createWritingFlowNotifier({ pool, handoffUrl, sourceUrl, secret,
       schedule(30000);
     } finally {
       running = false;
-      if (pending) { pending = false; schedule(100); }
+      if (pending) { pending = false; schedule(DIRECT_HANDOFF_GRACE_MS); }
     }
   }
 

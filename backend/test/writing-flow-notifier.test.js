@@ -107,6 +107,27 @@ test('hai tín hiệu trùng được gộp thành một lượt đánh thức',
   await notifier.close();
 });
 
+test('đường gọi trực tiếp có hai giây nhận việc trước khi notifier đánh thức n8n', async () => {
+  let directClaimed = false;
+  const pool = listenerPool([]);
+  pool.query = async () => ({ rows: [{ handoff_due: !directClaimed,
+    source_due: false, next_at: null, server_now: new Date() }] });
+  const timers = [];
+  let sent = 0;
+  const notifier = createWritingFlowNotifier({ pool,
+    handoffUrl: 'https://example.test/handoff', secret: 's'.repeat(32),
+    setTimer(handler, delay) { const timer = { handler, delay }; timers.push(timer); return timer; },
+    clearTimer(timer) { timer.cleared = true; },
+    setRecurringTimer() { return { unref() {} }; }, clearRecurringTimer() {},
+    async fetchImpl() { sent += 1; return { ok: true }; }, log() {} });
+  assert.equal(await notifier.start(), true);
+  assert.ok(timers[0].delay >= 2_000);
+  directClaimed = true;
+  await timers[0].handler();
+  assert.equal(sent, 0);
+  await notifier.close();
+});
+
 for (const failure of ['http_500', 'timeout']) {
   test(`n8n ${failure} vẫn gửi lại tín hiệu khi việc còn trong database`, async () => {
     const rows = Array.from({ length: 2 }, () => ({ handoff_due: true,

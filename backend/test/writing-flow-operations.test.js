@@ -300,6 +300,29 @@ test('retry không nhận intake, không nhận bài đã bỏ qua và làm mớ
   assert.equal(statements.some(item => item.sql.includes("'SUPERSEDED_BY_OPERATOR_RETRY'")), true);
 });
 
+test('nguồn Test trùng không thể bấm Retry để gọi AI lần hai', async () => {
+  const statements = [];
+  const pool = poolWith(async sql => {
+    statements.push(sql);
+    if (sql.includes('FROM writing_flow.operator_event')) return { rowCount: 0, rows: [] };
+    if (sql.includes('FROM writing_flow.pair WHERE pair_id=$1 FOR UPDATE')) {
+      return { rowCount: 1, rows: [{ status: 'needs_review', skipped_at: null }] };
+    }
+    if (sql.includes('FROM writing_flow.stage_result WHERE pair_id=$1 FOR UPDATE')) {
+      return { rowCount: 1, rows: [{ stage_key: 'precheck', status: 'needs_review',
+        cycle_no: 1, attempt_count: 0,
+        error_code: 'TEST_DOCUMENT_PAIR_ALREADY_REGISTERED' }] };
+    }
+    return { rowCount: 1, rows: [] };
+  });
+  await assert.rejects(createWritingFlowOperations({ pool }).requestStageRetry({
+    pairId: '11111111-1111-4111-8111-111111111111', stageKey: 'precheck',
+    requestId: '22222222-2222-4222-8222-222222222222',
+    actorRef: 'admin@example.invalid', reason: 'Thử lại',
+  }), error => error.code === 'TEST_DOCUMENT_PAIR_ALREADY_REGISTERED');
+  assert.equal(statements.some(sql => sql.includes('INSERT INTO writing_flow.handoff')), false);
+});
+
 test('migration vận hành không có DELETE và có bảng nguồn, sổ lớp, thao tác, lịch sử', async () => {
   const { readFile } = await import('node:fs/promises');
   const sql = await readFile(new URL('../../docs/migrations/2026-09-20-writing-flow-operations-v2.sql',

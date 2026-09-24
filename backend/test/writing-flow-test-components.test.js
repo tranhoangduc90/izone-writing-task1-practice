@@ -5,6 +5,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { createWritingTestComponentService,
   resetFailedTestComponentsForRetry,
   requireCompletedTestComponents } from '../src/writing-flow-test-components.js';
+import { TEST_TASK_DEFINITIONS } from '../src/writing-flow-test.js';
 
 const PAIR = '11111111-1111-4111-8111-111111111111';
 const SECOND_PAIR = '22222222-2222-4222-8222-222222222222';
@@ -13,6 +14,7 @@ const NEXT_STAGE_ATTEMPT = '44444444-4444-4444-8444-444444444444';
 const RETRY_STAGE_ATTEMPT = '55555555-5555-4555-8555-555555555555';
 const INPUT_SHA = 'a'.repeat(64);
 const OTHER_SHA = 'b'.repeat(64);
+const CONTRACT_SHA = 'd'.repeat(64);
 
 async function setup() {
   const db = new PGlite();
@@ -70,15 +72,26 @@ async function setup() {
       release() {},
     }),
   };
-  return { db, pool, service: createWritingTestComponentService({
+  const rawService = createWritingTestComponentService({
     pool, encryptionKey: '11'.repeat(32),
-  }) };
+  });
+  const service = { ...rawService, startPhase: input => {
+    const taskNumber = input.pairId === SECOND_PAIR ? 1 : 2;
+    const codes = input.phase === 'detail'
+      ? Object.values(TEST_TASK_DEFINITIONS[taskNumber].criteria).flat()
+      : Object.keys(TEST_TASK_DEFINITIONS[taskNumber].criteria)
+        .map(code => `aggregate_${code}`);
+    return rawService.startPhase({ ...input,
+      contractHashes: Object.fromEntries(codes.map(code => [code, CONTRACT_SHA])) });
+  } };
+  return { db, pool, service, rawService };
 }
 
 function request(job, pairId = PAIR, stageAttemptId = STAGE_ATTEMPT) {
   return { pairId, revision: 'rev-one', stageAttemptId,
     componentCode: job.componentCode, inputSha256: job.inputSha256,
-    runKey: job.runKey, result: { feedback: `Nhận xét giả cho ${job.componentCode}` } };
+    runKey: job.runKey, result: { sourceHash: job.contractSha256,
+      feedback: `Nhận xét giả cho ${job.componentCode}` } };
 }
 
 test('Task 2 nhận 10 thành phần đảo thứ tự, chặn tổng hợp sớm và chỉ mở một cổng', async () => {
@@ -105,7 +118,8 @@ test('Task 2 nhận 10 thành phần đảo thứ tự, chặn tổng hợp sớ
     }
     const duplicate = await service.complete(request(order[0]));
     assert.equal(duplicate.status, 'already_accepted');
-    await assert.rejects(service.complete({ ...request(order[0]), result: { feedback: 'khác' } }),
+    await assert.rejects(service.complete({ ...request(order[0]),
+      result: { sourceHash: order[0].contractSha256, feedback: 'khác' } }),
       error => error.code === 'TEST_COMPONENT_DUPLICATE_CONFLICT');
     const replay = await service.startPhase({ pairId: PAIR,
       revision: 'rev-one', stageAttemptId: STAGE_ATTEMPT, phase: 'detail' });
@@ -130,7 +144,7 @@ test('Task 2 nhận 10 thành phần đảo thứ tự, chặn tổng hợp sớ
 });
 
 test('sai bài, phiên bản, dấu đầu vào hoặc run key dừng trước khi ghi kết quả', async () => {
-  const { db, service } = await setup();
+  const { db, service, rawService } = await setup();
   try {
     const first = await service.startPhase({ pairId: PAIR,
       revision: 'rev-one', stageAttemptId: STAGE_ATTEMPT, phase: 'detail' });
@@ -140,8 +154,14 @@ test('sai bài, phiên bản, dấu đầu vào hoặc run key dừng trước k
       { ...request(job), revision: 'rev-other' },
       { ...request(job), inputSha256: OTHER_SHA },
       { ...request(job), runKey: NEXT_STAGE_ATTEMPT },
+      { ...request(job), result: { sourceHash: 'e'.repeat(64) } },
     ];
     for (const item of invalid) await assert.rejects(service.complete(item));
+    await assert.rejects(rawService.startPhase({ pairId: PAIR,
+      revision: 'rev-one', stageAttemptId: STAGE_ATTEMPT,
+      phase: 'detail', componentCode: job.componentCode,
+      contractHashes: { [job.componentCode]: 'e'.repeat(64) } }),
+    error => error.code === 'TEST_COMPONENT_CONTRACT_CHANGED');
     const stored = await db.query(`SELECT count(*)::integer AS n
       FROM writing_flow.test_component_work WHERE pair_id=$1 AND status='succeeded'`, [PAIR]);
     assert.equal(stored.rows[0].n, 0);
@@ -225,9 +245,9 @@ test('bản ghi thành phần lạ không thể mở cổng tổng hợp trướ
     const started = await service.startPhase({ pairId: PAIR,
       revision: 'rev-one', stageAttemptId: STAGE_ATTEMPT, phase: 'detail' });
     await db.query(`INSERT INTO writing_flow.test_component_work
-      (pair_id,input_sha256,component_code,phase,criterion_code)
-      VALUES ($1,$2,'rogue_component','detail','TR')`,
-    [PAIR, INPUT_SHA]);
+      (pair_id,input_sha256,component_code,contract_sha256,phase,criterion_code)
+      VALUES ($1,$2,'rogue_component',$3,'detail','TR')`,
+    [PAIR, INPUT_SHA, CONTRACT_SHA]);
     const rogueAttempt = '66666666-6666-4666-8666-666666666666';
     await db.query(`INSERT INTO writing_flow.test_component_attempt
       (attempt_id,pair_id,input_sha256,component_code,stage_attempt_id,retry_cycle,attempt_no)
@@ -294,5 +314,28 @@ test('Retry thủ công giữ thành phần đã xong và mở chu kỳ riêng c
       [[1, 1], [1, 2], [1, 3], [2, 1]]);
     assert.equal((await service.complete(request(refreshed, PAIR, manualAttempt))).status,
       'accepted');
+  } finally { await db.close(); }
+});
+
+test('cấp từng phần đúng lúc, không tính ba lượt cho phần chưa hề gọi AI', async () => {
+  const { db, service } = await setup();
+  try {
+    const codes = Object.values(TEST_TASK_DEFINITIONS[2].criteria).flat();
+    for (const [index, componentCode] of codes.entries()) {
+      const phase = await service.startPhase({ pairId: PAIR,
+        revision: 'rev-one', stageAttemptId: STAGE_ATTEMPT,
+        phase: 'detail', componentCode });
+      assert.equal(phase.jobs.length, 1);
+      assert.equal(phase.completedCount, index);
+      const attempts = await db.query(`SELECT count(*)::integer AS n
+        FROM writing_flow.test_component_attempt WHERE pair_id=$1`, [PAIR]);
+      assert.equal(attempts.rows[0].n, index + 1);
+      const complete = await service.complete(request(phase.jobs[0]));
+      assert.equal(complete.gateCreated, index === codes.length - 1);
+    }
+    await assert.rejects(service.startPhase({ pairId: PAIR,
+      revision: 'rev-one', stageAttemptId: STAGE_ATTEMPT,
+      phase: 'detail', componentCode: 'unknown_component' }),
+    error => error.code === 'TEST_COMPONENT_CODE_MISMATCH');
   } finally { await db.close(); }
 });

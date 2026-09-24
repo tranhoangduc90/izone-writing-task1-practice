@@ -188,7 +188,10 @@ const writingFail=z.object({pairId:uuid,revision:z.string().regex(/^[0-9a-f]{64}
 const writingTestComponentCode=z.string().regex(/^[a-z][a-z0-9_]{1,63}$/);
 const writingTestComponentBase=z.object({pairId:uuid,
  revision:z.string().regex(/^[0-9a-f]{64}$/),stageAttemptId:uuid});
-const writingTestComponentStart=writingTestComponentBase.extend({phase:z.enum(['detail','criterion'])});
+const writingTestComponentStart=writingTestComponentBase.extend({
+ phase:z.enum(['detail','criterion']),componentCode:writingTestComponentCode.optional(),
+ contractHashes:z.record(writingTestComponentCode,z.string().regex(/^[0-9a-f]{64}$/))
+   .refine(value=>Object.keys(value).length>0&&Object.keys(value).length<=14)});
 const writingTestComponentCallback=writingTestComponentBase.extend({
  componentCode:writingTestComponentCode,inputSha256:z.string().regex(/^[0-9a-f]{64}$/),runKey:uuid});
 const writingTestComponentComplete=writingTestComponentCallback.extend({

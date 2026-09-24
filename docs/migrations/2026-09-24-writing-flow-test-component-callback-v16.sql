@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS writing_flow.test_component_work (
   pair_id uuid NOT NULL REFERENCES writing_flow.pair(pair_id) ON DELETE CASCADE,
   input_sha256 char(64) NOT NULL CHECK (input_sha256 ~ '^[0-9a-f]{64}$'),
   component_code text NOT NULL CHECK (length(component_code) BETWEEN 2 AND 64),
+  contract_sha256 char(64) NOT NULL CHECK (contract_sha256 ~ '^[0-9a-f]{64}$'),
   phase text NOT NULL CHECK (phase IN ('detail','criterion')),
   criterion_code text NOT NULL CHECK (criterion_code IN ('TA','TR','CC','LR','GRA')),
   status text NOT NULL DEFAULT 'pending'

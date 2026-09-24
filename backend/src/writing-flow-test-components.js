@@ -86,12 +86,24 @@ export function createWritingTestComponentService({ pool, encryptionKey }) {
       'Chưa cấu hình nơi lưu kết quả thành phần.');
   }
 
-  async function startPhase({ pairId, revision, stageAttemptId, phase }) {
+  async function startPhase({ pairId, revision, stageAttemptId, phase,
+    componentCode = null, contractHashes }) {
     requireKey();
     return withTransaction(pool, async client => {
       const owner = await context(client, { pairId, revision, stageAttemptId });
       assertCurrent(owner);
       const definitions = expected(owner.task_number, phase);
+      const requested = componentCode
+        ? definitions.filter(item => item.componentCode === componentCode)
+        : definitions;
+      if (requested.length === 0) throw new ApiError(400, 'TEST_COMPONENT_CODE_MISMATCH',
+        'Thành phần không thuộc Task và bước này.');
+      for (const item of requested) {
+        if (!/^[0-9a-f]{64}$/u.test(String(contractHashes?.[item.componentCode] || ''))) {
+          throw new ApiError(400, 'TEST_COMPONENT_CONTRACT_MISSING',
+            'Thiếu dấu phiên bản của workflow chuyên môn.');
+        }
+      }
       const inputSha256 = owner.input_sha256;
       if (phase === 'criterion') {
         const gate = await client.query(`SELECT 1 FROM writing_flow.test_component_gate
@@ -103,17 +115,22 @@ export function createWritingTestComponentService({ pool, encryptionKey }) {
       const jobs = [];
       const completed = [];
       const needsReview = [];
-      for (const { componentCode, criterionCode } of definitions) {
+      for (const { componentCode, criterionCode } of requested) {
+        const contractSha256 = contractHashes[componentCode];
         await client.query(`INSERT INTO writing_flow.test_component_work
-          (pair_id,input_sha256,component_code,phase,criterion_code)
-          VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
-        [pairId, inputSha256, componentCode, phase, criterionCode]);
-        const selected = await client.query(`SELECT status,retry_cycle,attempt_count,
+          (pair_id,input_sha256,component_code,contract_sha256,phase,criterion_code)
+          VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,
+        [pairId, inputSha256, componentCode, contractSha256, phase, criterionCode]);
+        const selected = await client.query(`SELECT status,contract_sha256,retry_cycle,attempt_count,
             selected_attempt_id,result_ciphertext
           FROM writing_flow.test_component_work
           WHERE pair_id=$1 AND input_sha256=$2 AND component_code=$3 FOR UPDATE`,
         [pairId, inputSha256, componentCode]);
         const work = selected.rows[0];
+        if (work.contract_sha256 !== contractSha256) {
+          throw new ApiError(409, 'TEST_COMPONENT_CONTRACT_CHANGED',
+            'Workflow chuyên môn đã đổi phiên bản; cần đối chiếu trước khi tái dùng kết quả cũ.');
+        }
         if (work.status === 'succeeded') {
           completed.push({ componentCode, criterionCode,
             result: decode(work.result_ciphertext, key) });
@@ -130,7 +147,7 @@ export function createWritingTestComponentService({ pool, encryptionKey }) {
           if (active.rows[0]?.stage_attempt_id === stageAttemptId
             && active.rows[0]?.status === 'sent') {
             jobs.push({ componentCode, criterionCode, runKey: active.rows[0].run_key,
-              inputSha256, alreadyStarted: true });
+              inputSha256, contractSha256, alreadyStarted: true });
             continue;
           }
           await client.query(`UPDATE writing_flow.test_component_attempt
@@ -149,17 +166,23 @@ export function createWritingTestComponentService({ pool, encryptionKey }) {
           WHERE pair_id=$1 AND input_sha256=$2 AND component_code=$3`,
         [pairId, inputSha256, componentCode, nextAttempt, created.rows[0].attempt_id]);
         jobs.push({ componentCode, criterionCode, runKey: created.rows[0].run_key,
-          inputSha256, alreadyStarted: false });
+          inputSha256, contractSha256, alreadyStarted: false });
       }
       if (needsReview.length) throw new ApiError(409, 'TEST_COMPONENT_RETRY_EXHAUSTED',
         'Có thành phần đã hết ba lần thử; cần kiểm tra trước khi tiếp tục.');
-      if (completed.length === definitions.length) {
+      const count = await client.query(`SELECT count(*)::integer AS done
+        FROM writing_flow.test_component_work
+        WHERE pair_id=$1 AND input_sha256=$2 AND phase=$3 AND status='succeeded'
+          AND component_code = ANY($4::text[])`,
+      [pairId, inputSha256, phase, definitions.map(item => item.componentCode)]);
+      if (Number(count.rows[0]?.done) === definitions.length) {
         await client.query(`INSERT INTO writing_flow.test_component_gate
           (pair_id,input_sha256,gate_name) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
         [pairId, inputSha256, phase === 'detail' ? 'detail_complete' : 'criterion_complete']);
       }
       return { status: jobs.length ? 'running' : 'complete', pairId, phase,
-        inputSha256, jobs, completed, expectedCount: definitions.length };
+        inputSha256, jobs, completed,
+        completedCount: Number(count.rows[0]?.done), expectedCount: definitions.length };
     });
   }
 
@@ -181,7 +204,7 @@ export function createWritingTestComponentService({ pool, encryptionKey }) {
         throw new ApiError(409, 'TEST_COMPONENT_INPUT_CHANGED', 'Dấu đầu vào bài Test đã thay đổi.');
       }
       const current = await client.query(`SELECT phase,criterion_code,status,selected_attempt_id,
-          result_sha256 FROM writing_flow.test_component_work
+          contract_sha256,result_sha256 FROM writing_flow.test_component_work
         WHERE pair_id=$1 AND input_sha256=$2 AND component_code=$3 FOR UPDATE`,
       [pairId, inputSha256, componentCode]);
       const attempt = await client.query(`SELECT attempt_id,status,result_sha256
@@ -194,6 +217,10 @@ export function createWritingTestComponentService({ pool, encryptionKey }) {
       }
       const work = current.rows[0];
       const run = attempt.rows[0];
+      if (String(result.sourceHash || '') !== work.contract_sha256) {
+        throw new ApiError(409, 'TEST_COMPONENT_CONTRACT_CHANGED',
+          'Kết quả không thuộc phiên bản workflow chuyên môn đã được cấp.');
+      }
       if (!expected(owner.task_number, work.phase).some(item =>
         item.componentCode === componentCode && item.criterionCode === work.criterion_code)) {
         throw new ApiError(409, 'TEST_COMPONENT_CODE_MISMATCH', 'Thành phần không thuộc Task này.');

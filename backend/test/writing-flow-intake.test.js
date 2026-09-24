@@ -33,6 +33,11 @@ function fakePool() {
             || row.source_record_id !== values[5] || row.source_link_index !== values[6]));
         return { rowCount: matching.length, rows: matching.slice(0, 1) };
       }
+      if (sql.includes("SET status='needs_review',updated_at=now() WHERE pair_id=$1")) {
+        const row = pairs.find(item => item.pair_id === values[0]);
+        if (row) row.status = 'needs_review';
+        return { rowCount: row ? 1 : 0, rows: [] };
+      }
       if (sql.includes('UPDATE writing_flow.pair SET status')) {
         for (const row of pairs) {
           if (row.source_app_id === values[0] && row.source_table_id === values[1]
@@ -78,7 +83,8 @@ function fakePool() {
       }
       if (sql.includes("count(*) FILTER (WHERE status='delivered')")) {
         return { rowCount: 1, rows: [{ total: testPairs.length,
-          delivered: testPairs.filter(row => row.status === 'delivered').length }] };
+          delivered: testPairs.filter(row => row.status === 'delivered').length,
+          needs_review: testPairs.filter(row => row.status === 'needs_review').length }] };
       }
       return { rowCount: 1, rows: [] };
     },
@@ -303,7 +309,7 @@ test('quét lại đúng bài Test đã có kết quả không xóa trạng thá
 
 // Nhận vào: cùng tài liệu Test xuất hiện ở hai bài tập Classroom khác nhau.
 // Việc chính: lần nhận sau phải dừng trước AI, trong khi quét lại cùng nguồn vẫn idempotent.
-// Trả ra: một cặp và một bàn giao; khi lỗi, nguồn thứ hai được giữ để kiểm tra.
+// Trả ra: hai biên nhận nguồn, một bàn giao AI; nguồn trùng hiện ở Cần kiểm tra.
 test('cùng Docs, ô và phiên bản Test ở hai nguồn không được chấm lần hai', async () => {
   const { pool, pairs, writes } = fakePool();
   const intake = createWritingFlowIntake({ pool, encryptionKey: '11'.repeat(32) });
@@ -321,10 +327,17 @@ test('cùng Docs, ô và phiên bản Test ở hai nguồn không được chấ
   const sameSource = await intake(source);
   assert.equal(sameSource.receipts[0].status, 'existing');
   const otherAssignment = { ...source, recordId: 'record-other' };
-  await assert.rejects(intake(otherAssignment),
-    error => error.code === 'TEST_DOCUMENT_PAIR_ALREADY_REGISTERED');
-  assert.equal(pairs.length, 1);
+  const duplicate = await intake(otherAssignment);
+  assert.equal(duplicate.receipts[0].status, 'needs_review');
+  assert.equal(duplicate.receipts[0].errorCode, 'TEST_DOCUMENT_PAIR_ALREADY_REGISTERED');
+  assert.notEqual(duplicate.receipts[0].pairId, first.receipts[0].pairId);
+  assert.equal(pairs.length, 2);
+  assert.equal(writes.some(row => row.sql.includes('INSERT INTO writing_flow.manual_review')
+    && row.values[0] === duplicate.receipts[0].pairId), true);
   assert.equal(writes.filter(row => row.sql.includes('INSERT INTO writing_flow.handoff')).length, 1);
+  const scanReceipt = pairs.find(row => row.source_record_id === otherAssignment.recordId
+    && row.submission_revision === first.receipts[0].revision && row.status !== 'superseded');
+  assert.equal(scanReceipt?.pair_id, duplicate.receipts[0].pairId);
 });
 
 // Nhận vào: cùng Docs nhưng bài viết đã có phiên bản mới ở nguồn khác.

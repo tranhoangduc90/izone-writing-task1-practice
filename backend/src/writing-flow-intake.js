@@ -237,6 +237,7 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
             status: newest.status === 'superseded' ? 'stale_read' : 'existing' });
           continue;
         }
+        let duplicateTestPair = false;
         if (sourceType === 'term_test') {
           const otherSource = await client.query(`SELECT 1 AS duplicate_test_pair
             FROM writing_flow.pair
@@ -246,10 +247,7 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
                 AND source_record_id=$6 AND source_link_index=$7)
             LIMIT 1`, [input.docId, pair.essaySlot, pair.revision,
             input.appId, input.tableId, input.recordId, input.linkIndex]);
-          if (otherSource.rowCount > 0) {
-            throw new ApiError(409, 'TEST_DOCUMENT_PAIR_ALREADY_REGISTERED',
-              'Cùng bài Test đã được tiếp nhận từ một bài tập khác; cần kiểm tra nguồn.');
-          }
+          duplicateTestPair = otherSource.rowCount > 0;
         }
         await client.query(`
           UPDATE writing_flow.pair SET status = 'superseded', updated_at = now()
@@ -289,7 +287,23 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
              status, result_sha256, result_ciphertext, finished_at)
           VALUES ($1,'intake',1,1,$2,'succeeded',$3,$4,now())`,
         [pairId, `intake:${pairId}`, pair.resultSha256, pair.resultCiphertext]);
-        if (pair.alreadyGraded) {
+        if (duplicateTestPair) {
+          // Nhận vào: nguồn Classroom thứ hai trỏ cùng bài Test đã tiếp nhận.
+          // Việc chính: giữ biên nhận của nguồn này để sổ quét chốt được, đưa bài vào
+          // Cần kiểm tra và không tạo bàn giao AI. Lỗi hiện ở nhật ký của đúng cặp.
+          await client.query(`UPDATE writing_flow.pair
+            SET status='needs_review',updated_at=now() WHERE pair_id=$1`, [pairId]);
+          await client.query(`INSERT INTO writing_flow.stage_result
+            (pair_id,stage_key,status,cycle_no,attempt_count,input_sha256,error_code)
+            VALUES ($1,'precheck','needs_review',1,0,$2,$3)`,
+          [pairId, pair.resultSha256, 'TEST_DOCUMENT_PAIR_ALREADY_REGISTERED']);
+          await client.query(`INSERT INTO writing_flow.manual_review
+            (pair_id,stage_key,cycle_no,error_code)
+            VALUES ($1,'precheck',1,$2)`,
+          [pairId, 'TEST_DOCUMENT_PAIR_ALREADY_REGISTERED']);
+          receipts.push({ essaySlot: pair.essaySlot, pairId, status: 'needs_review',
+            revision: pair.revision, errorCode: 'TEST_DOCUMENT_PAIR_ALREADY_REGISTERED' });
+        } else if (pair.alreadyGraded) {
           await client.query(`UPDATE writing_flow.pair
             SET status='delivered',finished_at=now(),updated_at=now()
             WHERE pair_id=$1`, [pairId]);
@@ -313,7 +327,7 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
       }
       if (testGroupId) {
         for (const receipt of receipts) {
-          if (!receipt.pairId || !['received', 'existing'].includes(receipt.status)) continue;
+          if (!receipt.pairId || !['received', 'existing', 'needs_review'].includes(receipt.status)) continue;
           const preparedPair = prepared.find(item => item.essaySlot === receipt.essaySlot);
           const taskNumber = preparedPair?.taskType === 'task_1' ? 1 : 2;
           await client.query(`INSERT INTO writing_flow.test_pair
@@ -325,18 +339,21 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
               historical_evidence=EXCLUDED.historical_evidence,updated_at=now()
             WHERE writing_flow.test_pair.pair_id IS DISTINCT FROM EXCLUDED.pair_id`,
           [testGroupId, receipt.pairId, taskNumber,
-            receipt.historicalEvidence === true ? 'delivered' : 'pending',
+            receipt.status === 'needs_review' ? 'needs_review'
+              : receipt.historicalEvidence === true ? 'delivered' : 'pending',
             receipt.historicalEvidence === true]);
         }
         const groupState = await client.query(`SELECT count(*)::int AS total,
-            count(*) FILTER (WHERE status='delivered')::int AS delivered
+            count(*) FILTER (WHERE status='delivered')::int AS delivered,
+            count(*) FILTER (WHERE status='needs_review')::int AS needs_review
           FROM writing_flow.test_pair WHERE test_group_id=$1`, [testGroupId]);
-        const { total, delivered } = groupState.rows[0];
+        const { total, delivered, needs_review: needsReview } = groupState.rows[0];
         await client.query(`UPDATE writing_flow.test_group SET
           evidence_status=CASE WHEN $2::int>0 THEN 'already_graded' ELSE evidence_status END,
-          status=CASE WHEN $1::int>0 AND $1::int=$2::int THEN 'complete' ELSE status END,
+          status=CASE WHEN $4::int>0 THEN 'needs_review'
+            WHEN $1::int>0 AND $1::int=$2::int THEN 'complete' ELSE status END,
           completed_at=CASE WHEN $1::int>0 AND $1::int=$2::int THEN now() ELSE completed_at END,
-          updated_at=now() WHERE test_group_id=$3`, [total, delivered, testGroupId]);
+          updated_at=now() WHERE test_group_id=$3`, [total, delivered, testGroupId, needsReview]);
       }
       // Chỉ xóa lỗi đúng ô đã nhận; lỗi ô khác trong cùng file vẫn còn để xử lý.
       for (const receipt of receipts) {

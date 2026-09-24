@@ -94,3 +94,37 @@ test('Test đã giao không được nhận lượt chấm lại dù có bàn gi
   assert.equal(result.status, 'already_delivered');
   assert.equal(calls.some(sql => sql.includes('INSERT INTO writing_flow.stage_attempt')), false);
 });
+
+test('bước chấm Test hết hạn ở lượt ba vào Cần kiểm tra, không tạo bàn giao chấm lại', async () => {
+  const pairId = '11111111-1111-4111-8111-111111111111';
+  const queries = [];
+  const client = {
+    async query(sql, params = []) {
+      queries.push({ sql, params });
+      if (sql.includes('SELECT status FROM writing_flow.pair')) return {
+        rowCount: 1, rows: [{ status: 'running' }],
+      };
+      if (sql.includes('SELECT cycle_no,attempt_count,status,lease_expires_at')) return {
+        rowCount: 1, rows: [{ cycle_no: 1, attempt_count: 3,
+          status: 'running', lease_expires_at: new Date(Date.now() - 60_000) }],
+      };
+      if (sql.includes('UPDATE writing_flow.stage_attempt')) return {
+        rowCount: 1, rows: [{ attempt_id: '33333333-3333-4333-8333-333333333333' }],
+      };
+      return { rowCount: 1, rows: [] };
+    },
+    release() {},
+  };
+  const pool = {
+    async query(sql) {
+      queries.push({ sql });
+      return { rows: [{ pair_id: pairId, stage_key: 'main', source_type: 'term_test' }] };
+    },
+    async connect() { return client; },
+  };
+  const recovered = await createWritingFlowHandoff({ pool }).recoverExpired(1);
+  assert.deepEqual(recovered, [{ pairId, stageKey: 'main', status: 'needs_review' }]);
+  assert.ok(queries.some(({ sql }) => sql.includes('INSERT INTO writing_flow.manual_review')));
+  assert.ok(queries.some(({ sql }) => sql.includes("UPDATE writing_flow.pair SET status='needs_review'")));
+  assert.equal(queries.some(({ sql }) => sql.includes('INSERT INTO writing_flow.handoff')), false);
+});

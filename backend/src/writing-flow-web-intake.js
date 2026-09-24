@@ -18,13 +18,13 @@ function requestIdentity(input) {
     studentName: input.studentName.normalize('NFKC').trim().replace(/\s+/gu, ' ') };
 }
 
-async function resolveStudent(client, identity) {
+async function resolveStudent(client, identity, allowClosed = false) {
   let result;
   try {
     result = await client.query(`SELECT cohort,erp_course_class_id,
-        erp_student_contact_id,rubric_version
-      FROM writing_flow.resolve_web_substitute_student($1,$2,$3)`,
-    [identity.testSlug, identity.classId, identity.studentName]);
+        erp_student_contact_id,rubric_version,accepting
+      FROM writing_flow.resolve_web_substitute_student($1,$2,$3,$4)`,
+    [identity.testSlug, identity.classId, identity.studentName, allowClosed]);
   } catch (error) {
     const code = String(error?.message || '').match(/WEB_(?:TEST_ACCESS_CLOSED|ROSTER_NAME_NOT_FOUND|ROSTER_NAME_AMBIGUOUS|ROSTER_INPUT_INVALID)/u)?.[0];
     if (code) throw new ApiError(code === 'WEB_ROSTER_NAME_AMBIGUOUS' ? 409
@@ -40,7 +40,7 @@ async function resolveStudent(client, identity) {
       'Học viên hoặc lớp không khớp roster đang mở.');
   }
   return { erpStudentId: Number(row.erp_student_contact_id),
-    rubricVersion: row.rubric_version };
+    rubricVersion: row.rubric_version, accepting: row.accepting === true };
 }
 
 function publicAttempt(row) {
@@ -83,10 +83,21 @@ export function createWebSubstituteIntake({ pool, encryptionKey, getPinnedPrompt
     }
     const identity = requestIdentity(input);
     const attempt = await withTransaction(pool, async client => {
-      const student = await resolveStudent(client, identity);
-      pinnedPrompt(getPinnedPrompt, identity, identity.profile.tasks[0],
-        student.rubricVersion);
-      const inserted = await client.query(`INSERT INTO writing_flow.web_substitute_attempt
+      const student = await resolveStudent(client, identity, true);
+      const previous = await client.query(`SELECT *
+        FROM writing_flow.web_substitute_attempt
+        WHERE test_slug=$1 AND erp_course_class_id=$2
+          AND erp_student_contact_id=$3 AND attempt_no=1 FOR UPDATE`,
+      [identity.testSlug, identity.classId, student.erpStudentId]);
+      if (!previous.rows.length && !student.accepting) {
+        throw new ApiError(404, 'WEB_TEST_ACCESS_CLOSED',
+          'Bài thi đã đóng nhận lượt mới.');
+      }
+      if (!previous.rows.length || previous.rows[0].status === 'open') {
+        pinnedPrompt(getPinnedPrompt, identity, identity.profile.tasks[0],
+          student.rubricVersion);
+      }
+      const inserted = previous.rows.length ? previous : await client.query(`INSERT INTO writing_flow.web_substitute_attempt
         (test_slug,cohort,erp_course_class_id,erp_student_contact_id,
          task_number,rubric_version)
         VALUES ($1,$2,$3,$4,$5,$6)
@@ -138,7 +149,7 @@ export function createWebSubstituteIntake({ pool, encryptionKey, getPinnedPrompt
       throw new ApiError(409, 'WEB_TASK_MISMATCH', 'Task không khớp đề đã mở.');
     }
     const receipt = await withTransaction(pool, async client => {
-      const student = await resolveStudent(client, identity);
+      const student = await resolveStudent(client, identity, true);
       const found = await client.query(`SELECT * FROM writing_flow.web_substitute_attempt
         WHERE attempt_id=$1 FOR UPDATE`, [input.attemptId]);
       const attempt = found.rows[0];
@@ -153,6 +164,10 @@ export function createWebSubstituteIntake({ pool, encryptionKey, getPinnedPrompt
       if (attempt.status === 'open' && attempt.rubric_version !== student.rubricVersion) {
         throw new ApiError(409, 'WEB_RUBRIC_VERSION_CHANGED',
           'Đề đã cập nhật; cần kiểm tra lượt chưa nộp.');
+      }
+      if (attempt.status === 'open' && !student.accepting) {
+        throw new ApiError(409, 'WEB_TEST_ACCESS_CLOSED',
+          'Bài thi đã đóng nhận bài mới.');
       }
       // Nguồn đề phải là cache/registry cục bộ đã ghim; không gọi mạng khi đang khóa lượt.
       const pinned = pinnedPrompt(getPinnedPrompt, identity,

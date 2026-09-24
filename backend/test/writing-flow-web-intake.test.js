@@ -96,6 +96,20 @@ test('lượt do server cấp và phiếu nhận bài mã hóa sống qua gửi 
     await assert.rejects(service.submitWriting({ ...request,
       attemptId: '22222222-2222-4222-8222-222222222222' }),
     error => error.code === 'WEB_ATTEMPT_IDENTITY_MISMATCH');
+    await db.exec(`RESET ROLE; UPDATE writing_flow.web_substitute_access
+      SET enabled=false WHERE test_slug='substitute-test-2-k56';
+      SET ROLE writing_practice_api;`);
+    const afterClose = await service.openAttempt(identity());
+    assert.equal(afterClose.attemptId, first.attemptId);
+    assert.equal(afterClose.status, 'submitted');
+    assert.equal((await service.submitWriting(request)).submissionId, receipt.submissionId);
+    await db.exec(`RESET ROLE; INSERT INTO assessment_k56.term_test_roster VALUES
+      ('term-test-1-k56',1252,1002,
+       '22222222-2222-4222-8222-222222222222','Học viên khác',true);
+      SET ROLE writing_practice_api;`);
+    await assert.rejects(service.openAttempt({ ...identity(),
+      studentName: 'Học viên khác' }),
+    error => error.code === 'WEB_TEST_ACCESS_CLOSED');
   } finally {
     await db.close();
   }
@@ -172,6 +186,26 @@ test('không có khóa mã hóa hoặc quyền lớp thì không cấp lượt',
     const count = await db.query(`SELECT count(*)::int AS n
       FROM writing_flow.web_substitute_attempt`);
     assert.equal(count.rows[0].n, 0);
+  } finally {
+    await db.close();
+  }
+});
+
+test('đóng đề không nhận bài mới từ lượt còn mở nhưng vẫn đọc lại lượt cũ', async () => {
+  const { db, pool, getPinnedPrompt } = await fixture();
+  try {
+    const service = createWebSubstituteIntake({ pool, encryptionKey: key, getPinnedPrompt });
+    const attempt = await service.openAttempt(identity());
+    await db.exec(`RESET ROLE; UPDATE writing_flow.web_substitute_access
+      SET enabled=false WHERE test_slug='substitute-test-2-k56';
+      SET ROLE writing_practice_api;`);
+    assert.equal((await service.openAttempt(identity())).attemptId, attempt.attemptId);
+    await assert.rejects(service.submitWriting({ ...identity(),
+      attemptId: attempt.attemptId, essay: 'Synthetic late answer.' }),
+    error => error.code === 'WEB_TEST_ACCESS_CLOSED');
+    const submissions = await db.query(`SELECT count(*)::int AS n
+      FROM writing_flow.web_substitute_submission`);
+    assert.equal(submissions.rows[0].n, 0);
   } finally {
     await db.close();
   }

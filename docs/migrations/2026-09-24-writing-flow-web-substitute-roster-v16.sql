@@ -34,13 +34,15 @@ CREATE TABLE IF NOT EXISTS writing_flow.web_substitute_access (
 CREATE OR REPLACE FUNCTION writing_flow.resolve_web_substitute_student(
   p_test_slug text,
   p_class_id bigint,
-  p_student_name text
+  p_student_name text,
+  p_allow_closed boolean DEFAULT false
 ) RETURNS TABLE (
   cohort smallint,
   erp_course_class_id bigint,
   erp_student_contact_id bigint,
-  rubric_version text
-) LANGUAGE plpgsql STABLE SECURITY DEFINER
+  rubric_version text,
+  accepting boolean
+) LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, writing_flow, assessment, assessment_k56
 AS $function$
 DECLARE
@@ -52,12 +54,13 @@ BEGIN
     RAISE EXCEPTION 'WEB_ROSTER_INPUT_INVALID';
   END IF;
 
-  SELECT access.cohort, access.rubric_version INTO v_cohort, rubric_version
+  SELECT access.cohort, access.rubric_version, access.enabled
+    INTO v_cohort, rubric_version, accepting
   FROM writing_flow.web_substitute_access AS access
   WHERE access.test_slug = p_test_slug
     AND access.erp_course_class_id = p_class_id
-    AND access.enabled = true;
-  IF v_cohort IS NULL THEN
+  FOR SHARE;
+  IF v_cohort IS NULL OR (NOT accepting AND NOT coalesce(p_allow_closed, false)) THEN
     RAISE EXCEPTION 'WEB_TEST_ACCESS_CLOSED';
   END IF;
 
@@ -98,9 +101,9 @@ END;
 $function$;
 
 REVOKE ALL ON writing_flow.web_substitute_access FROM PUBLIC;
-REVOKE ALL ON FUNCTION writing_flow.resolve_web_substitute_student(text,bigint,text)
+REVOKE ALL ON FUNCTION writing_flow.resolve_web_substitute_student(text,bigint,text,boolean)
   FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION writing_flow.resolve_web_substitute_student(text,bigint,text)
+GRANT EXECUTE ON FUNCTION writing_flow.resolve_web_substitute_student(text,bigint,text,boolean)
   TO writing_practice_api;
 
 COMMIT;

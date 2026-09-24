@@ -11,6 +11,27 @@ test('thống kê ngày trả hợp đồng YYYY-MM-DD thay vì timestamp phụ 
   assert.match(observedSql, /to_char\([\s\S]*'YYYY-MM-DD'\)[\s\S]*AS day/iu);
 });
 
+test('thống kê ngày tách chấm mới, nhập lịch sử một lần và giao thành công', async () => {
+  let observedSql = '';
+  const pool = { query: async sql => {
+    observedSql = sql;
+    return { rows: [{
+      day: '2026-09-23', newly_graded_count: 4,
+      historical_count: 3, delivered_count: 2, completed_count: 2,
+    }] };
+  } };
+  const days = await createWritingFlowService({ pool }).dailyStats();
+  assert.equal(days[0].historical_count, 3);
+  assert.match(observedSql, /stage_key='main'/u);
+  assert.match(observedSql, /legacy_record/u);
+  assert.match(observedSql, /DISTINCT ON \(source_app_id,source_table_id,source_record_id,essay_slot\)/u);
+  assert.match(observedSql, /restored_legacy_result/u);
+  assert.match(observedSql, /google_docs_result_link/u);
+  assert.match(observedSql, /newly_graded_count/u);
+  assert.match(observedSql, /historical_count/u);
+  assert.match(observedSql, /delivered_count/u);
+});
+
 test('lọc tab Đã giao dùng cùng thời điểm giao bài với biểu đồ theo ngày', async () => {
   let observedSql = '';
   let observedValues = [];

@@ -715,31 +715,113 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
       return { classes: classes.rows, teachers: teachers.rows.map(row => row.teacher_name) };
     },
 
+    // Nhận vào: bộ lọc của biểu đồ ngày, giống bộ lọc bảng bài.
+    // Việc chính: đếm riêng lượt chấm mới, lần đầu nhập lịch sử và lượt giao kết quả.
+    // Trả ra: từng ngày Việt Nam với ba số độc lập; completed_count giữ hợp đồng cũ.
+    // Khi lỗi: API báo lỗi, không đoán số từ dữ liệu tải một phần.
     async dailyStats({ classCode = null, teacherName = null, taskType = null,
       dateFrom = null, dateTo = null, sourceKind = null } = {}) {
       const assignments = await teacherAssignmentsForDatabase();
-      const result = await pool.query(`WITH ${assignments}
-        SELECT to_char((deliver.completed_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date,
-          'YYYY-MM-DD') AS day,
-          count(DISTINCT p.pair_id)::integer AS completed_count
-        FROM writing_flow.pair AS p
-        JOIN writing_flow.stage_result AS deliver
-          ON deliver.pair_id=p.pair_id AND deliver.stage_key='deliver'
-         AND deliver.status='succeeded' AND deliver.completed_at IS NOT NULL
-        LEFT JOIN writing_flow.source_record AS source ON source.source_id=p.source_id
-        LEFT JOIN teacher_assignments AS teachers ON teachers.class_code=p.class_code
-        LEFT JOIN writing_flow.class_registry AS registry ON registry.class_code=p.class_code
-        WHERE p.status='delivered' AND p.skipped_at IS NULL
-          AND ${visibleRegistrySql('registry')}
-          AND ($1::text IS NULL OR p.class_code=$1)
-          AND ($2::text IS NULL OR $2=ANY(coalesce(nullif(source.teacher_names,ARRAY[]::text[]),
-            teachers.teacher_names,ARRAY[]::text[])))
-          AND ($3::text IS NULL OR p.task_type=$3)
-          AND ($4::date IS NULL OR (deliver.completed_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date >= $4)
-          AND ($5::date IS NULL OR (deliver.completed_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date <= $5)
-          AND ($6::text IS NULL OR ($6='test' AND p.source_type='term_test')
-            OR ($6='homework' AND p.source_type<>'term_test'))
-        GROUP BY day ORDER BY day`, [classCode, teacherName, taskType, dateFrom, dateTo, sourceKind]);
+      const result = await pool.query(`WITH ${assignments},
+        legacy_first AS (
+          SELECT DISTINCT ON (source_app_id,source_table_id,source_record_id,essay_slot)
+            class_code,teacher_name,imported_at
+          FROM writing_flow.legacy_record AS history
+          WHERE (essay_slot IS NOT NULL OR NOT EXISTS (
+            SELECT 1 FROM writing_flow.legacy_record AS slotted
+            WHERE slotted.source_app_id=history.source_app_id
+              AND slotted.source_table_id=history.source_table_id
+              AND slotted.source_record_id=history.source_record_id
+              AND slotted.essay_slot IS NOT NULL))
+          ORDER BY source_app_id,source_table_id,source_record_id,essay_slot,
+            imported_at,legacy_id
+        ),
+        daily_events AS (
+          SELECT to_char((main.completed_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date,
+              'YYYY-MM-DD') AS day,
+            1 AS newly_graded_count,0 AS historical_count,0 AS delivered_count
+          FROM writing_flow.pair AS p
+          JOIN writing_flow.stage_result AS main
+            ON main.pair_id=p.pair_id AND main.stage_key='main'
+           AND main.status='succeeded' AND main.completed_at IS NOT NULL
+          LEFT JOIN writing_flow.test_pair AS task ON task.pair_id=p.pair_id
+          LEFT JOIN writing_flow.source_record AS source ON source.source_id=p.source_id
+          LEFT JOIN teacher_assignments AS teachers ON teachers.class_code=p.class_code
+          LEFT JOIN writing_flow.class_registry AS registry ON registry.class_code=p.class_code
+          WHERE coalesce(task.historical_evidence->>'source','') NOT IN
+              ('restored_legacy_result','google_docs_result_link')
+            AND ${visibleRegistrySql('registry')}
+            AND ($1::text IS NULL OR p.class_code=$1)
+            AND ($2::text IS NULL OR $2=ANY(coalesce(nullif(source.teacher_names,ARRAY[]::text[]),
+              teachers.teacher_names,ARRAY[]::text[])))
+            AND ($3::text IS NULL OR p.task_type=$3)
+            AND ($4::date IS NULL OR (main.completed_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date >= $4)
+            AND ($5::date IS NULL OR (main.completed_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date <= $5)
+            AND ($6::text IS NULL OR ($6='test' AND p.source_type='term_test')
+              OR ($6='homework' AND p.source_type<>'term_test'))
+          UNION ALL
+          SELECT to_char((history.imported_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date,
+              'YYYY-MM-DD') AS day,
+            0,1,0
+          FROM legacy_first AS history
+          LEFT JOIN teacher_assignments AS teachers ON teachers.class_code=history.class_code
+          LEFT JOIN writing_flow.class_registry AS registry ON registry.class_code=history.class_code
+          WHERE ${visibleRegistrySql('registry')}
+            AND ($1::text IS NULL OR history.class_code=$1)
+            AND ($2::text IS NULL OR history.teacher_name=$2
+              OR $2=ANY(coalesce(teachers.teacher_names,ARRAY[]::text[])))
+            AND $3::text IS NULL
+            AND ($4::date IS NULL OR (history.imported_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date >= $4)
+            AND ($5::date IS NULL OR (history.imported_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date <= $5)
+            AND ($6::text IS NULL OR $6='homework')
+          UNION ALL
+          SELECT to_char((task.delivered_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date,
+              'YYYY-MM-DD') AS day,
+            0,1,0
+          FROM writing_flow.test_pair AS task
+          JOIN writing_flow.pair AS p ON p.pair_id=task.pair_id
+          LEFT JOIN writing_flow.source_record AS source ON source.source_id=p.source_id
+          LEFT JOIN teacher_assignments AS teachers ON teachers.class_code=p.class_code
+          LEFT JOIN writing_flow.class_registry AS registry ON registry.class_code=p.class_code
+          WHERE task.historical_evidence->>'source' IN
+              ('restored_legacy_result','google_docs_result_link')
+            AND task.task_score IS NOT NULL AND task.delivered_at IS NOT NULL
+            AND ${visibleRegistrySql('registry')}
+            AND ($1::text IS NULL OR p.class_code=$1)
+            AND ($2::text IS NULL OR $2=ANY(coalesce(nullif(source.teacher_names,ARRAY[]::text[]),
+              teachers.teacher_names,ARRAY[]::text[])))
+            AND ($3::text IS NULL OR p.task_type=$3)
+            AND ($4::date IS NULL OR (task.delivered_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date >= $4)
+            AND ($5::date IS NULL OR (task.delivered_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date <= $5)
+            AND ($6::text IS NULL OR $6='test')
+          UNION ALL
+          SELECT to_char((deliver.completed_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date,
+              'YYYY-MM-DD') AS day,
+            0,0,1
+          FROM writing_flow.pair AS p
+          JOIN writing_flow.stage_result AS deliver
+            ON deliver.pair_id=p.pair_id AND deliver.stage_key='deliver'
+           AND deliver.status='succeeded' AND deliver.completed_at IS NOT NULL
+          LEFT JOIN writing_flow.source_record AS source ON source.source_id=p.source_id
+          LEFT JOIN teacher_assignments AS teachers ON teachers.class_code=p.class_code
+          LEFT JOIN writing_flow.class_registry AS registry ON registry.class_code=p.class_code
+          WHERE p.status='delivered' AND p.skipped_at IS NULL
+            AND ${visibleRegistrySql('registry')}
+            AND ($1::text IS NULL OR p.class_code=$1)
+            AND ($2::text IS NULL OR $2=ANY(coalesce(nullif(source.teacher_names,ARRAY[]::text[]),
+              teachers.teacher_names,ARRAY[]::text[])))
+            AND ($3::text IS NULL OR p.task_type=$3)
+            AND ($4::date IS NULL OR (deliver.completed_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date >= $4)
+            AND ($5::date IS NULL OR (deliver.completed_at AT TIME ZONE 'Asia/Ho_Chi_Minh')::date <= $5)
+            AND ($6::text IS NULL OR ($6='test' AND p.source_type='term_test')
+              OR ($6='homework' AND p.source_type<>'term_test'))
+        )
+        SELECT day,sum(newly_graded_count)::integer AS newly_graded_count,
+          sum(historical_count)::integer AS historical_count,
+          sum(delivered_count)::integer AS delivered_count,
+          sum(delivered_count)::integer AS completed_count
+        FROM daily_events GROUP BY day ORDER BY day`,
+      [classCode, teacherName, taskType, dateFrom, dateTo, sourceKind]);
       return result.rows;
     },
 

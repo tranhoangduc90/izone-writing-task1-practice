@@ -9,6 +9,7 @@ const schema = z.object({
   TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(3).default(1),
   INTERNAL_API_TOKEN: z.string().min(32),
   WEB_SUBSTITUTE_API_TOKEN: z.string().min(32).optional(),
+  WEB_SUBSTITUTE_GRADER_TOKEN: z.string().min(32).optional(),
   GOOGLE_CLIENT_ID: z.string().trim().min(1),
   TEACHER_SESSION_IDLE_DAYS: z.coerce.number().int().min(1).max(180).default(90),
   TEACHER_SESSION_ABSOLUTE_DAYS: z.coerce.number().int().min(1).max(730).default(365),
@@ -31,6 +32,12 @@ const schema = z.object({
   if (notifyUrls.length && !value.WRITING_FLOW_NOTIFY_SECRET) {
     context.addIssue({ code: 'custom', path: ['WRITING_FLOW_NOTIFY_SECRET'],
       message: 'Đã bật đường đánh thức Writing nhưng thiếu khóa xác thực.' });
+  }
+  const webTokens = [value.INTERNAL_API_TOKEN,
+    value.WEB_SUBSTITUTE_API_TOKEN, value.WEB_SUBSTITUTE_GRADER_TOKEN].filter(Boolean);
+  if (new Set(webTokens).size !== webTokens.length) {
+    context.addIssue({ code: 'custom', path: ['WEB_SUBSTITUTE_GRADER_TOKEN'],
+      message: 'Khóa gateway, bộ chấm và API nội bộ phải khác nhau.' });
   }
   for (const url of notifyUrls) {
     if (new URL(url).protocol !== 'https:' && value.NODE_ENV === 'production') {
@@ -65,6 +72,7 @@ export function loadConfig(env = process.env) {
     trustProxyHops: value.TRUST_PROXY_HOPS,
     internalApiToken: value.INTERNAL_API_TOKEN,
     webSubstituteApiToken: value.WEB_SUBSTITUTE_API_TOKEN || null,
+    webSubstituteGraderToken: value.WEB_SUBSTITUTE_GRADER_TOKEN || null,
     googleClientId: value.GOOGLE_CLIENT_ID,
     teacherSessionIdleDays: value.TEACHER_SESSION_IDLE_DAYS,
     teacherSessionAbsoluteDays: value.TEACHER_SESSION_ABSOLUTE_DAYS,

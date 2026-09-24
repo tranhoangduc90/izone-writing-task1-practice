@@ -49,7 +49,7 @@ function publicAttempt(row) {
     rubricVersion: row.rubric_version, status: row.status };
 }
 
-function pinnedPrompt(getPinnedPrompt, identity, taskNumber, rubricVersion) {
+export function pinnedWebPrompt(getPinnedPrompt, identity, taskNumber, rubricVersion) {
   // Chỉ dùng đề đã ghim trên máy chủ; không tin đề hoặc URL ảnh do trình duyệt gửi.
   const pinned = getPinnedPrompt({ testSlug: identity.testSlug,
     taskNumber, rubricVersion });
@@ -94,7 +94,7 @@ export function createWebSubstituteIntake({ pool, encryptionKey, getPinnedPrompt
           'Bài thi đã đóng nhận lượt mới.');
       }
       if (!previous.rows.length || previous.rows[0].status === 'open') {
-        pinnedPrompt(getPinnedPrompt, identity, identity.profile.tasks[0],
+        pinnedWebPrompt(getPinnedPrompt, identity, identity.profile.tasks[0],
           student.rubricVersion);
       }
       const inserted = previous.rows.length ? previous : await client.query(`INSERT INTO writing_flow.web_substitute_attempt
@@ -170,7 +170,7 @@ export function createWebSubstituteIntake({ pool, encryptionKey, getPinnedPrompt
           'Bài thi đã đóng nhận bài mới.');
       }
       // Nguồn đề phải là cache/registry cục bộ đã ghim; không gọi mạng khi đang khóa lượt.
-      const pinned = pinnedPrompt(getPinnedPrompt, identity,
+      const pinned = pinnedWebPrompt(getPinnedPrompt, identity,
         Number(attempt.task_number), attempt.rubric_version);
       const content = JSON.stringify({ taskNumber: pinned.taskNumber,
         topic: pinned.topic, imageUrl: pinned.imageUrl || '', essay });

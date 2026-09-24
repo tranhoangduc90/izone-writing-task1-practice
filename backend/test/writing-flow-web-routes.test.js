@@ -5,17 +5,19 @@ import { createApp } from '../src/app.js';
 import { ApiError } from '../src/service.js';
 
 const token = 'w'.repeat(32);
+const graderToken = 'g'.repeat(32);
 const base = '/api/v1/internal/writing-flow/web-substitute';
 const identity = { testSlug: 'substitute-test-2-k56', classId: 1252,
   studentName: 'Học viên thử' };
 const attemptId = '11111111-1111-4111-8111-111111111111';
 
-function app(writingFlowWebIntake = null) {
+function app(writingFlowWebIntake = null, writingFlowWebQueue = null) {
   return createApp({
     config: { trustProxyHops: 0, allowedOrigins: new Set(),
-      internalApiToken: 'i'.repeat(32), webSubstituteApiToken: token },
+      internalApiToken: 'i'.repeat(32), webSubstituteApiToken: token,
+      webSubstituteGraderToken: graderToken },
     pool: { query: async () => ({ rows: [] }) },
-    service: {}, writingFlowWebIntake,
+    service: {}, writingFlowWebIntake, writingFlowWebQueue,
   });
 }
 
@@ -86,4 +88,30 @@ test('lỗi đọc lại sau ghi không bị route đổi thành accepted', asyn
   assert.equal(response.status, 503);
   assert.equal(response.body.error, 'WEB_RECEIPT_READBACK_UNKNOWN');
   assert.equal(JSON.stringify(response.body).includes('Synthetic response.'), false);
+});
+
+test('khóa gateway không lấy việc chấm và khóa grader không mở lượt', async () => {
+  const calls = [];
+  const candidate = app({ openAttempt: async () => ({ attemptId }) }, {
+    claimDue: async ({ limit }) => {
+      calls.push(limit);
+      return [];
+    },
+    markExpiredForReview: async () => ({ needsReview: 0 }),
+  });
+  const denied = await request(candidate).post(`${base}/work/claim`)
+    .set('Authorization', `Bearer ${token}`).send({ limit: 1 });
+  assert.equal(denied.status, 401);
+  const deniedOpen = await request(candidate).post(`${base}/attempts`)
+    .set('Authorization', `Bearer ${graderToken}`).send(identity);
+  assert.equal(deniedOpen.status, 401);
+  const claimed = await request(candidate).post(`${base}/work/claim`)
+    .set('Authorization', `Bearer ${graderToken}`).send({ limit: 1 });
+  assert.equal(claimed.status, 200);
+  assert.deepEqual(claimed.body.jobs, []);
+  assert.deepEqual(calls, [1]);
+  const expired = await request(candidate).post(`${base}/work/expire`)
+    .set('Authorization', `Bearer ${graderToken}`).send({ limit: 1 });
+  assert.equal(expired.status, 200);
+  assert.equal(expired.body.summary.needsReview, 0);
 });

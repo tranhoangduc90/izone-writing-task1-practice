@@ -85,3 +85,149 @@ test('webhook lỗi không làm mất việc và hẹn thử lại 30 giây', as
   assert.equal(timers.at(-1).delay, 30000);
   await notifier.close();
 });
+
+test('mất kết nối giữ khóa phải dừng gửi và hẹn thử nhận lại vai trò điều phối', async () => {
+  const pool = listenerPool([{ handoff_due: true, source_due: false,
+    next_at: null, server_now: new Date() }]);
+  const timers = [];
+  const recurring = [];
+  let sent = 0;
+  const notifier = createWritingFlowNotifier({ pool,
+    handoffUrl: 'https://example.test/handoff', secret: 's'.repeat(32),
+    now: () => 10_000,
+    setTimer(handler, delay) { const timer = { handler, delay }; timers.push(timer); return timer; },
+    clearTimer() {},
+    setRecurringTimer(handler, delay) { const timer = { handler, delay }; recurring.push(timer); return timer; },
+    clearRecurringTimer() {},
+    async fetchImpl() { sent += 1; return { ok: true }; }, log() {} });
+  assert.equal(await notifier.start(), true);
+  const scheduledBeforeLoss = timers[0];
+  pool.listeners.get('error')(new Error('database connection lost'));
+  await scheduledBeforeLoss.handler();
+  assert.equal(sent, 0);
+  assert.ok(recurring.some(timer => timer.delay === WRITING_FLOW_FALLBACK_MS));
+  await notifier.close();
+});
+
+test('database tạm ngắt lúc khởi động vẫn tự thử lại và nhận việc tồn', async () => {
+  let connectCount = 0;
+  const listeners = new Map();
+  const client = {
+    async query(sql) {
+      if (String(sql).includes('pg_try_advisory_lock')) return { rows: [{ acquired: true }] };
+      return { rows: [] };
+    },
+    on(name, handler) { listeners.set(name, handler); }, release() {}
+  };
+  const pool = {
+    async connect() {
+      connectCount += 1;
+      if (connectCount === 1) throw new Error('database unavailable');
+      return client;
+    },
+    async query() { return { rows: [{ handoff_due: true, source_due: false,
+      next_at: null, server_now: new Date() }] }; }
+  };
+  const timers = [];
+  const recurring = [];
+  let sent = 0;
+  const notifier = createWritingFlowNotifier({ pool,
+    handoffUrl: 'https://example.test/handoff', secret: 's'.repeat(32), now: () => 10_000,
+    setTimer(handler, delay) { const timer = { handler, delay }; timers.push(timer); return timer; },
+    clearTimer() {},
+    setRecurringTimer(handler, delay) { const timer = { handler, delay }; recurring.push(timer); return timer; },
+    clearRecurringTimer() {},
+    async fetchImpl() { sent += 1; return { ok: true }; }, log() {} });
+  assert.equal(await notifier.start(), false);
+  assert.equal(recurring[0].delay, WRITING_FLOW_FALLBACK_MS);
+  await recurring[0].handler();
+  await new Promise(resolve => setImmediate(resolve));
+  await timers.at(-1).handler();
+  assert.equal(connectCount, 2);
+  assert.equal(sent, 1);
+  await notifier.close();
+});
+
+test('hai backend: bản dự phòng nhận khóa sau khi bản chính dừng và chỉ gửi một lần', async () => {
+  let owner = null;
+  const sent = [];
+  const clock = name => ({
+    timers: [], recurring: [],
+    setTimer(handler, delay) { const timer = { handler, delay }; this.timers.push(timer); return timer; },
+    clearTimer(timer) { timer.cleared = true; },
+    setRecurringTimer(handler, delay) {
+      const timer = { handler, delay }; this.recurring.push(timer); return timer;
+    },
+    clearRecurringTimer(timer) { timer.cleared = true; },
+    async fetchImpl() { sent.push(name); return { ok: true }; }
+  });
+  function leaderPool(name) {
+    const client = {
+      async query(sql) {
+        if (String(sql).includes('pg_try_advisory_lock')) {
+          if (owner === null) owner = name;
+          return { rows: [{ acquired: owner === name }] };
+        }
+        if (String(sql).includes('pg_advisory_unlock') && owner === name) owner = null;
+        return { rows: [] };
+      },
+      on() {},
+      release() { if (owner === name) owner = null; }
+    };
+    return {
+      async connect() { return client; },
+      async query() { return { rows: [{ handoff_due: true, source_due: false,
+        next_at: null, server_now: new Date() }] }; }
+    };
+  }
+  const firstClock = clock('first');
+  const secondClock = clock('second');
+  const options = { handoffUrl: 'https://example.test/handoff',
+    secret: 's'.repeat(32), now: () => 10_000, log() {} };
+  const first = createWritingFlowNotifier({ ...options, pool: leaderPool('first'),
+    ...firstClock,
+    setTimer: firstClock.setTimer.bind(firstClock), clearTimer: firstClock.clearTimer.bind(firstClock),
+    setRecurringTimer: firstClock.setRecurringTimer.bind(firstClock),
+    clearRecurringTimer: firstClock.clearRecurringTimer.bind(firstClock) });
+  const second = createWritingFlowNotifier({ ...options, pool: leaderPool('second'),
+    ...secondClock,
+    setTimer: secondClock.setTimer.bind(secondClock), clearTimer: secondClock.clearTimer.bind(secondClock),
+    setRecurringTimer: secondClock.setRecurringTimer.bind(secondClock),
+    clearRecurringTimer: secondClock.clearRecurringTimer.bind(secondClock) });
+  assert.equal(await first.start(), true);
+  assert.equal(await second.start(), false);
+  await firstClock.timers[0].handler();
+  assert.deepEqual(sent, ['first']);
+  await first.close();
+  assert.equal(owner, null);
+  await secondClock.recurring[0].handler();
+  await new Promise(resolve => setImmediate(resolve));
+  await secondClock.timers[0].handler();
+  assert.deepEqual(sent, ['first', 'second']);
+  await second.close();
+});
+
+test('mất NOTIFY được nhịp năm phút phục hồi mà không cần n8n chạy rỗng', async () => {
+  const pool = listenerPool([
+    { handoff_due: false, source_due: false, next_at: null, server_now: new Date() },
+    { handoff_due: true, source_due: false, next_at: null, server_now: new Date() }
+  ]);
+  const timers = [];
+  const recurring = [];
+  let sent = 0;
+  const notifier = createWritingFlowNotifier({ pool,
+    handoffUrl: 'https://example.test/handoff', secret: 's'.repeat(32), now: () => 10_000,
+    setTimer(handler, delay) { const timer = { handler, delay }; timers.push(timer); return timer; },
+    clearTimer() {},
+    setRecurringTimer(handler, delay) { const timer = { handler, delay }; recurring.push(timer); return timer; },
+    clearRecurringTimer() {},
+    async fetchImpl() { sent += 1; return { ok: true }; }, log() {} });
+  await notifier.start();
+  await timers.shift().handler();
+  assert.equal(sent, 0);
+  assert.equal(recurring[0].delay, WRITING_FLOW_FALLBACK_MS);
+  recurring[0].handler();
+  await timers.shift().handler();
+  assert.equal(sent, 1);
+  await notifier.close();
+});

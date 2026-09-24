@@ -54,6 +54,7 @@ export function createWritingFlowNotifier({ pool, handoffUrl, sourceUrl, secret,
   let isLeader = false;
   let lastSentAt = 0;
   let standby = null;
+  let acquiring = null;
 
   function schedule(delay = 100) {
     if (!enabled || closed || !isLeader) return;
@@ -88,7 +89,7 @@ export function createWritingFlowNotifier({ pool, handoffUrl, sourceUrl, secret,
     try {
       const result = await pool.query(writingFlowWorkStatusSql);
       const row = result.rows[0];
-      if (!row || closed) return;
+      if (!row || closed || !isLeader) return;
       const kinds = [];
       if (row.handoff_due && targets.handoff) kinds.push('handoff');
       if (row.source_due && targets.source) kinds.push('source');
@@ -113,43 +114,77 @@ export function createWritingFlowNotifier({ pool, handoffUrl, sourceUrl, secret,
     }
   }
 
+  function ensureStandby() {
+    if (standby || !enabled || closed) return;
+    standby = setRecurringTimer(() => { void acquireLeadership(); }, WRITING_FLOW_FALLBACK_MS);
+    standby?.unref?.();
+  }
+
+  function loseLeadership(candidate) {
+    if (closed || listener !== candidate) return;
+    // Mất kết nối PostgreSQL cũng làm mất advisory lock: dừng gửi trước khi thử nhận lại.
+    listener = null;
+    isLeader = false;
+    if (timer) clearTimer(timer);
+    if (fallback) clearRecurringTimer(fallback);
+    timer = null;
+    fallback = null;
+    try { candidate.release(true); } catch { /* Kết nối đã đóng. */ }
+    log(JSON.stringify({ event: 'writing_flow_notify_listener_failed' }));
+    ensureStandby();
+  }
+
   async function acquireLeadership() {
     if (!enabled || closed) return false;
     if (listener || isLeader) return isLeader;
-    const candidate = await pool.connect();
-    const lock = await candidate.query('SELECT pg_try_advisory_lock($1) AS acquired', [LEADER_LOCK_ID]);
-    isLeader = lock.rows[0]?.acquired === true;
-    if (!isLeader) {
-      candidate.release();
-      log(JSON.stringify({ event: 'writing_flow_notify_standby' }));
-      return false;
-    }
-    listener = candidate;
-    await listener.query(`LISTEN ${WRITING_FLOW_NOTIFY_CHANNEL}`);
-    listener.on('notification', kick);
-    listener.on('error', () => log(JSON.stringify({ event: 'writing_flow_notify_listener_failed' })));
-    fallback = setRecurringTimer(() => {
-      log(JSON.stringify({ event: 'writing_flow_fallback_sweep', intervalSeconds: 300 }));
-      kick();
-    }, WRITING_FLOW_FALLBACK_MS);
-    fallback?.unref?.();
-    kick();
-    return true;
+    if (acquiring) return acquiring;
+    acquiring = (async () => {
+      let candidate = null;
+      try {
+        candidate = await pool.connect();
+        const lock = await candidate.query('SELECT pg_try_advisory_lock($1) AS acquired', [LEADER_LOCK_ID]);
+        if (lock.rows[0]?.acquired !== true) {
+          candidate.release();
+          log(JSON.stringify({ event: 'writing_flow_notify_standby' }));
+          ensureStandby();
+          return false;
+        }
+        await candidate.query(`LISTEN ${WRITING_FLOW_NOTIFY_CHANNEL}`);
+        if (closed) { candidate.release(true); return false; }
+        listener = candidate;
+        isLeader = true;
+        candidate.on('notification', kick);
+        candidate.on('error', () => loseLeadership(candidate));
+        candidate.on('end', () => loseLeadership(candidate));
+        if (standby) clearRecurringTimer(standby);
+        standby = null;
+        fallback = setRecurringTimer(() => {
+          log(JSON.stringify({ event: 'writing_flow_fallback_sweep', intervalSeconds: 300 }));
+          kick();
+        }, WRITING_FLOW_FALLBACK_MS);
+        fallback?.unref?.();
+        kick();
+        return true;
+      } catch {
+        try { candidate?.release(true); } catch { /* Kết nối đã đóng. */ }
+        log(JSON.stringify({ event: 'writing_flow_notify_connect_failed' }));
+        ensureStandby();
+        return false;
+      }
+    })();
+    try { return await acquiring; } finally { acquiring = null; }
   }
 
   async function start() {
     if (!enabled || closed) return false;
     const acquired = await acquireLeadership();
-    if (!acquired && !standby) {
-      // Bản dự phòng thử nhận vai trò điều phối theo nhịp phục hồi, không cần khởi động lại.
-      standby = setRecurringTimer(() => { void acquireLeadership(); }, WRITING_FLOW_FALLBACK_MS);
-      standby?.unref?.();
-    }
+    if (!acquired) ensureStandby();
     return acquired;
   }
 
   async function close() {
     closed = true;
+    if (acquiring) await acquiring;
     if (timer) clearTimer(timer);
     if (fallback) clearRecurringTimer(fallback);
     if (standby) clearRecurringTimer(standby);

@@ -136,7 +136,8 @@ test('Portal chỉ lấy phiếu hoàn tất, xem trước rồi xác nhận rea
       { listening: 30, reading: 32, writing: 7.5 });
     assert.deepEqual(await portal.claimDue(), []);
     const result = { ok: true, status: 'synced', externalWrite: true,
-      classCode: 'IC2264', attemptToken: attempt.attemptId,
+      classCode: 'IC2264', classId: 1252, studentId: 1001,
+      attemptToken: attempt.attemptId,
       actualScores: claim.request.grades,
       // Bộ ghi Portal cũ có thể hạ điểm theo chính sách Thi lại;
       // điểm thực tế phải giữ nguyên, ba cột đọc lại phải khớp điểm Portal.
@@ -152,6 +153,10 @@ test('Portal chỉ lấy phiếu hoàn tất, xem trước rồi xác nhận rea
         'Term Test 2 Listening (Thi lại)': 20.5 } };
     await assert.rejects(portal.completeSync({ submissionId: job.submissionId,
       leaseToken: claim.leaseToken, result: fractionalRaw }),
+    error => error.code === 'WEB_PORTAL_READBACK_MISMATCH');
+    await assert.rejects(portal.completeSync({ submissionId: job.submissionId,
+      leaseToken: claim.leaseToken,
+      result: { ...result, studentId: 1002 } }),
     error => error.code === 'WEB_PORTAL_READBACK_MISMATCH');
     const synced = await portal.completeSync({ submissionId: job.submissionId,
       leaseToken: claim.leaseToken, result });

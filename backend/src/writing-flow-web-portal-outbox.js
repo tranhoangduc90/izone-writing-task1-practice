@@ -14,6 +14,8 @@ const MAX_SCORE = { listening: 40, reading: 40, writing: 9 };
 function readbackMatches(result, request) {
   if (result?.ok !== true || result.status !== 'synced'
     || result.externalWrite !== true || result.classCode !== 'IC2264'
+    || result.classId !== request.classId
+    || result.studentId !== request.studentId
     || result.attemptToken !== request.attemptToken
     || !result.actualScores || !result.portalScores || !result.portalFields
     || Object.keys(result.portalFields).length !== 3) return false;

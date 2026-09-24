@@ -179,7 +179,8 @@ test('HTTP đầy đủ Substitute dùng cùng phiếu và trả đúng kết qu
       { listening: 26, reading: 28, writing: 6.5 });
     assert.equal(JSON.stringify(portalJob).includes(submission.essay), false);
     const portalResult = { ok: true, status: 'synced', externalWrite: true,
-      classCode: 'IC2264', attemptToken: attemptId,
+      classCode: 'IC2264', classId: 1252, studentId: 1001,
+      attemptToken: attemptId,
       actualScores: portalJob.request.grades,
       portalScores: portalJob.request.grades,
       portalFields: {

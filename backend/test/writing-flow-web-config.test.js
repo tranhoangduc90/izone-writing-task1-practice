@@ -17,11 +17,21 @@ test('khóa gateway và grader Substitute phải độc lập', () => {
   const unconfigured = loadConfig(base);
   assert.equal(unconfigured.webSubstituteApiToken, null);
   assert.equal(unconfigured.webSubstituteGraderToken, null);
+  assert.equal(unconfigured.webSubstituteEnabled, false);
   const configured = loadConfig({ ...base,
     WEB_SUBSTITUTE_API_TOKEN: 'w'.repeat(32),
     WEB_SUBSTITUTE_GRADER_TOKEN: 'g'.repeat(32) });
   assert.equal(configured.webSubstituteApiToken, 'w'.repeat(32));
   assert.equal(configured.webSubstituteGraderToken, 'g'.repeat(32));
+  assert.throws(() => loadConfig({ ...base,
+    WEB_SUBSTITUTE_ENABLED: 'true' }),
+  /Mở Substitute cần hai khóa riêng và khóa mã hóa Writing/u);
+  const enabled = loadConfig({ ...base,
+    WEB_SUBSTITUTE_API_TOKEN: 'w'.repeat(32),
+    WEB_SUBSTITUTE_GRADER_TOKEN: 'g'.repeat(32),
+    WRITING_FLOW_ENCRYPTION_KEY: 'a'.repeat(64),
+    WEB_SUBSTITUTE_ENABLED: 'true' });
+  assert.equal(enabled.webSubstituteEnabled, true);
   assert.throws(() => loadConfig({ ...base,
     WEB_SUBSTITUTE_API_TOKEN: base.INTERNAL_API_TOKEN }),
   /Khóa gateway, bộ chấm và API nội bộ phải khác nhau/u);

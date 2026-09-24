@@ -10,6 +10,7 @@ const schema = z.object({
   INTERNAL_API_TOKEN: z.string().min(32),
   WEB_SUBSTITUTE_API_TOKEN: z.string().min(32).optional(),
   WEB_SUBSTITUTE_GRADER_TOKEN: z.string().min(32).optional(),
+  WEB_SUBSTITUTE_ENABLED: z.enum(['true', 'false']).default('false'),
   GOOGLE_CLIENT_ID: z.string().trim().min(1),
   TEACHER_SESSION_IDLE_DAYS: z.coerce.number().int().min(1).max(180).default(90),
   TEACHER_SESSION_ABSOLUTE_DAYS: z.coerce.number().int().min(1).max(730).default(365),
@@ -38,6 +39,12 @@ const schema = z.object({
   if (new Set(webTokens).size !== webTokens.length) {
     context.addIssue({ code: 'custom', path: ['WEB_SUBSTITUTE_GRADER_TOKEN'],
       message: 'Khóa gateway, bộ chấm và API nội bộ phải khác nhau.' });
+  }
+  if (value.WEB_SUBSTITUTE_ENABLED === 'true'
+    && (!value.WEB_SUBSTITUTE_API_TOKEN || !value.WEB_SUBSTITUTE_GRADER_TOKEN
+      || !value.WRITING_FLOW_ENCRYPTION_KEY)) {
+    context.addIssue({ code: 'custom', path: ['WEB_SUBSTITUTE_ENABLED'],
+      message: 'Mở Substitute cần hai khóa riêng và khóa mã hóa Writing.' });
   }
   for (const url of notifyUrls) {
     if (new URL(url).protocol !== 'https:' && value.NODE_ENV === 'production') {
@@ -73,6 +80,7 @@ export function loadConfig(env = process.env) {
     internalApiToken: value.INTERNAL_API_TOKEN,
     webSubstituteApiToken: value.WEB_SUBSTITUTE_API_TOKEN || null,
     webSubstituteGraderToken: value.WEB_SUBSTITUTE_GRADER_TOKEN || null,
+    webSubstituteEnabled: value.WEB_SUBSTITUTE_ENABLED === 'true',
     googleClientId: value.GOOGLE_CLIENT_ID,
     teacherSessionIdleDays: value.TEACHER_SESSION_IDLE_DAYS,
     teacherSessionAbsoluteDays: value.TEACHER_SESSION_ABSOLUTE_DAYS,

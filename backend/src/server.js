@@ -14,6 +14,9 @@ import { createWritingFlowAiCall } from './writing-flow-ai-call.js';
 import { createWritingFlowScan } from './writing-flow-scan.js';
 import { createWritingFlowTrccRepair } from './writing-flow-trcc-repair.js';
 import { createWritingFlowNotifier } from './writing-flow-notifier.js';
+import { createWebSubstituteIntake } from './writing-flow-web-intake.js';
+import { createWebSubstituteQueue } from './writing-flow-web-queue.js';
+import { getPinnedWebPrompt } from './writing-flow-web-registry.js';
 
 const config = loadConfig();
 const pool = createDatabasePool(config);
@@ -33,6 +36,12 @@ const app = createApp({
   provisionalService,
   lmsResultService: createLmsResultService({ pool }),
   writingFlowService: createWritingFlowService({ pool, encryptionKey: config.writingFlowEncryptionKey }),
+  writingFlowWebIntake: config.webSubstituteEnabled
+    ? createWebSubstituteIntake({ pool, encryptionKey: config.writingFlowEncryptionKey,
+      getPinnedPrompt: getPinnedWebPrompt }) : null,
+  writingFlowWebQueue: config.webSubstituteEnabled
+    ? createWebSubstituteQueue({ pool, encryptionKey: config.writingFlowEncryptionKey,
+      getPinnedPrompt: getPinnedWebPrompt }) : null,
   writingFlowStage: createWritingFlowStage({ pool, encryptionKey: config.writingFlowEncryptionKey }),
   writingFlowHandoff: createWritingFlowHandoff({ pool }),
   writingFlowAiCall: createWritingFlowAiCall({ pool, encryptionKey: config.writingFlowEncryptionKey }),

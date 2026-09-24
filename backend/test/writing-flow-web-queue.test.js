@@ -4,7 +4,8 @@ import test from 'node:test';
 import { PGlite } from '@electric-sql/pglite';
 import { sha256 } from '../src/writing-flow-crypto.js';
 import { createWebSubstituteIntake } from '../src/writing-flow-web-intake.js';
-import { createWebSubstituteQueue } from '../src/writing-flow-web-queue.js';
+import { createWebSubstituteQueue,
+  normalizeWebSubstituteGradingResult } from '../src/writing-flow-web-queue.js';
 import { TEST_TASK_DEFINITIONS } from '../src/writing-flow-test.js';
 
 const key = '11'.repeat(32);
@@ -72,6 +73,17 @@ function provenPizzaTask1Result(score = 6.5) {
           : 'ta_data',
       })) }) };
 }
+
+test('mã TA cũ chỉ được chuyển cho Substitute 2 K56 Task 1', () => {
+  const result = provenPizzaTask1Result();
+  assert.throws(() => normalizeWebSubstituteGradingResult({
+    testSlug: 'substitute-test-1-k56', taskNumber: 1, result,
+  }), error => error.code === 'TEST_RESULT_COMPONENTS_INCOMPLETE');
+  assert.deepEqual(normalizeWebSubstituteGradingResult({
+    testSlug: 'substitute-test-2-k56', taskNumber: 1, result: task1Result(),
+  }).criteria[0].components.map(item => item.code),
+  ['ta_key_features_overview', 'ta_data_support']);
+});
 
 // Dữ liệu vào: mã khía cạnh từ bộ chấm pizza đã được kiểm bằng bài giả.
 // Việc chính: nhận đúng hai bí danh cũ, nhưng vẫn tính điểm và lưu mã chuẩn.

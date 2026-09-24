@@ -71,6 +71,13 @@ function syntheticTask1Result() {
         })) })) };
 }
 
+function provenOldTask1Result() {
+  const result = syntheticTask1Result();
+  result.criteria[0].components[0].code = 'ta_overview';
+  result.criteria[0].components[1].code = 'ta_data';
+  return result;
+}
+
 function syntheticSections() {
   const make = type => ({ correct: 1, band: 5, total: 1, answered: 1,
     details: [{ number: 1, studentAnswer: 'A', correctAnswer: 'A', result: 'correct' }],
@@ -136,7 +143,7 @@ test('HTTP đầy đủ Substitute dùng cùng phiếu và trả đúng kết qu
     assert.equal(wrongClass.status, 409);
     const completed = await request(app).post(`${base}/work/complete`)
       .set('Authorization', `Bearer ${graderToken}`)
-      .send({ ...job, result: syntheticTask1Result() });
+      .send({ ...job, result: provenOldTask1Result() });
     assert.equal(completed.status, 200);
     assert.equal(completed.body.receipt.taskScore, 6.5);
     const viewed = await request(app).post(`${base}/status`)
@@ -147,6 +154,8 @@ test('HTTP đầy đủ Substitute dùng cùng phiếu và trả đúng kết qu
     assert.equal(viewed.body.status.submittedEssay, submission.essay);
     assert.deepEqual(viewed.body.status.sectionResults, submission.sectionResults);
     assert.equal(viewed.body.status.result.criteria.length, 4);
+    assert.deepEqual(viewed.body.status.result.criteria[0].components.map(item => item.code),
+      ['ta_key_features_overview', 'ta_data_support']);
     const other = await request(app).post(`${base}/status`)
       .set('Authorization', `Bearer ${gatewayToken}`)
       .send({ ...selected, studentName: 'Người khác', attemptId });

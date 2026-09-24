@@ -293,5 +293,27 @@ export function createWebSubstituteIntake({ pool, encryptionKey, getPinnedPrompt
     return status;
   }
 
-  return { openAttempt, submitWriting, getStatus };
+  // Dữ liệu vào: tên/lớp/đề được chọn lại, không cần mã lượt lưu ở thiết bị cũ.
+  // Việc chính: chỉ tìm lượt đã có theo mã học viên ERP rồi dùng cùng phép kiểm getStatus.
+  // Kết quả: trả null nếu chưa từng mở lượt; không tạo lượt khi chỉ xem trạng thái.
+  // Khi lỗi: tên trùng hoặc không đúng roster không được xem bài của người khác.
+  async function getStatusByName(input) {
+    if (!key) throw new ApiError(503, 'WEB_INTAKE_NOT_READY',
+      'Nơi lưu bài web chưa sẵn sàng.');
+    const identity = requestIdentity(input);
+    const found = await withTransaction(pool, async client => {
+      const student = await resolveStudent(client, identity, true);
+      return client.query(`SELECT attempt_id
+        FROM writing_flow.web_substitute_attempt
+        WHERE test_slug=$1 AND erp_course_class_id=$2
+          AND erp_student_contact_id=$3 AND attempt_no=1`,
+      [identity.testSlug, identity.classId, student.erpStudentId]);
+    });
+    if (found.rows.length === 0) return null;
+    if (found.rows.length !== 1) throw new ApiError(409,
+      'WEB_ATTEMPT_IDENTITY_MISMATCH', 'Không thể xác định duy nhất lượt thi.');
+    return getStatus({ ...input, attemptId: found.rows[0].attempt_id });
+  }
+
+  return { openAttempt, submitWriting, getStatus, getStatusByName };
 }

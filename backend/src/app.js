@@ -405,6 +405,12 @@ export function createApp({config,pool,service,lessonService=service,provisional
      const status=await writingFlowWebIntake.getStatus(parse(webSubstituteStatus,q.body));
      r.json({ok:true,status});
    }));
+ app.post('/api/v1/internal/writing-flow/web-substitute/status-by-name',webInternal,
+   webIntakeReady,asyncRoute(async(q,r)=>{
+     const status=await writingFlowWebIntake.getStatusByName(
+       parse(webSubstituteIdentity,q.body));
+     r.json({ok:true,status});
+   }));
  app.post('/api/v1/internal/writing-flow/web-substitute/work/claim',webGrader,
    webQueueReady,asyncRoute(async(q,r)=>{
      const {limit}=parse(z.object({limit:z.number().int().min(1).max(4).default(1)}),q.body);

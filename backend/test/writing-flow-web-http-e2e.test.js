@@ -78,6 +78,13 @@ function syntheticTask1Result() {
 test('HTTP đầy đủ Substitute dùng cùng phiếu và trả đúng kết quả', async () => {
   const { db, app } = await fixture();
   try {
+    const notStarted = await request(app).post(`${base}/status-by-name`)
+      .set('Authorization', `Bearer ${gatewayToken}`).send(selected);
+    assert.equal(notStarted.status, 200);
+    assert.equal(notStarted.body.status, null);
+    const beforeRows = await db.query(`SELECT count(*)::int AS n
+      FROM writing_flow.web_substitute_attempt`);
+    assert.equal(beforeRows.rows[0].n, 0);
     const opened = await request(app).post(`${base}/attempts`)
       .set('Authorization', `Bearer ${gatewayToken}`).send(selected);
     assert.equal(opened.status, 200);
@@ -97,6 +104,11 @@ test('HTTP đầy đủ Substitute dùng cùng phiếu và trả đúng kết qu
       .send({ ...selected, attemptId });
     assert.equal(before.body.status.submissionStatus, 'pending');
     assert.equal(before.body.status.submittedEssay, submission.essay);
+    const reopenedByName = await request(app).post(`${base}/status-by-name`)
+      .set('Authorization', `Bearer ${gatewayToken}`).send(selected);
+    assert.equal(reopenedByName.status, 200);
+    assert.equal(reopenedByName.body.status.attemptId, attemptId);
+    assert.equal(reopenedByName.body.status.submittedEssay, submission.essay);
     const deniedClaim = await request(app).post(`${base}/work/claim`)
       .set('Authorization', `Bearer ${gatewayToken}`).send({ limit: 1 });
     assert.equal(deniedClaim.status, 401);
@@ -128,6 +140,10 @@ test('HTTP đầy đủ Substitute dùng cùng phiếu và trả đúng kết qu
       .set('Authorization', `Bearer ${gatewayToken}`)
       .send({ ...selected, studentName: 'Người khác', attemptId });
     assert.notEqual(other.status, 200);
+    const otherByName = await request(app).post(`${base}/status-by-name`)
+      .set('Authorization', `Bearer ${gatewayToken}`)
+      .send({ ...selected, studentName: 'Người khác' });
+    assert.notEqual(otherByName.status, 200);
     const rows = await db.query(`SELECT count(*)::int AS n
       FROM writing_flow.web_substitute_submission`);
     assert.equal(rows.rows[0].n, 1);

@@ -51,7 +51,8 @@ const webSubstituteIdentity=z.object({
 const webSubstituteSubmission=webSubstituteIdentity.extend({
  attemptId:uuid,
  taskNumber:z.number().int().min(1).max(2),
- essay:z.string().min(1).max(40000)
+ essay:z.string().min(1).max(40000),
+ sectionResults:z.object({listening:z.unknown(),reading:z.unknown()}).optional()
 });
 const webSubstituteStatus=webSubstituteIdentity.extend({attemptId:uuid});
 const webWorkIdentity=z.object({

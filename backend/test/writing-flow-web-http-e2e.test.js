@@ -71,6 +71,14 @@ function syntheticTask1Result() {
         })) })) };
 }
 
+function syntheticSections() {
+  const make = type => ({ correct: 1, band: 5, total: 1, answered: 1,
+    details: [{ number: 1, studentAnswer: 'A', correctAnswer: 'A', result: 'correct' }],
+    typeStats: [{ type, correct: 1, total: 1, percentage: 1 }],
+  });
+  return { listening: make('Nghe'), reading: make('Đọc') };
+}
+
 // Dữ liệu vào: tên và bài viết giả; database in-process, không gọi n8n/Portal thật.
 // Việc chính: chạy API thật từ lượt → phiếu → job → callback → xem kết quả.
 // Kết quả: duy nhất một bài/kết quả đúng lớp/Task; khóa gateway không lấy việc.
@@ -91,7 +99,8 @@ test('HTTP đầy đủ Substitute dùng cùng phiếu và trả đúng kết qu
     assert.equal(opened.body.attempt.taskNumber, 1);
     const attemptId = opened.body.attempt.attemptId;
     const submission = { ...selected, attemptId, taskNumber: 1,
-      essay: 'Synthetic Task 1 response for full HTTP test.' };
+      essay: 'Synthetic Task 1 response for full HTTP test.',
+      sectionResults: syntheticSections() };
     const accepted = await request(app).post(`${base}/submissions`)
       .set('Authorization', `Bearer ${gatewayToken}`).send(submission);
     assert.equal(accepted.status, 202);
@@ -104,6 +113,7 @@ test('HTTP đầy đủ Substitute dùng cùng phiếu và trả đúng kết qu
       .send({ ...selected, attemptId });
     assert.equal(before.body.status.submissionStatus, 'pending');
     assert.equal(before.body.status.submittedEssay, submission.essay);
+    assert.deepEqual(before.body.status.sectionResults, submission.sectionResults);
     const reopenedByName = await request(app).post(`${base}/status-by-name`)
       .set('Authorization', `Bearer ${gatewayToken}`).send(selected);
     assert.equal(reopenedByName.status, 200);
@@ -135,6 +145,7 @@ test('HTTP đầy đủ Substitute dùng cùng phiếu và trả đúng kết qu
     assert.equal(viewed.status, 200);
     assert.equal(viewed.body.status.submissionStatus, 'completed');
     assert.equal(viewed.body.status.submittedEssay, submission.essay);
+    assert.deepEqual(viewed.body.status.sectionResults, submission.sectionResults);
     assert.equal(viewed.body.status.result.criteria.length, 4);
     const other = await request(app).post(`${base}/status`)
       .set('Authorization', `Bearer ${gatewayToken}`)

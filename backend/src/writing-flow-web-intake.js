@@ -49,6 +49,78 @@ function publicAttempt(row) {
     rubricVersion: row.rubric_version, status: row.status };
 }
 
+function validatedSectionResults(value) {
+  if (value === undefined || value === null) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).sort().join(',') !== 'listening,reading') {
+    throw new ApiError(400, 'WEB_SECTIONS_INVALID',
+      'Kết quả Listening/Reading chưa đủ để lưu cùng bài Writing.');
+  }
+  const sections = {};
+  for (const skill of ['listening', 'reading']) {
+    const section = value[skill];
+    if (!section || typeof section !== 'object' || Array.isArray(section)
+      || !Number.isInteger(section.total) || section.total < 1 || section.total > 40
+      || !Number.isInteger(section.correct) || section.correct < 0
+      || section.correct > section.total
+      || !Number.isInteger(section.answered) || section.answered < 0
+      || section.answered > section.total
+      || !Number.isFinite(section.band) || section.band < 0 || section.band > 9
+      || !Number.isInteger(section.band * 2)
+      || !Array.isArray(section.details) || section.details.length !== section.total
+      || !Array.isArray(section.typeStats) || section.typeStats.length < 1
+      || section.typeStats.length > 40) {
+      throw new ApiError(400, 'WEB_SECTIONS_INVALID',
+        'Kết quả Listening/Reading chưa hợp lệ.');
+    }
+    const details = section.details.map(detail => {
+      if (!detail || !Number.isInteger(detail.number)
+        || detail.number < 1 || detail.number > 40
+        || typeof detail.studentAnswer !== 'string'
+        || detail.studentAnswer.length > 500
+        || typeof detail.correctAnswer !== 'string'
+        || detail.correctAnswer.length > 500
+        || !['correct', 'incorrect', 'blank'].includes(detail.result)) {
+        throw new ApiError(400, 'WEB_SECTIONS_INVALID',
+          'Chi tiết Listening/Reading chưa hợp lệ.');
+      }
+      return { number: detail.number, studentAnswer: detail.studentAnswer,
+        correctAnswer: detail.correctAnswer, result: detail.result };
+    });
+    if (new Set(details.map(detail => detail.number)).size !== section.total
+      || details.filter(detail => detail.result === 'correct').length !== section.correct
+      || details.filter(detail => detail.result !== 'blank').length !== section.answered) {
+      throw new ApiError(400, 'WEB_SECTIONS_INVALID',
+        'Số câu Listening/Reading không khớp chi tiết.');
+    }
+    const typeStats = section.typeStats.map(stat => {
+      if (!stat || typeof stat.type !== 'string' || !stat.type.trim()
+        || stat.type.length > 120 || !Number.isInteger(stat.correct)
+        || !Number.isInteger(stat.total) || stat.total < 1
+        || stat.correct < 0 || stat.correct > stat.total
+        || !Number.isFinite(stat.percentage) || stat.percentage < 0
+        || stat.percentage > 1) {
+        throw new ApiError(400, 'WEB_SECTIONS_INVALID',
+          'Thống kê Listening/Reading chưa hợp lệ.');
+      }
+      return { type: stat.type, correct: stat.correct,
+        total: stat.total, percentage: stat.percentage };
+    });
+    if (typeStats.reduce((sum, stat) => sum + stat.total, 0) !== section.total
+      || typeStats.reduce((sum, stat) => sum + stat.correct, 0) !== section.correct) {
+      throw new ApiError(400, 'WEB_SECTIONS_INVALID',
+        'Thống kê Listening/Reading không khớp số câu.');
+    }
+    sections[skill] = { correct: section.correct, band: section.band,
+      total: section.total, answered: section.answered, details, typeStats };
+  }
+  if (JSON.stringify(sections).length > 120_000) {
+    throw new ApiError(400, 'WEB_SECTIONS_INVALID',
+      'Kết quả Listening/Reading vượt giới hạn lưu an toàn.');
+  }
+  return sections;
+}
+
 export function pinnedWebPrompt(getPinnedPrompt, identity, taskNumber, rubricVersion) {
   // Chỉ dùng đề đã ghim trên máy chủ; không tin đề hoặc URL ảnh do trình duyệt gửi.
   const pinned = getPinnedPrompt({ testSlug: identity.testSlug,
@@ -140,6 +212,7 @@ export function createWebSubstituteIntake({ pool, encryptionKey, getPinnedPrompt
     }
     const identity = requestIdentity(input);
     const essay = String(input.essay ?? '');
+    const sectionResults = validatedSectionResults(input.sectionResults);
     if (typeof input.essay !== 'string' || !essay.trim() || essay.length > 40_000
       || typeof input.attemptId !== 'string' || !UUID.test(input.attemptId)) {
       throw new ApiError(400, 'WEB_ESSAY_INVALID', 'Bài Writing chưa hợp lệ.');
@@ -173,7 +246,8 @@ export function createWebSubstituteIntake({ pool, encryptionKey, getPinnedPrompt
       const pinned = pinnedWebPrompt(getPinnedPrompt, identity,
         Number(attempt.task_number), attempt.rubric_version);
       const content = JSON.stringify({ taskNumber: pinned.taskNumber,
-        topic: pinned.topic, imageUrl: pinned.imageUrl || '', essay });
+        topic: pinned.topic, imageUrl: pinned.imageUrl || '', essay,
+        sectionResults });
       const contentSha256 = sha256(content);
       const inserted = await client.query(`INSERT INTO writing_flow.web_substitute_submission
         (attempt_id,task_number,content_ciphertext,content_sha256,
@@ -249,6 +323,7 @@ export function createWebSubstituteIntake({ pool, encryptionKey, getPinnedPrompt
       const submissionStatus = row.lease_expired === true ? 'needs_review'
         : row.submission_status;
       let submittedEssay = null;
+      let sectionResults = null;
       if (row.submission_id) {
         let content;
         try {
@@ -270,6 +345,7 @@ export function createWebSubstituteIntake({ pool, encryptionKey, getPinnedPrompt
             'Bài Writing đã lưu không khớp đề hoặc Task.');
         }
         submittedEssay = content.essay;
+        sectionResults = validatedSectionResults(content.sectionResults);
       }
       const resultText = submissionStatus === 'completed'
         || submissionStatus === 'delivered'
@@ -288,7 +364,8 @@ export function createWebSubstituteIntake({ pool, encryptionKey, getPinnedPrompt
         classId: identity.classId, taskNumber: Number(row.task_number),
         rubricVersion: row.rubric_version, attemptStatus: row.attempt_status,
         submissionId: row.submission_id || null, submissionStatus,
-        submittedEssay, taskScore: result ? Number(row.task_score) : null, result };
+        submittedEssay, sectionResults,
+        taskScore: result ? Number(row.task_score) : null, result };
     });
     return status;
   }

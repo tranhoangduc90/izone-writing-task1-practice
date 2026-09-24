@@ -56,6 +56,17 @@ function identity() {
     studentName: 'Học viên thử' };
 }
 
+function syntheticSections() {
+  const make = type => ({ correct: 1, band: 5, total: 2, answered: 1,
+    details: [
+      { number: 1, studentAnswer: 'A', correctAnswer: 'A', result: 'correct' },
+      { number: 2, studentAnswer: '', correctAnswer: 'B', result: 'blank' },
+    ],
+    typeStats: [{ type, correct: 1, total: 2, percentage: 0.5 }],
+  });
+  return { listening: make('Nghe'), reading: make('Đọc') };
+}
+
 // Dữ liệu vào: hai lần nộp một bài giả, không dùng bài/định danh thật.
 // Việc chính: kiểm commit, đọc lại, mã hóa, idempotency và khóa lớp–Task.
 // Kết quả: chỉ một phiếu nhận kiêm việc chờ; gửi nội dung khác bị từ chối.
@@ -185,6 +196,33 @@ test('mở lại bằng tên chỉ trả bài đúng lượt; bài lưu hỏng k
     await db.exec('SET ROLE writing_practice_api;');
     await assert.rejects(service.getStatus({ ...identity(), attemptId: first.attemptId }),
       error => error.code === 'WEB_CONTENT_READBACK_MISMATCH');
+  } finally {
+    await db.close();
+  }
+});
+
+test('kết quả Nghe/Đọc giữ cùng phiếu mã hóa, thiếu/sai số câu không được đoán điểm', async () => {
+  const { db, pool, getPinnedPrompt } = await fixture();
+  try {
+    const service = createWebSubstituteIntake({ pool, encryptionKey: key, getPinnedPrompt });
+    const attempt = await service.openAttempt(identity());
+    const invalid = syntheticSections();
+    invalid.reading.correct = 2;
+    await assert.rejects(service.submitWriting({ ...identity(),
+      attemptId: attempt.attemptId, essay: 'Synthetic sections essay.',
+      sectionResults: invalid }), error => error.code === 'WEB_SECTIONS_INVALID');
+    const empty = await db.query(`SELECT count(*)::int AS n
+      FROM writing_flow.web_substitute_submission`);
+    assert.equal(empty.rows[0].n, 0);
+    const sections = syntheticSections();
+    await service.submitWriting({ ...identity(), attemptId: attempt.attemptId,
+      essay: 'Synthetic sections essay.', sectionResults: sections });
+    const reopened = await service.getStatusByName(identity());
+    assert.deepEqual(reopened.sectionResults, sections);
+    assert.equal(reopened.submittedEssay, 'Synthetic sections essay.');
+    await assert.rejects(service.submitWriting({ ...identity(),
+      attemptId: attempt.attemptId, essay: 'Synthetic sections essay.' }),
+    error => error.code === 'WEB_SUBMISSION_CONFLICT');
   } finally {
     await db.close();
   }

@@ -63,6 +63,55 @@ function task1Result(score = 6.5) {
   return { criteria, taskScore: score, report: 'Synthetic report.' };
 }
 
+function provenPizzaTask1Result(score = 6.5) {
+  const result = task1Result(score);
+  return { ...result, criteria: result.criteria.map(criterion =>
+    criterion.code !== 'TA' ? criterion : { ...criterion,
+      components: criterion.components.map(component => ({ ...component,
+        code: component.code === 'ta_key_features_overview' ? 'ta_overview'
+          : 'ta_data',
+      })) }) };
+}
+
+// Dữ liệu vào: mã khía cạnh từ bộ chấm pizza đã được kiểm bằng bài giả.
+// Việc chính: nhận đúng hai bí danh cũ, nhưng vẫn tính điểm và lưu mã chuẩn.
+// Kết quả: callback lặp không tạo thêm bài; kết quả đọc lại có mã chuẩn.
+// Khi lỗi: mã lạ hoặc trùng không được ghi vào bài của học viên.
+test('callback nhận mã Task 1 từ bộ chấm pizza cũ và chuẩn hóa trước khi lưu', async () => {
+  const { db, intake, queue } = await fixture();
+  try {
+    const attempt = await intake.openAttempt(identity);
+    await intake.submitWriting({ ...identity, attemptId: attempt.attemptId,
+      essay: 'Synthetic answer using proven pizza codes.' });
+    const [job] = await queue.claimDue();
+    const result = provenPizzaTask1Result();
+    const input = { ...job, result };
+    for (const codes of [
+      ['ta_overview', 'ta_overview'],
+      ['ta_overview', 'ta_unknown'],
+      ['ta_overview', 'ta_data_support'],
+    ]) {
+      const invalid = structuredClone(result);
+      invalid.criteria[0].components.forEach((component, index) => {
+        component.code = codes[index];
+      });
+      await assert.rejects(queue.completeWork({ ...job, result: invalid }),
+        error => error.code === 'TEST_RESULT_COMPONENTS_INCOMPLETE');
+    }
+    const completed = await queue.completeWork(input);
+    assert.equal(completed.taskScore, 6.5);
+    assert.deepEqual(await queue.completeWork(input), completed);
+    assert.deepEqual(result.criteria[0].components.map(item => item.code),
+      ['ta_overview', 'ta_data']);
+    const status = await intake.getStatus({ ...identity,
+      attemptId: attempt.attemptId });
+    assert.deepEqual(status.result.criteria[0].components.map(item => item.code),
+      ['ta_key_features_overview', 'ta_data_support']);
+  } finally {
+    await db.close();
+  }
+});
+
 // Dữ liệu vào: một bài giả từ phiếu đã commit trong PostgreSQL thử nghiệm.
 // Việc chính: lấy việc đúng một lần, ràng buộc đầy đủ callback và điểm tính lại.
 // Kết quả: cùng callback chỉ có một kết quả, xem lại đúng lớp/lượt.

@@ -30,6 +30,38 @@ function checkWorkInput(input) {
   }
 }
 
+// Dữ liệu vào: kết quả Task 1 từ bộ chấm Substitute 2 K56 đã dùng lâu nay.
+// Việc chính: đổi đúng hai mã TA cũ sang tên chuẩn mà backend lưu, không sửa nhận xét/điểm.
+// Kết quả: bộ kiểm chung vẫn đòi đủ bốn tiêu chí và chín khía cạnh.
+// Khi lỗi: mã thiếu, trùng hoặc lạ giữ nguyên để bộ kiểm chung từ chối.
+function adaptProvenPizzaResult(input) {
+  if (input.testSlug !== 'substitute-test-2-k56' || Number(input.taskNumber) !== 1) {
+    return input.result;
+  }
+  const source = input.result?.testResult || input.result?.result || input.result;
+  if (!Array.isArray(source?.criteria)) return input.result;
+  const ta = source.criteria.find(item => String(item?.code || '').trim().toUpperCase() === 'TA');
+  if (!Array.isArray(ta?.components)) return input.result;
+  const codes = ta.components.map(item => String(item?.code || '').trim());
+  if (codes.length !== 2
+    || !codes.includes('ta_overview') || !codes.includes('ta_data')) {
+    return input.result;
+  }
+  const mapped = { ...source, criteria: source.criteria.map(criterion =>
+    criterion !== ta ? criterion : { ...criterion,
+      components: criterion.components.map(component => ({ ...component,
+        code: component.code === 'ta_overview' ? 'ta_key_features_overview'
+          : 'ta_data_support',
+      })) }) };
+  if (input.result?.testResult) return { ...input.result, testResult: mapped };
+  if (input.result?.result) return { ...input.result, result: mapped };
+  return mapped;
+}
+
+export function normalizeWebSubstituteGradingResult(input) {
+  return normalizeWritingTestResult(input.taskNumber, adaptProvenPizzaResult(input));
+}
+
 // Dữ liệu vào: phiếu web đã commit và đến hạn trong cùng database Writing.
 // Việc chính: khóa từng phiếu, kiểm nội dung/đề rồi cấp lease; các bộ lấy việc không trùng.
 // Kết quả: job giữ runKey cũ và leaseToken mới cho đúng bộ chấm chuyên môn đã ghim.
@@ -161,7 +193,7 @@ export function createWebSubstituteQueue({ pool, encryptionKey, getPinnedPrompt 
   async function completeWork(input) {
     ready();
     checkWorkInput(input);
-    const normalized = normalizeWritingTestResult(input.taskNumber, input.result);
+    const normalized = normalizeWebSubstituteGradingResult(input);
     const resultText = JSON.stringify(normalized);
     const resultSha256 = sha256(resultText);
     const receipt = await withTransaction(pool, async client => {

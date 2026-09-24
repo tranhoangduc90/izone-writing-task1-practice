@@ -578,6 +578,13 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
           FROM writing_flow.stage_result WHERE pair_id=$1 FOR UPDATE`, [pairId]);
         const target = stages.rows.find(row => row.stage_key === stageKey);
         if (!target) throw new ApiError(409, 'STAGE_NOT_READY', 'Bước này chưa được tạo.');
+        // Nhận vào: yêu cầu Retry một nguồn Test đã xác định là trùng.
+        // Việc chính: giữ chốt chống chấm lại cả khi người vận hành bấm Retry.
+        // Kết quả: nguồn vẫn ở Cần kiểm tra; bài sửa thật sẽ vào qua revision mới.
+        if (target.error_code === 'TEST_DOCUMENT_PAIR_ALREADY_REGISTERED') {
+          throw new ApiError(409, 'TEST_DOCUMENT_PAIR_ALREADY_REGISTERED',
+            'Bài Test này trùng với nguồn đã có. Hãy đối chiếu rồi bỏ qua nguồn trùng, hoặc quét bản bài mới sau khi sửa.');
+        }
         if (!['succeeded','needs_review'].includes(target.status)) {
           throw new ApiError(409, 'STAGE_STILL_AUTOMATIC', 'Bước này đang chờ hệ thống tự xử lý.');
         }

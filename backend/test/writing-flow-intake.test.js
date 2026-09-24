@@ -24,13 +24,11 @@ function fakePool() {
           || b.lark_modified_ms - a.lark_modified_ms);
         return { rowCount: matching.length ? 1 : 0, rows: matching.slice(0, 1) };
       }
-      if (sql.includes('SELECT 1 AS duplicate_test_pair')
-        && sql.includes("source_type='term_test'")) {
-        const matching = pairs.filter(row => row.source_type === 'term_test'
-          && row.homework_file_id === values[0] && row.essay_slot === values[1]
-          && row.submission_revision === values[2]
-          && (row.source_app_id !== values[3] || row.source_table_id !== values[4]
-            || row.source_record_id !== values[5] || row.source_link_index !== values[6]));
+      if (sql.includes('SELECT 1 AS duplicate_test_pair')) {
+        const matching = pairs.filter(row => row.homework_file_id === values[0]
+          && ((row.essay_slot === values[1] && row.submission_revision === values[2])
+            || row.content_sha256 === values[3])          && (row.source_app_id !== values[4] || row.source_table_id !== values[5]
+            || row.source_record_id !== values[6] || row.source_link_index !== values[7]));
         return { rowCount: matching.length, rows: matching.slice(0, 1) };
       }
       if (sql.includes("SET status='needs_review',updated_at=now() WHERE pair_id=$1")) {
@@ -338,6 +336,62 @@ test('cùng Docs, ô và phiên bản Test ở hai nguồn không được chấ
   const scanReceipt = pairs.find(row => row.source_record_id === otherAssignment.recordId
     && row.submission_revision === first.receipts[0].revision && row.status !== 'superseded');
   assert.equal(scanReceipt?.pair_id, duplicate.receipts[0].pairId);
+});
+
+// Nhận vào: cùng file và bài viết đã được ghi qua nguồn Homework cũ.
+// Việc chính: nguồn Test mới phải dừng trước AI dù cờ TR/CC tạo revision khác.
+// Trả ra: nguồn Test ở Cần kiểm tra; lần chấm Homework cũ không bị đổi.
+test('bài Test trùng nội dung đã vào nguồn Homework cũ dừng trước AI', async () => {
+  const { pool, pairs, writes } = fakePool();
+  const intake = createWritingFlowIntake({ pool, encryptionKey: '11'.repeat(32) });
+  const oldSource = input();
+  oldSource.expectedCount = 1;
+  oldSource.larkMeta.imageUrls[1] = '';
+  oldSource.linkIndex = 1;
+  oldSource.pairs = [{ essaySlot: 1, taskType: 'task_2', topic: 'Đề giả',
+    image: '', essay: 'Bài giả từ nguồn cũ', trCcCheck: false }];
+  const oldResult = await intake(oldSource);
+  assert.equal(oldResult.receipts[0].status, 'received');
+
+  const testSource = { ...oldSource, sourceType: 'term_test',
+    appId: 'google_classroom', tableId: 'course-demo', recordId: 'assignment-demo',
+    sourceMeta: { teacherNames: [], displayName: 'Term Test 1' },
+    pairs: [{ ...oldSource.pairs[0], trCcCheck: true, alreadyGraded: false }] };
+  delete testSource.larkMeta;
+  delete testSource.larkModifiedMs;
+  const testResult = await intake(testSource);
+  assert.equal(testResult.receipts[0].status, 'needs_review');
+  assert.equal(testResult.receipts[0].errorCode,
+    'TEST_DOCUMENT_PAIR_ALREADY_REGISTERED');
+  assert.notEqual(oldResult.receipts[0].revision, testResult.receipts[0].revision);
+  assert.equal(pairs.length, 2);
+  assert.equal(writes.filter(row => row.sql.includes('INSERT INTO writing_flow.handoff')).length, 1);
+});
+
+// Nhận vào: cùng bài nằm ở ô khác sau khi một nguồn đổi cách đánh số ô.
+// Việc chính: so dấu nội dung, không dựa duy nhất vào số thứ tự của ô.
+// Trả ra: nguồn Test ở Cần kiểm tra và không thêm bàn giao AI.
+test('bài Test trùng nội dung ở ô khác vẫn dừng trước AI', async () => {
+  const { pool, writes } = fakePool();
+  const intake = createWritingFlowIntake({ pool, encryptionKey: '11'.repeat(32) });
+  const oldSource = input();
+  oldSource.expectedCount = 1;
+  oldSource.pairs = [{ essaySlot: 2, taskType: 'task_2', topic: 'Đề giả',
+    image: '', essay: 'Cùng một bài giả', trCcCheck: false }];
+  const oldResult = await intake(oldSource);
+  assert.equal(oldResult.receipts[0].status, 'received');
+  const testSource = { ...oldSource, sourceType: 'term_test',
+    appId: 'google_classroom', tableId: 'course-demo', recordId: 'assignment-demo',
+    sourceMeta: { teacherNames: [], displayName: 'Term Test 1' },
+    pairs: [{ ...oldSource.pairs[0], essaySlot: 1,
+      trCcCheck: true, alreadyGraded: false }] };
+  delete testSource.larkMeta;
+  delete testSource.larkModifiedMs;
+  const result = await intake(testSource);
+  assert.equal(result.receipts[0].status, 'needs_review');
+  assert.equal(result.receipts[0].errorCode,
+    'TEST_DOCUMENT_PAIR_ALREADY_REGISTERED');
+  assert.equal(writes.filter(row => row.sql.includes('INSERT INTO writing_flow.handoff')).length, 1);
 });
 
 // Nhận vào: cùng Docs nhưng bài viết đã có phiên bản mới ở nguồn khác.

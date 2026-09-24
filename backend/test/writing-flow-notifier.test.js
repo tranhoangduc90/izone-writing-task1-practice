@@ -155,6 +155,41 @@ test('nhiều tín hiệu liên tiếp không đẩy lùi mãi thời điểm đ
   await notifier.close();
 });
 
+for (const signalKind of ['database', 'fallback']) {
+  test(`việc mới rút lịch kiểm xa về hai giây khi nhận tín hiệu ${signalKind}`, async () => {
+    // Lúc khởi động chỉ có một việc hẹn rất xa; sau đó bài mới cần được xử lý ngay.
+    const pool = listenerPool([
+      { handoff_due: false, source_due: false,
+        next_at: new Date(3_600_000), server_now: new Date(0) },
+      { handoff_due: true, source_due: false,
+        next_at: null, server_now: new Date(0) }
+    ]);
+    const timers = [];
+    const recurring = [];
+    let sent = 0;
+    const notifier = createWritingFlowNotifier({ pool,
+      handoffUrl: 'https://example.test/handoff', secret: 's'.repeat(32), now: () => 10_000,
+      setTimer(handler, delay) { const timer = { handler, delay }; timers.push(timer); return timer; },
+      clearTimer(timer) { timer.cleared = true; },
+      setRecurringTimer(handler, delay) { const timer = { handler, delay }; recurring.push(timer); return timer; },
+      clearRecurringTimer() {},
+      async fetchImpl() { sent += 1; return { ok: true }; }, log() {} });
+    assert.equal(await notifier.start(), true);
+    await timers[0].handler();
+    const farTimer = timers.at(-1);
+    assert.ok(farTimer.delay >= 3_600_000);
+    if (signalKind === 'database') pool.listeners.get('notification')();
+    else recurring[0].handler();
+    const earlyTimer = timers.at(-1);
+    assert.notEqual(earlyTimer, farTimer);
+    assert.equal(farTimer.cleared, true);
+    assert.equal(earlyTimer.delay, 2_000);
+    await earlyTimer.handler();
+    assert.equal(sent, 1);
+    await notifier.close();
+  });
+}
+
 for (const failure of ['http_500', 'timeout']) {
   test(`n8n ${failure} vẫn gửi lại tín hiệu khi việc còn trong database`, async () => {
     const rows = Array.from({ length: 2 }, () => ({ handoff_due: true,

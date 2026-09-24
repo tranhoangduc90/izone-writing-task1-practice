@@ -68,7 +68,7 @@ export function createWritingFlowNotifier({ pool, handoffUrl, sourceUrl, secret,
   function kick() {
     if (!isLeader || closed) return;
     if (running) pending = true;
-    else schedule(DIRECT_HANDOFF_GRACE_MS);
+    else if (!timer) schedule(DIRECT_HANDOFF_GRACE_MS);
   }
 
   async function send(kind) {

@@ -128,6 +128,27 @@ test('đường gọi trực tiếp có hai giây nhận việc trước khi not
   await notifier.close();
 });
 
+test('nhiều tín hiệu liên tiếp không đẩy lùi mãi thời điểm đánh thức', async () => {
+  const pool = listenerPool([{ handoff_due: true, source_due: false,
+    next_at: null, server_now: new Date() }]);
+  const timers = [];
+  let sent = 0;
+  const notifier = createWritingFlowNotifier({ pool,
+    handoffUrl: 'https://example.test/handoff', secret: 's'.repeat(32),
+    setTimer(handler, delay) { const timer = { handler, delay }; timers.push(timer); return timer; },
+    clearTimer(timer) { timer.cleared = true; },
+    setRecurringTimer() { return { unref() {} }; }, clearRecurringTimer() {},
+    async fetchImpl() { sent += 1; return { ok: true }; }, log() {} });
+  assert.equal(await notifier.start(), true);
+  const firstTimer = timers[0];
+  for (let index = 0; index < 100; index += 1) pool.listeners.get('notification')();
+  assert.equal(firstTimer.cleared, undefined);
+  assert.equal(timers.filter(timer => !timer.cleared).length, 1);
+  await firstTimer.handler();
+  assert.equal(sent, 1);
+  await notifier.close();
+});
+
 for (const failure of ['http_500', 'timeout']) {
   test(`n8n ${failure} vẫn gửi lại tín hiệu khi việc còn trong database`, async () => {
     const rows = Array.from({ length: 2 }, () => ({ handoff_due: true,

@@ -157,13 +157,11 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
       }
       const receipts = [];
       for (const pair of prepared) {
-        // Nhận vào: đúng tài liệu, ô bài và phiên bản Test đã đọc.
-        // Việc chính: khóa chung giữa các bài tập Classroom để hai nguồn không cùng gọi AI.
-        // Trả ra: chỉ một nguồn được tiếp nhận; nguồn trùng báo lỗi để người vận hành kiểm.
-        if (sourceType === 'term_test') {
-          await client.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)',
-            [JSON.stringify(['term_test', input.docId, pair.essaySlot, pair.revision])]);
-        }
+        // Nhận vào: file, ô bài và dấu nội dung, kể cả nguồn Homework cũ.
+        // Việc chính: khóa chung để hai nguồn không cùng nhận một bài trong một thời điểm.
+        // Trả ra: nguồn trùng Test được đưa đi kiểm trước khi gọi AI.
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)',
+          [JSON.stringify(['writing_document', input.docId, pair.contentSha256])]);
         const scope = [input.appId, input.tableId, input.recordId,
           input.docId, input.linkIndex, pair.essaySlot];
         await client.query('SELECT pg_advisory_xact_lock(hashtext($1)::bigint)', [JSON.stringify(scope)]);
@@ -241,11 +239,11 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
         if (sourceType === 'term_test') {
           const otherSource = await client.query(`SELECT 1 AS duplicate_test_pair
             FROM writing_flow.pair
-            WHERE source_type='term_test' AND homework_file_id=$1
-              AND essay_slot=$2 AND submission_revision=$3
-              AND NOT (source_app_id=$4 AND source_table_id=$5
-                AND source_record_id=$6 AND source_link_index=$7)
-            LIMIT 1`, [input.docId, pair.essaySlot, pair.revision,
+            WHERE homework_file_id=$1
+              AND ((essay_slot=$2 AND submission_revision=$3)
+                OR content_sha256=$4)              AND NOT (source_app_id=$5 AND source_table_id=$6
+                AND source_record_id=$7 AND source_link_index=$8)
+            LIMIT 1`, [input.docId, pair.essaySlot, pair.revision, pair.contentSha256,
             input.appId, input.tableId, input.recordId, input.linkIndex]);
           duplicateTestPair = otherSource.rowCount > 0;
         }

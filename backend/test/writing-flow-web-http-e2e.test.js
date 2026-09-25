@@ -251,6 +251,12 @@ test('Substitute cùng tên ở hai lớp không tráo bài khi chấm đảo th
     }
     assert.notEqual(entries[0].attemptId, entries[1].attemptId);
     assert.notEqual(entries[0].submissionId, entries[1].submissionId);
+    const crossedSubmission = await request(app).post(`${base}/submissions`)
+      .set('Authorization', `Bearer ${gatewayToken}`)
+      .send({ ...entries[1].identity, attemptId: entries[0].attemptId,
+        taskNumber: 1, essay: 'Bài giả không được nhận của lớp khác.',
+        sectionResults: syntheticSections() });
+    assert.equal(crossedSubmission.status, 409);
     const claimed = await request(app).post(`${base}/work/claim`)
       .set('Authorization', `Bearer ${graderToken}`).send({ limit: 2 });
     assert.equal(claimed.status, 200);

@@ -338,6 +338,41 @@ test('cùng Docs, ô và phiên bản Test ở hai nguồn không được chấ
   assert.equal(scanReceipt?.pair_id, duplicate.receipts[0].pairId);
 });
 
+// Nhận vào: cùng file và bài Test đến từ Classroom hoặc nút thêm thủ công.
+// Việc chính: thử cả hai thứ tự nhận để nguồn đến sau không tạo lượt chấm mới.
+// Trả ra: một bàn giao AI và một mục Cần kiểm tra; khi sai, test nêu thứ tự nguồn.
+test('Classroom và file Test thủ công trùng nhau chỉ tạo một bàn giao ở cả hai thứ tự', async () => {
+  for (const firstApp of ['google_classroom', 'manual']) {
+    const { pool, pairs, writes } = fakePool();
+    const intake = createWritingFlowIntake({ pool, encryptionKey: '11'.repeat(32) });
+    const source = input();
+    source.sourceType = 'term_test';
+    source.appId = firstApp;
+    source.tableId = firstApp === 'manual' ? 'manual' : 'course-demo';
+    source.recordId = firstApp === 'manual' ? 'manual-record' : 'assignment-record';
+    source.sourceMeta = { teacherNames: [], displayName: 'Bài Test giả' };
+    delete source.larkMeta;
+    delete source.larkModifiedMs;
+    source.expectedCount = 1;
+    source.pairs = [{ essaySlot: 1, taskType: 'task_2', topic: 'Đề Test giả',
+      image: '', essay: 'Bài viết giả', trCcCheck: true, alreadyGraded: false }];
+
+    const first = await intake(source);
+    const otherApp = firstApp === 'manual' ? 'google_classroom' : 'manual';
+    const secondSource = { ...source, appId: otherApp,
+      tableId: otherApp === 'manual' ? 'manual' : 'course-demo',
+      recordId: otherApp === 'manual' ? 'manual-record' : 'assignment-record' };
+    const second = await intake(secondSource);
+    assert.equal(first.receipts[0].status, 'received', firstApp);
+    assert.equal(second.receipts[0].status, 'needs_review', firstApp);
+    assert.equal(second.receipts[0].errorCode,
+      'TEST_DOCUMENT_PAIR_ALREADY_REGISTERED', firstApp);
+    assert.equal(pairs.length, 2, firstApp);
+    assert.equal(writes.filter(row => row.sql.includes('INSERT INTO writing_flow.handoff')).length,
+      1, firstApp);
+  }
+});
+
 // Nhận vào: cùng file và bài viết đã được ghi qua nguồn Homework cũ.
 // Việc chính: nguồn Test mới phải dừng trước AI dù cờ TR/CC tạo revision khác.
 // Trả ra: nguồn Test ở Cần kiểm tra; lần chấm Homework cũ không bị đổi.

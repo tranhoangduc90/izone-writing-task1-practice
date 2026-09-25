@@ -29,7 +29,10 @@ def remote(client, command):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--apply", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--apply", action="store_true")
+    mode.add_argument("--inspect", action="store_true")
+    mode.add_argument("--rollback", action="store_true")
     parser.add_argument("--backup-dir", required=True)
     args = parser.parse_args()
     directory = args.backup_dir.replace("\\", "/")
@@ -38,7 +41,7 @@ def main():
         directory,
     ):
         raise RuntimeError("CANARY_REDIS_DIRECTORY_INVALID")
-    if not args.apply:
+    if not (args.apply or args.inspect or args.rollback):
         print(json.dumps({"toolOutcome": "success", "businessOutcome": "dry_run",
                           "keys": [TOKEN_KEY, URL_KEY], "ttlSeconds": 7200}))
         return 0
@@ -53,9 +56,34 @@ def main():
         client.connect("ducizone.ddns.net", port=22, username=username,
                        password=password, timeout=15)
         step = "readback_before"
-        exists = remote(client, "docker exec redis redis-cli EXISTS "
-                        + TOKEN_KEY + " " + URL_KEY)
-        if exists != "0":
+        keys = TOKEN_KEY + " " + URL_KEY
+        exists = int(remote(client, "docker exec redis redis-cli EXISTS " + keys))
+        if args.inspect:
+            ttl = {"grader_token": int(remote(
+                client, "docker exec redis redis-cli TTL " + TOKEN_KEY)),
+                   "gateway_base_url": int(remote(
+                       client, "docker exec redis redis-cli TTL " + URL_KEY))}
+            print(json.dumps({"toolOutcome": "success", "businessOutcome": "inventory",
+                              "existingCount": exists, "ttlSeconds": ttl,
+                              "productionWrites": 0}))
+            return 0
+        if args.rollback:
+            if exists != 2:
+                raise RuntimeError("CANARY_REDIS_ROLLBACK_SCOPE_MISMATCH")
+            ttl = [int(remote(client, "docker exec redis redis-cli TTL " + key))
+                   for key in (TOKEN_KEY, URL_KEY)]
+            if min(ttl) <= 0:
+                raise RuntimeError("CANARY_REDIS_ROLLBACK_TTL_MISSING")
+            step = "rollback"
+            deleted = int(remote(client, "docker exec redis redis-cli DEL " + keys))
+            remaining = int(remote(client, "docker exec redis redis-cli EXISTS " + keys))
+            if deleted != 2 or remaining:
+                raise RuntimeError("CANARY_REDIS_ROLLBACK_UNCONFIRMED")
+            print(json.dumps({"toolOutcome": "success", "businessOutcome": "rolled_back",
+                              "deletedCount": deleted, "remainingCount": remaining,
+                              "productionKeyUntouched": True}))
+            return 0
+        if exists != 0:
             raise RuntimeError("CANARY_REDIS_KEYS_ALREADY_EXIST")
         prior = remote(client,
                        "docker exec redis redis-cli --scan --pattern 'substitute:*' | wc -l")

@@ -51,11 +51,25 @@ def main():
         errors.read()
         if scan.channel.recv_exit_status():
             raise RuntimeError("REDIS_PREFIX_COUNT_FAILED")
+        ttl = {}
+        for key in ("substitute:staging:grader_token",
+                    "substitute:staging:gateway_base_url",
+                    "substitute:web:gateway_base_url"):
+            # Dữ liệu vào: tên ba khóa đã biết, không đọc giá trị/token.
+            # Việc chính: lấy thời gian sống để biết khóa thử còn dùng được không.
+            # Kết quả: số giây TTL; khi lỗi dừng trước mọi thao tác ghi.
+            _stdin, value, errors = client.exec_command(
+                "docker exec redis redis-cli TTL " + key, timeout=15)
+            ttl[key] = int(value.read().decode("utf-8", errors="replace").strip())
+            errors.read()
+            if value.channel.recv_exit_status():
+                raise RuntimeError("REDIS_TTL_READ_FAILED")
         print(json.dumps({"toolOutcome": "success", "businessOutcome": "inventory",
                           "redisContainerNames": selected, "redisNetworks": networks,
                           "redisPingNoAuth": ping_answer == "PONG" and ping_exit == 0,
                           "trackedKeyExistsCount": int(key_count),
                           "substitutePrefixKeyCount": int(substitute_count),
+                          "ttlSeconds": ttl,
                           "productionWrites": 0}))
         return 0
     except (paramiko.SSHException, OSError, RuntimeError) as error:

@@ -1,0 +1,105 @@
+{
+  "schema_version": 2,
+  "product": "Bảng vận hành chấm Writing 56/67",
+  "change_id": "writing-exclude-hdp-20260926",
+  "change_kind": "bugfix",
+  "escaped_user_defect": true,
+  "risk": "medium",
+  "system_traits": ["stateful", "personal_data"],
+  "acceptance_mode": "small_complete",
+  "requirements": [
+    {
+      "id": "REQ-1",
+      "statement": "Các lớp có giảng viên Hoàng Diệu Pháp không được quét hoặc hiện trong bảng Writing; dữ liệu mapping vẫn được giữ.",
+      "test_ids": ["T-REGRESSION", "T-DASHBOARD", "T-READBACK"]
+    },
+    {
+      "id": "REQ-2",
+      "statement": "Lớp của giảng viên khác tiếp tục được nhận bình thường.",
+      "test_ids": ["T-INVALID", "T-FULL"]
+    }
+  ],
+  "invariants": [
+    {
+      "id": "INV-1",
+      "statement": "Không ghi Lark Base, không sửa bảng mapping hoặc bài học viên khi chặn lớp.",
+      "test_ids": ["T-SECURITY", "T-READBACK"]
+    },
+    {
+      "id": "INV-2",
+      "statement": "Lượt đồng bộ mapping tiếp theo vẫn giữ lớp bị chặn ở trạng thái dừng.",
+      "test_ids": ["T-LIFECYCLE"]
+    }
+  ],
+  "tests": [
+    {"id": "T-REGRESSION", "category": "regression", "priority": "P0", "status": "passed", "evidence": "Cùng ca IC2328 với tên giảng viên chuẩn và không dấu: mã cũ trả active, mã sửa trả excluded_teacher và enabled=false."},
+    {"id": "T-DASHBOARD", "category": "happy_path", "priority": "P0", "status": "passed", "evidence": "Danh sách và số đếm lỗi nguồn đều dùng điều kiện ẩn excluded_teacher; focused suite 25/25."},
+    {"id": "T-INVALID", "category": "invalid_input", "priority": "P1", "status": "passed", "evidence": "Cùng mã lớp với giảng viên khác vẫn active; lớp tương lai của đúng giảng viên bị loại."},
+    {"id": "T-LIFECYCLE", "category": "lifecycle_time", "priority": "P1", "status": "passed", "evidence": "mappingClassState xuất enabled=false và eligibility_reason=excluded_teacher; syncClassesFromMapping dùng hai giá trị này để đặt scan_status=paused và next_scan_at xa."},
+    {"id": "T-SECURITY", "category": "security_privacy", "priority": "P1", "status": "passed", "evidence": "Diff chỉ gồm quy tắc lớp và test, không có dữ liệu học viên, token hoặc thay đổi quyền."},
+    {"id": "T-FULL", "category": "regression", "priority": "P0", "status": "passed", "evidence": "npm run check và npm test đạt 268/268, không skip trên revision hiện tại."},
+    {"id": "T-READBACK", "category": "lifecycle_time", "priority": "P0", "status": "passed", "evidence": "Production chỉ cập nhật backend Writing và đúng dòng IC2328. Docker readback source hash 42e35c458b598358f38271e670956887659a98b13bfabba7ff055d575d0ce43e, health OK; database IC2328 excluded_teacher/paused; 41 lớp khác vẫn active. Dashboard Chrome: 41 lớp, không có IC2328 trong danh sách; lọc Hoàng Diệu Pháp rồi bấm Tìm kiếm cho 0 bài và 0 lỗi nguồn."}
+  ],
+  "red_green": {
+    "red_on_base": {
+      "test_id": "T-REGRESSION",
+      "command": "node --test test/writing-flow-service.test.js",
+      "tree_revision": "68b6fc30f3e670d904796051ce0ad715c9a370a9",
+      "outcome": "failed",
+      "exit_code": 1,
+      "failed": 1,
+      "evidence": "Ca IC2328 được mappingClassState trả active thay vì excluded."
+    },
+    "green_on_head": {
+      "test_id": "T-REGRESSION",
+      "command": "node --test test/writing-flow-service.test.js",
+      "tree_revision": "15815bde366a246da0688724531e356a5a6e87fc",
+      "outcome": "passed",
+      "exit_code": 0,
+      "passed": 25,
+      "failed": 0,
+      "skipped": 0,
+      "evidence": "Ca IC2328 và kiểm truy vấn dashboard đạt; focused suite 25/25."
+    }
+  },
+  "cross_constraints": [
+    {
+      "id": "CLASS-SCAN-1",
+      "left": {"name": "excluded_teacher_enabled", "value": 0},
+      "operator": "==",
+      "right": {"name": "allowed_scan_enabled", "value": 0},
+      "status": "passed",
+      "evidence": "Regression IC2328 trả enabled=false; syncClassesFromMapping chuyển lớp bị loại sang paused."
+    }
+  ],
+  "verification_runs": [
+    {
+      "id": "V-FULL",
+      "scope": "full_suite",
+      "command": "npm run check && npm test (backend)",
+      "tree_revision": "15815bde366a246da0688724531e356a5a6e87fc",
+      "captured_at": "2026-09-26T09:27:00Z",
+      "exit_code": 0,
+      "outcome": "passed",
+      "passed": 268,
+      "failed": 0,
+      "skipped": 0,
+      "evidence": "Log kiểm thử riêng tư trên máy vận hành; 268/268, không skip."
+    }
+  ],
+  "mutations": [
+    {"id": "M-BACKEND", "target": "writing-task1-practice-api", "outcome": "success", "readback": "verified", "evidence": "Source và container Writing có cùng SHA256 42e35c458b598358f38271e670956887659a98b13bfabba7ff055d575d0ce43e; health OK."},
+    {"id": "M-CLASS", "target": "writing_flow.class_registry:IC2328", "outcome": "success", "readback": "verified", "evidence": "Chỉ IC2328 được đặt enabled=false, eligibility_reason=excluded_teacher, scan_status=paused; các lớp khác active=41."}
+  ],
+  "release": {
+    "target_environment": "production",
+    "decision": "verified",
+    "base_tree_revision": "68b6fc30f3e670d904796051ce0ad715c9a370a9",
+    "current_tree_revision": "15815bde366a246da0688724531e356a5a6e87fc",
+    "production_authorized": true,
+    "rollback": "Khôi phục đúng source production đã sao lưu hoặc chạy lại image trước phát hành; giữ nguyên database mapping.",
+    "deployment_readback": "verified",
+    "operational_observation": "Dashboard production hiển thị 41 lớp, không có IC2328; lọc Hoàng Diệu Pháp cho 0 bài và 0 lỗi nguồn.",
+    "open_risks": []
+  }
+}

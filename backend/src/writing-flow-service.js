@@ -80,7 +80,8 @@ const TERM_TEST_CLASS_NAMES = new Map([
   ['term test 1 khóa chuyên sâu', 'Term test 1 khóa Chuyên sâu'],
   ['term test 1 khóa chiến lược', 'Term test 1 khóa Chiến lược'],
 ]);
-const HIDDEN_CLASS_REASONS = ['excluded', 'excluded_ic_before_2065', 'excluded_ic_program'];
+const HIDDEN_CLASS_REASONS = ['excluded', 'excluded_ic_before_2065',
+  'excluded_ic_program', 'excluded_teacher'];
 const visibleRegistrySql = alias => `(${alias}.class_code IS NULL
   OR coalesce(${alias}.eligibility_reason,'') <> ALL($VISIBLE_CLASS_REASONS$::text[]))`
   .replace('$VISIBLE_CLASS_REASONS$', `ARRAY[${HIDDEN_CLASS_REASONS.map(value => `'${value}'`).join(',')}]`);
@@ -160,9 +161,15 @@ export function mappingClassState(row) {
   let operationalState = 'active';
   let eligibilityReason = 'active';
   const icNumber = /^IC(\d+)$/u.test(classCode) ? Number(classCode.slice(2)) : null;
+  const teacherExcluded = (Array.isArray(row.teacher_names) ? row.teacher_names : [])
+    .some(name => String(name)
+      .normalize('NFKD').replace(/\p{M}/gu, '').replace(/đ/giu, 'd')
+      .replace(/\s+/gu, ' ').trim().toLowerCase() === 'hoang dieu phap');
   if (!classCode) operationalState = eligibilityReason = 'missing_class_code';
   else if (classCode === 'IC2288') {
     operationalState = 'excluded'; eligibilityReason = 'excluded';
+  } else if (teacherExcluded) {
+    operationalState = 'excluded'; eligibilityReason = 'excluded_teacher';
   } else if (icNumber !== null && icNumber < 2065) {
     operationalState = 'excluded'; eligibilityReason = 'excluded_ic_before_2065';
   } else if (icNumber !== null && !ALLOWED_IC_CLASS_INFO.has(classInfo)) {
@@ -259,7 +266,8 @@ export function mergeClassCoverage(expectedRows = [], seenRows = []) {
     class_code_missing: 3, status_review: 4, pending_review: 5, unexpected_source: 6,
     excluded: 7, completed: 8, covered: 9 };
   const covered = [...rows.values()].map(row => ({ ...row,
-    status: row.class_code === 'IC2288' ? 'excluded'
+    status: row.class_code === 'IC2288' || row.eligibility_reason === 'excluded_teacher'
+      ? 'excluded'
       : row.operational_state === 'completed' ? 'completed'
         : ['status_review', 'pending_review', 'missing_classroom_course', 'mapping_conflict']
             .includes(row.operational_state) ? row.operational_state

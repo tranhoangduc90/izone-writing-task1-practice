@@ -23,6 +23,40 @@ test('trạng thái lớp chỉ active khi mapping đã duyệt và lớp đang 
     'excluded');
 });
 
+test('lớp của giảng viên Hoàng Diệu Pháp bị loại riêng khỏi hệ thống Writing', () => {
+  const base = { erp_course_class_id: 2328, erp_class_name_snapshot: 'IC2328',
+    classroom_course_id: 'course-2328', classroom_course_name_snapshot: 'IC2328',
+    classroom_section_snapshot: 'Chiến lược (5.0 - 6.0)',
+    mapping_status: 'approved', class_statuses: ['on_going'] };
+  for (const teacherName of ['Hoàng Diệu Pháp', '  HOANG   DIEU PHAP  ']) {
+    const result = mappingClassState({ ...base, teacher_names: [teacherName] });
+    assert.equal(result.operational_state, 'excluded');
+    assert.equal(result.eligibility_reason, 'excluded_teacher');
+    assert.equal(result.enabled, false);
+  }
+  const otherTeacher = mappingClassState({ ...base, teacher_names: ['Giảng viên khác'] });
+  assert.equal(otherTeacher.operational_state, 'active');
+  assert.equal(otherTeacher.enabled, true);
+  const futureClass = mappingClassState({ ...base, erp_class_name_snapshot: 'IC2400',
+    teacher_names: ['Hoàng Diệu Pháp'] });
+  assert.equal(futureClass.eligibility_reason, 'excluded_teacher');
+});
+
+test('danh sách và số đếm lỗi nguồn đều ẩn lớp đã loại theo giảng viên', async () => {
+  const calls = [];
+  const pool = { query: async (sql, values = []) => {
+    calls.push({ sql, values });
+    return { rows: [] };
+  } };
+  const service = createWritingFlowService({ pool });
+  await service.listSourceIssues();
+  assert.match(calls.at(-1).sql, /'excluded_teacher'/u);
+  await service.dashboardCounts();
+  const issueQueries = calls.filter(call => call.sql.includes('writing_flow.source_issue'));
+  assert.ok(issueQueries.length >= 2);
+  assert.equal(issueQueries.every(call => call.sql.includes("'excluded_teacher'")), true);
+});
+
 test('lọc lớp IC theo số hiệu, giữ hai hệ Writing, lớp 1-1 và mọi lớp CS', () => {
   const base = { erp_course_class_id: 1, classroom_course_id: 'course-1',
     classroom_course_name_snapshot: 'Classroom thử', mapping_status: 'approved',

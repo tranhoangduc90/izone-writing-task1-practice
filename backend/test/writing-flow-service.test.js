@@ -227,6 +227,33 @@ test('lỗi nguồn có thùng rác mềm idempotent và khôi phục được',
   assert.deepEqual(state.updates, ['skipped', 'open']);
 });
 
+test('khôi phục mục tự bỏ qua sẽ xếp file đọc lại, không động vào bài đã chấm', async () => {
+  const issueKey = 'b'.repeat(64);
+  const calls = [];
+  const client = { async query(sql, values = []) {
+    if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(sql)) return {};
+    calls.push({ sql, values });
+    if (sql.includes('SELECT event_type FROM writing_flow.operator_event')) {
+      return { rowCount: 0, rows: [] };
+    }
+    if (sql.includes('SELECT i.issue_key,i.status')) return { rowCount: 1,
+      rows: [{ issue_key: issueKey, status: 'skipped', class_code: 'IC2305',
+        reason_code: 'ESSAY_ANCHOR_MISSING', skipped_by: 'system',
+        source_id: '11111111-1111-4111-8111-111111111111' }] };
+    return { rowCount: 1, rows: [] };
+  }, release() {} };
+  const service = createWritingFlowService({ pool: { connect: async () => client } });
+  const result = await service.restoreSourceIssue({ issueKey,
+    requestId: '55555555-5555-4555-8555-555555555555',
+    actorRef: 'admin@example.invalid', reason: 'File đã sửa' });
+  assert.equal(result.recheckQueued, true);
+  const sourceUpdate = calls.find(call => call.sql.includes('UPDATE writing_flow.source_record'));
+  assert.ok(sourceUpdate);
+  assert.match(sourceUpdate.sql, /dispatch_status='pending'/u);
+  assert.match(sourceUpdate.sql, /last_error_code='ESSAY_ANCHOR_MISSING'/u);
+  assert.ok(calls.every(call => !call.sql.includes('UPDATE writing_flow.pair')));
+});
+
 test('danh sách lỗi nguồn tách trạng thái mở và đã bỏ qua', async () => {
   let observed;
   const pool = { query: async (sql, values) => { observed = { sql, values }; return { rows: [] }; } };

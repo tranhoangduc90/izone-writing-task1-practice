@@ -545,7 +545,8 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
         const duplicate = await client.query(`SELECT event_type FROM writing_flow.operator_event
           WHERE request_id=$1`, [requestId]);
         if (duplicate.rowCount) return { issueKey, status: 'open', requestId };
-        const found = await client.query(`SELECT i.issue_key,i.status,i.class_code,s.source_id
+        const found = await client.query(`SELECT i.issue_key,i.status,i.class_code,
+          i.reason_code,i.skipped_by,s.source_id
           FROM writing_flow.source_issue AS i
           LEFT JOIN writing_flow.source_record AS s
             ON s.source_app_id=i.source_app_id AND s.source_table_id=i.source_table_id
@@ -560,6 +561,17 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
         await client.query(`UPDATE writing_flow.source_issue
           SET status='open',skipped_at=NULL,skipped_by=NULL,skip_reason=NULL,last_seen_at=now()
           WHERE issue_key=$1`, [issueKey]);
+        // Chỉ mục tự bỏ qua vì thiếu nhãn cần được đọc lại khi quản trị viên khôi phục.
+        // Mục bỏ qua thủ công giữ hành vi cũ để không tự phát bài ngoài ý muốn.
+        const autoEssaySkip = found.rows[0].reason_code === 'ESSAY_ANCHOR_MISSING'
+          && found.rows[0].skipped_by === 'system';
+        if (autoEssaySkip && found.rows[0].source_id) {
+          await client.query(`UPDATE writing_flow.source_record
+            SET dispatch_status='pending',dispatch_count=0,next_dispatch_at=now(),
+              last_error_code=NULL,updated_at=now()
+            WHERE source_id=$1 AND dispatch_status='excluded'
+              AND last_error_code='ESSAY_ANCHOR_MISSING'`, [found.rows[0].source_id]);
+        }
         await client.query(`INSERT INTO writing_flow.operator_event
           (source_id,class_code,source_issue_key,event_type,actor_ref,request_id,reason,
            before_state,after_state)
@@ -567,7 +579,7 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
             '{"status":"skipped"}'::jsonb,'{"status":"open"}'::jsonb)`,
         [found.rows[0].source_id, found.rows[0].class_code, issueKey,
           actorRef, requestId, reason]);
-        return { issueKey, status: 'open', requestId };
+        return { issueKey, status: 'open', requestId, recheckQueued: autoEssaySkip };
       });
     },
     async summary() {

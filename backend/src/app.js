@@ -110,6 +110,12 @@ const writingSourceIssue=z.object({
    'INTAKE_TOPIC_MISSING','INTAKE_CHART_LINK_INVALID',
    'INTAKE_CHART_LINK_AMBIGUOUS','INTAKE_TASK_TYPE_MISMATCH'])
 });
+const writingSourceWarningReceipt=writingSourceIssue.extend({
+ warningKind:z.enum(['TITLE_WRITING','VIETNAMESE_WRITING','NONSTANDARD_K56_TOPIC']),
+ readbackDocumentId:z.string().trim().min(1).max(160),
+ documentRevision:z.string().trim().min(1).max(500),
+ targetCount:z.number().int().min(1).max(4),
+});
 const writingScanItem=z.object({
  recordId:z.string().trim().min(1).max(120),
  docId:z.string().trim().min(1).max(160).nullable(),
@@ -130,7 +136,7 @@ const writingScanAck=z.object({
  issueKeys:z.array(z.string().regex(/^[0-9a-f]{64}$/)).max(4).default([]),
  detectedSlotCount:z.number().int().min(0).max(4).nullable().default(null),
  exclusionCode:z.enum(['CLASS_EXCLUDED','NON_WRITING_TITLE','NON_WRITING_DOCUMENT',
-   'FILE_TYPE_UNSUPPORTED']).nullable().default(null)
+   'FILE_TYPE_UNSUPPORTED','ESSAY_ANCHOR_MISSING']).nullable().default(null)
 });
 const writingScanCursor=z.object({
  appId:z.string().trim().min(1).max(120),tableId:z.string().trim().min(1).max(120)
@@ -382,6 +388,12 @@ export function createApp({config,pool,service,lessonService=service,provisional
    r.status(202).json({ok:true,issue:await writingFlowService.recordSourceIssue(
      parse(writingSourceIssue,q.body))});
  }));
+ app.post('/api/v1/internal/writing-flow/source-warning-receipts',internal,writingFlowReady,
+   asyncRoute(async(q,r)=>{
+     const receipt=await writingFlowService.confirmSourceWarning(
+       parse(writingSourceWarningReceipt,q.body));
+     r.json({ok:true,receipt});
+   }));
  app.post('/api/v1/internal/writing-flow/sources/due',internal,writingFlowReady,asyncRoute(async(q,r)=>{
    const input=parse(z.object({sourceTypes:z.array(writingSourceType).min(1).max(4)
      .default(['manual','google_classroom','term_test']),limit:z.number().int().min(1).max(100).default(50)}),q.body);
@@ -620,8 +632,10 @@ export function createApp({config,pool,service,lessonService=service,provisional
     const search=q.query.search?parse(z.string().trim().min(1).max(500),q.query.search):null;
     const reasonCode=q.query.reasonCode?parse(z.string().trim().min(1).max(100),q.query.reasonCode):null;
     const status=parse(z.enum(['open','skipped']),q.query.status??'open');
+    const warningGroup=q.query.warningGroup
+      ?parse(z.enum(['warned','review']),q.query.warningGroup):null;
     r.json({ok:true,issues:await writingFlowService.listSourceIssues({classCode,teacherName,
-      search,reasonCode,status,limit,offset})});
+      search,reasonCode,status,warningGroup,limit,offset})});
   }));
  app.get('/api/v1/admin/writing-flow/sources',adminAuth,writingFlowAdmin,writingFlowReady,asyncRoute(async(q,r)=>{
    const limit=parse(z.coerce.number().int().min(1).max(100),q.query.limit??50);

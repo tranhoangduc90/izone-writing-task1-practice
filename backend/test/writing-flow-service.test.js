@@ -196,6 +196,65 @@ test('lỗi nguồn của hai ô cùng file có khóa riêng', async () => {
   assert.match(writes[0].sql, /status='skipped'[\s\S]*THEN 'skipped'/u);
 });
 
+test('chỉ lưu biên nhận khi cảnh báo được đọc lại đúng file, đúng loại lỗi', async () => {
+  const calls = [];
+  const pool = { query: async (sql, values) => {
+    calls.push({ sql, values });
+    return { rowCount: 1, rows: [{ issue_key: values[0], status: 'open',
+      warning_kind: values[9], warning_confirmed_at: '2026-09-27T00:00:00Z' }] };
+  } };
+  const service = createWritingFlowService({ pool });
+  const base = { appId: 'google_classroom', tableId: 'course-1',
+    recordId: 'submission-1', docId: 'document-1', readbackDocumentId: 'document-1',
+    linkIndex: 1, essaySlot: 1, classCode: 'IC2180', reasonCode: 'TITLE_WRITING',
+    warningKind: 'TITLE_WRITING', documentRevision: 'revision-2', targetCount: 1 };
+  for (const wrong of [
+    { readbackDocumentId: 'other-document' },
+    { warningKind: 'VIETNAMESE_WRITING' },
+    { targetCount: 0 },
+    { reasonCode: 'FETCH_FAILED' },
+  ]) await assert.rejects(service.confirmSourceWarning({ ...base, ...wrong }),
+    error => error.code === 'SOURCE_WARNING_RECEIPT_INVALID');
+  assert.equal(calls.length, 0);
+  const receipt = await service.confirmSourceWarning(base);
+  assert.equal(receipt.status, 'open');
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].sql, /WHERE writing_flow\.source_issue\.status='open'/u);
+  assert.match(calls[0].sql, /coalesce\(writing_flow\.source_issue\.warning_confirmed_at,now\(\)\)/u);
+  assert.equal(calls[0].values[9], 'TITLE_WRITING');
+});
+
+test('lỗi đã bỏ qua không nhận biên nhận cảnh báo', async () => {
+  const service = createWritingFlowService({ pool: { query: async () =>
+    ({ rowCount: 0, rows: [] }) } });
+  await assert.rejects(service.confirmSourceWarning({
+    appId: 'google_classroom', tableId: 'course-1', recordId: 'submission-1',
+    docId: 'document-1', readbackDocumentId: 'document-1', reasonCode: 'TITLE_WRITING',
+    warningKind: 'TITLE_WRITING', documentRevision: 'revision-2', targetCount: 1,
+  }), error => error.code === 'SOURCE_ISSUE_NOT_OPEN');
+});
+
+test('danh sách lỗi nguồn lọc tại database, số tổng bằng hai nhóm', async () => {
+  const calls = [];
+  const pool = { query: async (sql, values = []) => {
+    calls.push({ sql, values });
+    if (sql.includes('AS source_issues_warned')) return { rows: [{ source_issues: 9,
+      source_issues_warned: 6, reviews: 2, technical_errors: 0 }] };
+    return { rows: [] };
+  } };
+  const service = createWritingFlowService({ pool });
+  await service.listSourceIssues({ warningGroup: 'warned', status: 'open', limit: 51 });
+  assert.equal(calls.at(-1).values[8], 'warned');
+  assert.match(calls.at(-1).sql, /warning_confirmed_at IS NOT NULL/u);
+  await service.listSourceIssues({ warningGroup: 'review', status: 'open', offset: 50 });
+  assert.equal(calls.at(-1).values[8], 'review');
+  assert.equal(calls.at(-1).values[7], 50);
+  const counts = await service.dashboardCounts();
+  assert.equal(counts.support.source_issues, 9);
+  assert.equal(counts.support.source_issues_warned, 6);
+  assert.equal(counts.support.source_issues_review, 3);
+});
+
 test('lỗi nguồn có thùng rác mềm idempotent và khôi phục được', async () => {
   const issueKey = 'a'.repeat(64);
   const state = { status: 'open', events: new Set(), updates: [] };
@@ -259,7 +318,7 @@ test('danh sách lỗi nguồn tách trạng thái mở và đã bỏ qua', asyn
   const pool = { query: async (sql, values) => { observed = { sql, values }; return { rows: [] }; } };
   await createWritingFlowService({ pool }).listSourceIssues({ status: 'skipped', limit: 25, offset: 5 });
   assert.match(observed.sql, /WHERE i\.status=\$6/u);
-  assert.deepEqual(observed.values.slice(5), ['skipped', 25, 5]);
+  assert.deepEqual(observed.values.slice(5), ['skipped', 25, 5, null]);
 });
 
 test('nhật ký một bài chỉ đọc metadata và sắp theo thời gian', async () => {
@@ -413,7 +472,7 @@ test('bài kiểm thử giả không xuất hiện trong danh sách và số li�
     assert.match(sql, /IS DISTINCT FROM 'codex_fixture'/u);
   }
   assert.equal((calls[1].sql.match(/IS DISTINCT FROM 'codex_fixture'/gu) || []).length, 1);
-  assert.equal((calls[2].sql.match(/IS DISTINCT FROM 'codex_fixture'/gu) || []).length, 2);
+  assert.equal((calls[2].sql.match(/IS DISTINCT FROM 'codex_fixture'/gu) || []).length, 3);
   assert.equal((calls[3].sql.match(/IS DISTINCT FROM 'codex_fixture'/gu) || []).length, 3);
 });
 
@@ -486,7 +545,8 @@ test('số đếm dashboard ghi rõ bảng lớp khi pair và source cùng có c
     return { rows: [] };
   } };
   const result = await createWritingFlowService({ pool }).dashboardCounts();
-  assert.deepEqual(result.support, { source_issues: 0, reviews: 0, technical_errors: 0 });
+  assert.deepEqual(result.support, { source_issues: 0, reviews: 0,
+    technical_errors: 0, source_issues_review: 0 });
   assert.equal(calls.length, 2);
   assert.equal(calls.every(call => !/USING \(class_code\)/u.test(call.sql)), true);
   assert.match(calls[1].sql,

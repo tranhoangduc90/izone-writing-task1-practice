@@ -462,8 +462,47 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
       return result.rows[0];
     },
 
+    // Nhận vào: định danh lỗi nguồn cùng kết quả đọc lại cảnh báo trong Google Docs.
+    // Việc chính: chỉ xác nhận đúng lỗi, đúng tài liệu và đúng loại cảnh báo đã kiểm.
+    // Trả ra: biên nhận bền để dashboard phân biệt bài đã cảnh báo với bài cần xem.
+    // Khi lỗi: không tạo biên nhận; bài vẫn nằm trong nhóm Cần xem xét.
+    async confirmSourceWarning({ appId, tableId, recordId, docId, linkIndex = null,
+      essaySlot = null, classCode = null, reasonCode, warningKind, documentRevision,
+      readbackDocumentId, targetCount }) {
+      const expected = { TITLE_WRITING: 'TITLE_WRITING',
+        VIETNAMESE_WRITING: 'VIETNAMESE_WRITING',
+        TOPIC_NOT_IN_REGISTRY: 'NONSTANDARD_K56_TOPIC' }[reasonCode];
+      if (!docId || readbackDocumentId !== docId || !expected || warningKind !== expected
+        || !Number.isInteger(targetCount) || targetCount < 1 || targetCount > 4) {
+        throw new ApiError(400, 'SOURCE_WARNING_RECEIPT_INVALID',
+          'Biên nhận cảnh báo không khớp lỗi nguồn hoặc tài liệu.');
+      }
+      const issueKey = crypto.createHash('sha256')
+        .update(JSON.stringify([appId, tableId, recordId, docId,
+          linkIndex ?? 0, essaySlot ?? 0, reasonCode]))
+        .digest('hex');
+      const result = await pool.query(`
+        INSERT INTO writing_flow.source_issue
+          (issue_key,source_app_id,source_table_id,source_record_id,
+           homework_file_id,source_link_index,essay_slot,class_code,reason_code,
+           warning_confirmed_at,warning_kind,warning_document_revision)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now(),$10,$11)
+        ON CONFLICT (issue_key) DO UPDATE
+          SET warning_confirmed_at=coalesce(writing_flow.source_issue.warning_confirmed_at,now()),
+              warning_kind=EXCLUDED.warning_kind,
+              warning_document_revision=EXCLUDED.warning_document_revision
+        WHERE writing_flow.source_issue.status='open'
+        RETURNING issue_key,status,warning_confirmed_at,warning_kind`,
+      [issueKey, appId, tableId, recordId, docId, linkIndex, essaySlot,
+        classCode, reasonCode, warningKind, documentRevision]);
+      if (!result.rowCount) throw new ApiError(409, 'SOURCE_ISSUE_NOT_OPEN',
+        'Lỗi nguồn đã được bỏ qua hoặc xử lý.');
+      return result.rows[0];
+    },
+
     async listSourceIssues({ classCode = null, teacherName = null, search = null,
-      reasonCode = null, status = 'open', limit = 100, offset = 0 } = {}) {
+      reasonCode = null, status = 'open', warningGroup = null,
+      limit = 100, offset = 0 } = {}) {
       const assignments = await teacherAssignmentsForDatabase();
       const searchDocId = documentIdFromSearch(search);
       const result = await pool.query(`
@@ -472,6 +511,7 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
                i.homework_file_id,i.source_link_index,
                i.essay_slot,i.class_code,i.reason_code,i.occurrence_count,
                i.first_seen_at,i.last_seen_at,i.status,
+               i.warning_confirmed_at,i.warning_kind,
                i.skipped_at,i.skipped_by,i.skip_reason,
                s.source_id,s.source_type,s.display_name,s.student_name,s.teacher_names,
                s.classroom_url,s.file_url,s.source_status
@@ -496,9 +536,10 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
              OR writing_flow.normalize_search(s.student_name)
                LIKE '%' || writing_flow.normalize_search($3) || '%')
            AND ($5::text IS NULL OR i.reason_code=$5)
+           AND ($9::text IS NULL OR ($9='warned')=(i.warning_confirmed_at IS NOT NULL))
          ORDER BY i.last_seen_at DESC,i.issue_key
          LIMIT $7 OFFSET $8`, [classCode, teacherName, search, searchDocId,
-        reasonCode, status, limit, offset]);
+        reasonCode, status, limit, offset, warningGroup]);
       return result.rows;
     },
 
@@ -651,6 +692,26 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
                 teachers.teacher_names,ARRAY[]::text[])))
               AND ($3::text IS NULL OR ($3='test' AND source.source_type='term_test')
                 OR ($3='homework' AND source.source_type<>'term_test'))) AS source_issues,
+          (SELECT count(*)::integer FROM writing_flow.source_issue AS issue
+            LEFT JOIN writing_flow.source_record AS source
+              ON source.source_app_id=issue.source_app_id
+             AND source.source_table_id=issue.source_table_id
+             AND source.source_record_id=issue.source_record_id
+             AND source.homework_file_id IS NOT DISTINCT FROM issue.homework_file_id
+             AND source.source_link_index IS NOT DISTINCT FROM issue.source_link_index
+            LEFT JOIN teacher_assignments AS teachers
+              ON teachers.class_code=coalesce(issue.class_code,source.class_code)
+            LEFT JOIN writing_flow.class_registry AS registry
+              ON registry.class_code=coalesce(issue.class_code,source.class_code)
+            WHERE issue.status='open' AND issue.warning_confirmed_at IS NOT NULL
+              AND ${visibleOperationalSourceSql('issue')}
+              AND registry.class_status IS DISTINCT FROM 'completed'
+              AND ${visibleRegistrySql('registry')}
+              AND ($1::text IS NULL OR coalesce(issue.class_code,source.class_code)=$1)
+              AND ($2::text IS NULL OR $2=ANY(coalesce(nullif(source.teacher_names,ARRAY[]::text[]),
+                teachers.teacher_names,ARRAY[]::text[])))
+              AND ($3::text IS NULL OR ($3='test' AND source.source_type='term_test')
+                OR ($3='homework' AND source.source_type<>'term_test'))) AS source_issues_warned,
           (SELECT count(*)::integer FROM writing_flow.manual_review AS review
             JOIN writing_flow.pair AS pair ON pair.pair_id=review.pair_id
             JOIN writing_flow.stage_result AS review_stage
@@ -674,7 +735,12 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
           (SELECT count(*)::integer FROM writing_flow.workflow_failure
              WHERE last_seen_at>now()-interval '7 days') AS technical_errors`,
       [classCode, teacherName, sourceKind]);
-      return { stages: result.rows, support: support.rows[0] };
+      const supportCounts = support.rows[0] || {};
+      return { stages: result.rows, support: {
+        ...supportCounts,
+        source_issues_review: Number(supportCounts.source_issues || 0)
+          - Number(supportCounts.source_issues_warned || 0),
+      } };
     },
 
     async listClassCoverage() {

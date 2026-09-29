@@ -20,12 +20,32 @@ export const writingFlowWorkStatusSql = `SELECT
       AND p.status NOT IN ('delivered','superseded')) AS handoff_due,
   EXISTS (SELECT 1 FROM writing_flow.scan_item i
     JOIN writing_flow.scan_run r ON r.run_id=i.run_id
-    WHERE r.status='open' AND i.status IN ('pending','partial','issue')
-      AND i.next_send_at<=now())
-    OR EXISTS (SELECT 1 FROM writing_flow.source_record s
+    WHERE r.status='open' AND i.status='pending'
+      AND i.next_send_at<=now()
+      AND (i.send_count=0 OR i.last_sent_at<=now()-interval '6 hours')
+      AND (SELECT count(*) FROM writing_flow.scan_item busy
+        JOIN writing_flow.scan_run open_run ON open_run.run_id=busy.run_id
+        WHERE busy.status='pending' AND open_run.status='open'
+          AND busy.send_count>0
+          AND busy.last_sent_at>now()-interval '6 hours')<100) AS source_due,
+  EXISTS (SELECT 1 FROM writing_flow.source_record s
       WHERE s.source_type IN ('manual','google_classroom','term_test')
         AND s.dispatch_status IN ('pending','sent')
-        AND s.next_dispatch_at<=now()) AS source_due,
+        AND coalesce(s.next_dispatch_at,now())<=now()
+        AND (s.dispatch_status='pending'
+          OR coalesce(s.last_dispatched_at,'-infinity'::timestamptz)
+            <=now()-interval '6 hours')
+        AND NOT EXISTS (SELECT 1 FROM writing_flow.scan_run r
+          WHERE r.status='open' AND r.source_app_id=s.source_app_id
+            AND r.source_table_id=s.source_table_id)
+        AND (SELECT count(*) FROM writing_flow.source_record busy
+          WHERE busy.source_type IN ('manual','google_classroom','term_test')
+            AND busy.dispatch_status='sent'
+            AND busy.last_dispatched_at>now()-interval '6 hours')<100) AS intake_due,
+  EXISTS (SELECT 1 FROM writing_flow.scan_item i
+    JOIN writing_flow.scan_run r ON r.run_id=i.run_id
+    WHERE r.status='open' AND i.status='pending'
+      AND i.receipt_plan IS NOT NULL) AS receipt_pending,
   LEAST(
     (SELECT min(h.next_send_at) FROM writing_flow.handoff h
       JOIN writing_flow.pair p ON p.pair_id=h.pair_id
@@ -39,12 +59,14 @@ export const writingFlowWorkStatusSql = `SELECT
   ) AS next_at,
   now() AS server_now;`;
 
-export function createWritingFlowNotifier({ pool, handoffUrl, sourceUrl, secret,
+export function createWritingFlowNotifier({ pool, handoffUrl, sourceUrl, intakeUrl, secret,
+  reconcileScans = null,
   fetchImpl = fetch, setTimer = setTimeout, clearTimer = clearTimeout,
   setRecurringTimer = setInterval, clearRecurringTimer = clearInterval,
   now = () => Date.now(), log = message => console.error(message) }) {
-  const targets = { handoff: handoffUrl || null, source: sourceUrl || null };
-  const enabled = Boolean(targets.handoff || targets.source);
+  const targets = { handoff: handoffUrl || null, source: sourceUrl || null,
+    intake: intakeUrl || null };
+  const enabled = Boolean(targets.handoff || targets.source || targets.intake);
   if (enabled && String(secret || '').length < 32) throw new Error('WRITING_FLOW_NOTIFY_CONFIG_INVALID');
   let listener = null;
   let timer = null;
@@ -94,9 +116,23 @@ export function createWritingFlowNotifier({ pool, handoffUrl, sourceUrl, secret,
       const result = await pool.query(writingFlowWorkStatusSql);
       const row = result.rows[0];
       if (!row || closed || !isLeader) return;
+      // Biên nhận có thể đến sau khi n8n gửi link; đối chiếu mà không gửi lại cả bài.
+      let reconcileFailed = false;
+      if (row.receipt_pending && reconcileScans) {
+        try {
+          const result = await reconcileScans();
+          reconcileFailed = Boolean(result?.failureCount);
+          if (reconcileFailed) log(JSON.stringify({ event: 'writing_flow_scan_reconcile_failed',
+            failureCount: result.failureCount }));
+        } catch {
+          reconcileFailed = true;
+          log(JSON.stringify({ event: 'writing_flow_scan_reconcile_failed', failureCount: 1 }));
+        }
+      }
       const kinds = [];
       if (row.handoff_due && targets.handoff) kinds.push('handoff');
       if (row.source_due && targets.source) kinds.push('source');
+      if (row.intake_due && targets.intake) kinds.push('intake');
       if (kinds.length) {
         const wait = 2000 - (now() - lastSentAt);
         if (wait > 0) { schedule(wait); return; }
@@ -107,8 +143,9 @@ export function createWritingFlowNotifier({ pool, handoffUrl, sourceUrl, secret,
       } else if (row.next_at) {
         const delay = new Date(row.next_at).getTime() - new Date(row.server_now).getTime();
         if (!Number.isFinite(delay)) throw new Error('STATUS_INVALID');
-        schedule(Math.max(1000, delay + 100));
-      }
+        // Một mốc cũ có thể đang bị khóa bởi lượt quét mở; tránh hỏi DB liên tục mỗi giây.
+        schedule(reconcileFailed || delay < 0 ? 30_000 : Math.max(1000, delay + 100));
+      } else if (reconcileFailed) schedule(30_000);
     } catch {
       log(JSON.stringify({ event: 'writing_flow_notify_failed', retrySeconds: 30 }));
       schedule(30000);

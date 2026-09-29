@@ -18,10 +18,13 @@ import { createWritingFlowNotifier } from './writing-flow-notifier.js';
 
 const config = loadConfig();
 const pool = createDatabasePool(config);
+const writingFlowScan = createWritingFlowScan({ pool });
 const writingFlowNotifier = createWritingFlowNotifier({
   pool,
+  reconcileScans: () => writingFlowScan.finishReady({ limit: 100 }),
   handoffUrl: config.writingFlowHandoffNotifyUrl,
   sourceUrl: config.writingFlowSourceNotifyUrl,
+  intakeUrl: config.writingFlowIntakeNotifyUrl,
   secret: config.writingFlowNotifySecret
 });
 const provisionalService = createProvisionalStudentService({ pool, pepper: config.provisionalStudentPinPepper });
@@ -37,7 +40,7 @@ const app = createApp({
   writingFlowStage: createWritingFlowStage({ pool, encryptionKey: config.writingFlowEncryptionKey }),
   writingFlowHandoff: createWritingFlowHandoff({ pool }),
   writingFlowAiCall: createWritingFlowAiCall({ pool, encryptionKey: config.writingFlowEncryptionKey }),
-  writingFlowScan: createWritingFlowScan({ pool }),
+  writingFlowScan,
   writingFlowTrccRepair: createWritingFlowTrccRepair({
     pool, encryptionKey: config.writingFlowEncryptionKey }),
   writingTestComponents: createWritingTestComponentService({

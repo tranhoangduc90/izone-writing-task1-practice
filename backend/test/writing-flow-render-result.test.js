@@ -32,6 +32,37 @@ test('chỉ link xem đã đọc lại của đúng trang và đúng version đ�
   }
 });
 
+test('bài giữ nguyên mọi câu được nhận khi có bằng chứng đầy đủ', () => {
+  const kept = { ...result, correctionsCount: 0,
+    noCorrections: true, keptSentenceCount: 4 };
+  assert.doesNotThrow(() => verifyWritingRenderResult(kept));
+  for (const invalid of [
+    { ...kept, noCorrections: false },
+    { ...kept, keptSentenceCount: 0 },
+    { ...kept, keptSentenceCount: 1.5 },
+    { ...kept, readbackOk: false },
+    { ...kept, correctionsCount: 1 },
+  ]) {
+    assert.throws(() => verifyWritingRenderResult(invalid),
+      error => error.code === 'RENDER_READBACK_MISSING');
+  }
+});
+
+test('bài không cần sửa chỉ được giao khi đã đọc lại lời nhắn trong Comment của GV', () => {
+  const rendered = { ...result, correctionsCount: 0,
+    noCorrections: true, keptSentenceCount: 8 };
+  const delivered = { readbackOk: true, homeworkFileId: 'doc-1', essaySlot: 1,
+    sourceLinkIndex: 1, resultUrl: result.resultUrl,
+    noCorrectionCommentReadback: true };
+  const pair = { homework_file_id: 'doc-1', essay_slot: 1, source_link_index: 1 };
+  assert.doesNotThrow(() => verifyWritingDeliveryResult(delivered, rendered, pair));
+  assert.throws(() => verifyWritingDeliveryResult({ ...delivered,
+    noCorrectionCommentReadback: false }, rendered, pair),
+  error => error.code === 'DELIVERY_RESULT_MISMATCH');
+  assert.doesNotThrow(() => verifyWritingDeliveryResult({ ...delivered,
+    noCorrectionCommentReadback: false }, result, pair));
+});
+
 test('Test nhận bản nhận xét và điểm để ghi vào Docs, không tạo link LMS', () => {
   const reportMarkdown = '# Kết quả Writing Task 2\n\nĐiểm Task: **6.5**\n\n## Task Response: 6.5\n\nNhận xét đầy đủ.';
   const prepared = { reportMarkdown, taskScore: 6.5, readbackOk: true };

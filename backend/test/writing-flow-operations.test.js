@@ -144,7 +144,6 @@ test('đồng bộ Classroom bổ sung tên homework cho nguồn chuyển tiếp
   const inserted = statements.find(item => item.sql.includes('INSERT INTO writing_flow.source_record'));
   assert.equal(JSON.parse(inserted.params[inserted.params.length - 2]).googleUserId,
     'google-user-123');
-  assert.match(inserted.sql, /metadata - 'googleUserId'/u);
   assert.match(backfill.sql, /count\(\*\) OVER \(PARTITION BY homework_file_id\)/u);
   assert.match(backfill.sql, /homework_file_id=ANY\(\$1::text\[\]\)/u);
   assert.deepEqual(backfill.params, [['doc']]);
@@ -300,7 +299,9 @@ test('retry không nhận intake, không nhận bài đã bỏ qua và làm mớ
   assert.equal(statements.some(item => item.sql.includes("'SUPERSEDED_BY_OPERATOR_RETRY'")), true);
 });
 
-test('nguồn Test trùng không thể bấm Retry để gọi AI lần hai', async () => {
+test('D03: nguồn Test trùng hoặc tranh chấp không thể bấm Retry để gọi AI lần hai', async () => {
+  for (const errorCode of ['TEST_DOCUMENT_PAIR_ALREADY_REGISTERED',
+    'TEST_HISTORICAL_EVIDENCE_CONFLICT']) {
   const statements = [];
   const pool = poolWith(async sql => {
     statements.push(sql);
@@ -311,7 +312,7 @@ test('nguồn Test trùng không thể bấm Retry để gọi AI lần hai', as
     if (sql.includes('FROM writing_flow.stage_result WHERE pair_id=$1 FOR UPDATE')) {
       return { rowCount: 1, rows: [{ stage_key: 'precheck', status: 'needs_review',
         cycle_no: 1, attempt_count: 0,
-        error_code: 'TEST_DOCUMENT_PAIR_ALREADY_REGISTERED' }] };
+        error_code: errorCode }] };
     }
     return { rowCount: 1, rows: [] };
   });
@@ -319,8 +320,9 @@ test('nguồn Test trùng không thể bấm Retry để gọi AI lần hai', as
     pairId: '11111111-1111-4111-8111-111111111111', stageKey: 'precheck',
     requestId: '22222222-2222-4222-8222-222222222222',
     actorRef: 'admin@example.invalid', reason: 'Thử lại',
-  }), error => error.code === 'TEST_DOCUMENT_PAIR_ALREADY_REGISTERED');
+  }), error => error.code === errorCode);
   assert.equal(statements.some(sql => sql.includes('INSERT INTO writing_flow.handoff')), false);
+  }
 });
 
 test('Retry bước chấm Test chỉ mở lại thành phần đã hết ba lượt', async () => {

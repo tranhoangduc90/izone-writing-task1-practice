@@ -472,7 +472,8 @@ test('bài kiểm thử giả không xuất hiện trong danh sách và số li�
     assert.match(sql, /IS DISTINCT FROM 'codex_fixture'/u);
   }
   assert.equal((calls[1].sql.match(/IS DISTINCT FROM 'codex_fixture'/gu) || []).length, 1);
-  assert.equal((calls[2].sql.match(/IS DISTINCT FROM 'codex_fixture'/gu) || []).length, 3);
+  // Bốn nhánh hỗ trợ: lỗi nguồn, kiểm tra thủ công, cảnh báo nguồn và Test trùng đã giao.
+  assert.equal((calls[2].sql.match(/IS DISTINCT FROM 'codex_fixture'/gu) || []).length, 4);
   assert.equal((calls[3].sql.match(/IS DISTINCT FROM 'codex_fixture'/gu) || []).length, 3);
 });
 

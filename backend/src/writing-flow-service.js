@@ -732,6 +732,31 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
                 teachers.teacher_names,ARRAY[]::text[])))
               AND ($3::text IS NULL OR ($3='test' AND pair.source_type='term_test')
                 OR ($3='homework' AND pair.source_type<>'term_test'))) AS reviews,
+          (SELECT count(*)::integer FROM writing_flow.pair AS delivered
+            LEFT JOIN writing_flow.source_record AS source ON source.source_id=delivered.source_id
+            LEFT JOIN teacher_assignments AS teachers ON teachers.class_code=delivered.class_code
+            LEFT JOIN writing_flow.class_registry AS registry
+              ON registry.class_code=delivered.class_code
+            WHERE delivered.source_type='term_test' AND delivered.status='delivered'
+              AND delivered.skipped_at IS NULL
+              AND ${visibleOperationalSourceSql('delivered')}
+              AND registry.class_status IS DISTINCT FROM 'completed'
+              AND ${visibleRegistrySql('registry')}
+              AND ($1::text IS NULL OR delivered.class_code=$1)
+              AND ($2::text IS NULL OR $2=ANY(coalesce(nullif(source.teacher_names,ARRAY[]::text[]),
+                teachers.teacher_names,ARRAY[]::text[])))
+              AND ($3::text IS NULL OR $3='test')
+              AND EXISTS (SELECT 1 FROM writing_flow.pair AS peer
+                WHERE peer.source_type='term_test' AND peer.status<>'superseded'
+                  AND peer.homework_file_id=delivered.homework_file_id
+                  AND peer.essay_slot=delivered.essay_slot
+                  AND peer.task_type=delivered.task_type
+                  AND peer.submission_revision=delivered.submission_revision
+                  AND peer.pair_id<>delivered.pair_id
+                  AND NOT (peer.source_app_id=delivered.source_app_id
+                    AND peer.source_table_id=delivered.source_table_id
+                    AND peer.source_record_id=delivered.source_record_id
+                    AND peer.source_link_index=delivered.source_link_index))) AS historical_reviews,
           (SELECT count(*)::integer FROM writing_flow.workflow_failure
              WHERE last_seen_at>now()-interval '7 days') AS technical_errors`,
       [classCode, teacherName, sourceKind]);
@@ -976,6 +1001,11 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
                test_pair.historical_evidence,
                test_pair.component_count,test_pair.task_score,test_pair.status AS test_task_status,
                test_final.writing_score,test_final.status AS test_final_status,
+               history.peer_pair_ids AS historical_peer_pair_ids,
+               CASE WHEN current_stage.error_code='TEST_HISTORICAL_EVIDENCE_CONFLICT'
+                 OR history.peer_conflict THEN 'TEST_HISTORICAL_EVIDENCE_CONFLICT'
+                 WHEN history.peer_pair_ids IS NOT NULL
+                   THEN 'TEST_DOCUMENT_PAIR_ALREADY_REGISTERED' END AS historical_review_code,
                EXISTS (SELECT 1 FROM writing_flow.stage_result AS graded
                  WHERE graded.pair_id=p.pair_id AND graded.stage_key IN ('main','render')
                    AND graded.status='succeeded') AS grading_text_available
@@ -993,6 +1023,25 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
             ON test_group.test_group_id=test_pair.test_group_id
           LEFT JOIN writing_flow.test_final AS test_final
             ON test_final.test_group_id=test_group.test_group_id
+          LEFT JOIN LATERAL (
+            SELECT array_agg(peer.pair_id ORDER BY peer.created_at) AS peer_pair_ids,
+              coalesce(bool_or(peer_precheck.error_code='TEST_HISTORICAL_EVIDENCE_CONFLICT'),false)
+                AS peer_conflict
+            FROM writing_flow.pair AS peer
+            LEFT JOIN writing_flow.stage_result AS peer_precheck
+              ON peer_precheck.pair_id=peer.pair_id AND peer_precheck.stage_key='precheck'
+            WHERE p.source_type='term_test' AND peer.source_type='term_test'
+              AND peer.status<>'superseded'
+              AND peer.homework_file_id=p.homework_file_id
+              AND peer.essay_slot=p.essay_slot
+              AND peer.task_type=p.task_type
+              AND peer.submission_revision=p.submission_revision
+              AND peer.pair_id<>p.pair_id
+              AND NOT (peer.source_app_id=p.source_app_id
+                AND peer.source_table_id=p.source_table_id
+                AND peer.source_record_id=p.source_record_id
+                AND peer.source_link_index=p.source_link_index)
+          ) AS history ON p.source_type='term_test'
           LEFT JOIN LATERAL (
             SELECT s.stage_key, s.status AS stage_status, s.attempt_count,s.error_code
              FROM writing_flow.stage_result AS s
@@ -1029,7 +1078,8 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
              OR ($20='homework' AND p.source_type<>'term_test'))
            AND (($6::text='skipped' AND p.skipped_at IS NOT NULL)
              OR ($6::text='review' AND p.skipped_at IS NULL
-               AND coalesce(current_stage.stage_status,'')='needs_review')
+               AND (coalesce(current_stage.stage_status,'')='needs_review'
+                 OR (p.source_type='term_test' AND history.peer_pair_ids IS NOT NULL)))
              OR ($6::text='delivered' AND p.status='delivered' AND p.skipped_at IS NULL)
              OR ($6::text='unfinished' AND p.status<>'delivered' AND p.skipped_at IS NULL)
              OR ($6::text IS NULL AND p.skipped_at IS NULL))
@@ -1129,7 +1179,25 @@ export function createWritingFlowService({ pool, encryptionKey = null }) {
                s.attempt_count, p.class_code, p.source_app_id,
                p.source_table_id, p.source_record_id,
                p.homework_file_id, p.source_link_index, p.essay_slot,
-               p.task_type,
+               p.task_type,p.source_type,
+               CASE WHEN p.source_type='term_test' AND r.error_code IN
+                 ('TEST_DOCUMENT_PAIR_ALREADY_REGISTERED','TEST_HISTORICAL_EVIDENCE_CONFLICT')
+                 THEN r.error_code END AS historical_review_code,
+               CASE WHEN p.source_type='term_test' AND r.error_code IN
+                 ('TEST_DOCUMENT_PAIR_ALREADY_REGISTERED','TEST_HISTORICAL_EVIDENCE_CONFLICT')
+                 THEN (SELECT array_agg(peer.pair_id ORDER BY peer.created_at)
+                   FROM writing_flow.pair AS peer
+                   WHERE peer.source_type='term_test' AND peer.status<>'superseded'
+                     AND peer.homework_file_id=p.homework_file_id
+                     AND peer.essay_slot=p.essay_slot
+                     AND peer.task_type=p.task_type
+                     AND peer.submission_revision=p.submission_revision
+                     AND peer.pair_id<>p.pair_id
+                     AND NOT (peer.source_app_id=p.source_app_id
+                       AND peer.source_table_id=p.source_table_id
+                       AND peer.source_record_id=p.source_record_id
+                       AND peer.source_link_index=p.source_link_index))
+                 END AS historical_peer_pair_ids,
                coalesce(nullif(source.teacher_names,ARRAY[]::text[]),
                  t.teacher_names,ARRAY[]::text[]) AS teacher_names,
                source.student_name,source.classroom_url,source.file_url,source.source_status

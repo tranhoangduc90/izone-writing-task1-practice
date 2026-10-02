@@ -78,6 +78,13 @@ const writingPairIntake=z.object({
    taskType:z.enum(['task_1','task_2']),
    topic:z.string().max(20000), image:z.string().max(20000),
    essay:z.string().max(40000), trCcCheck:z.boolean(), alreadyGraded:z.boolean().default(false),
+   historicalEvidence:z.object({
+     source:z.enum(['google_docs_result_link','restored_legacy_result']),
+     sourceRef:z.string().trim().min(1).max(160),
+     linkMethod:z.enum(['same_doc_task_revision','verified_record_bridge']),
+     score:z.string().regex(/^(?:[0-8](?:\.[05])?|9(?:\.0)?)$/).optional(),
+     reportSha256:z.string().regex(/^[0-9a-f]{64}$/).optional(),
+   }).optional(),
    revision:z.string().regex(/^[0-9a-f]{64}$/).optional(),
    contentSha256:z.string().regex(/^[0-9a-f]{64}$/).optional()
  })).min(1).max(4)
@@ -90,6 +97,19 @@ const writingPairIntake=z.object({
  }
  if(value.sourceType==='manual'&&value.classCode!=='MANUAL'){
    context.addIssue({code:'custom',path:['classCode'],message:'Nguồn thủ công phải dùng lớp MANUAL.'});
+ }
+ for (const [index,pair] of value.pairs.entries()) {
+   const evidence=pair.historicalEvidence;
+   if (!evidence) continue;
+   if (value.sourceType!=='term_test'||!pair.alreadyGraded
+     || (evidence.source==='google_docs_result_link'
+       && (evidence.sourceRef!==value.docId||evidence.linkMethod!=='same_doc_task_revision'))
+     || (evidence.source==='restored_legacy_result'
+       && (evidence.linkMethod!=='verified_record_bridge'
+         || !z.uuid().safeParse(evidence.sourceRef).success))) {
+     context.addIssue({code:'custom',path:['pairs',index,'historicalEvidence'],
+       message:'Bằng chứng lịch sử không khớp nguồn, tài liệu hoặc Task Test.'});
+   }
  }
 });
 const writingSourceIssue=z.object({

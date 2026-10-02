@@ -5,6 +5,7 @@ import { createWritingFlowIntake } from '../src/writing-flow-intake.js';
 function fakePool() {
   const pairs = [];
   const testPairs = [];
+  const evidenceClaims = new Map();
   const writes = [];
   const client = {
     async query(sql, values = []) {
@@ -24,16 +25,40 @@ function fakePool() {
           || b.lark_modified_ms - a.lark_modified_ms);
         return { rowCount: matching.length ? 1 : 0, rows: matching.slice(0, 1) };
       }
+      if (sql.includes('FROM writing_flow.pair AS other')) {
+        const matching = pairs.filter(row => row.homework_file_id === values[0]
+          && ((row.essay_slot === values[1] && row.submission_revision === values[2])
+            || row.content_sha256 === values[3])
+          && (row.source_app_id !== values[4] || row.source_table_id !== values[5]
+            || row.source_record_id !== values[6] || row.source_link_index !== values[7]));
+        return { rowCount: matching.length, rows: matching.map(row => ({
+          essay_slot: row.essay_slot, submission_revision: row.submission_revision,
+          historical_evidence: evidenceClaims.get(row.pair_id),
+        })) };
+      }
       if (sql.includes('SELECT 1 AS duplicate_test_pair')) {
         const matching = pairs.filter(row => row.homework_file_id === values[0]
           && ((row.essay_slot === values[1] && row.submission_revision === values[2])
-            || row.content_sha256 === values[3])          && (row.source_app_id !== values[4] || row.source_table_id !== values[5]
+            || row.content_sha256 === values[3])
+          && (row.source_app_id !== values[4] || row.source_table_id !== values[5]
             || row.source_record_id !== values[6] || row.source_link_index !== values[7]));
         return { rowCount: matching.length, rows: matching.slice(0, 1) };
       }
       if (sql.includes("SET status='needs_review',updated_at=now() WHERE pair_id=$1")) {
         const row = pairs.find(item => item.pair_id === values[0]);
         if (row) row.status = 'needs_review';
+        return { rowCount: row ? 1 : 0, rows: [] };
+      }
+      if (sql.includes('FROM writing_flow.legacy_record AS legacy')) {
+        const linked = values[0] === '55555555-5555-4555-8555-555555555555'
+          && pairs.some(row => row.source_type === 'term_test'
+            && row.homework_file_id === values[1] && row.essay_slot === values[2]
+            && row.submission_revision === values[3]);
+        return { rowCount: linked ? 1 : 0, rows: linked ? [{ '?column?': 1 }] : [] };
+      }
+      if (sql.includes("SET status='delivered',finished_at=now()")) {
+        const row = pairs.find(item => item.pair_id === values[0]);
+        if (row) row.status = 'delivered';
         return { rowCount: row ? 1 : 0, rows: [] };
       }
       if (sql.includes('UPDATE writing_flow.pair SET status')) {
@@ -72,10 +97,12 @@ function fakePool() {
             || !sql.includes('WHERE writing_flow.test_pair.pair_id IS DISTINCT FROM EXCLUDED.pair_id')) {
             Object.assign(current, { pairId: values[1], status: values[3],
               historicalEvidence: values[4] });
+            evidenceClaims.set(values[1], values[5] ? JSON.parse(values[5]) : {});
           }
         } else {
           testPairs.push({ pairId: values[1], taskNumber: values[2], status: values[3],
             historicalEvidence: values[4] });
+          evidenceClaims.set(values[1], values[5] ? JSON.parse(values[5]) : {});
         }
         return { rowCount: 1, rows: [] };
       }
@@ -371,6 +398,84 @@ test('Classroom và file Test thủ công trùng nhau chỉ tạo một bàn gia
     assert.equal(writes.filter(row => row.sql.includes('INSERT INTO writing_flow.handoff')).length,
       1, firstApp);
   }
+});
+
+// Nhận vào: hai hồ sơ giả độc lập cùng Docs/Task/phiên bản; thử điểm giống và khác.
+// Việc chính: phân biệt tranh chấp điểm với một nguồn trùng thông thường.
+// Trả ra mong đợi: giữ dấu đã giao của nguồn đầu, nguồn sau nêu đúng lý do, 0 AI.
+// Khi lỗi: test ĐỎ chỉ rõ hợp đồng tiếp nhận chưa mang điểm/xuất xứ; còn cần test UI riêng.
+test('D03: nguồn điểm lịch sử trái nhau phải báo mã tranh chấp riêng', async () => {
+  for (const { secondScore, reportSha256, expectedCode } of [
+    { secondScore: '7.0', reportSha256: 'a'.repeat(64),
+      expectedCode: 'TEST_DOCUMENT_PAIR_ALREADY_REGISTERED' },
+    { secondScore: '6.0', reportSha256: 'a'.repeat(64),
+      expectedCode: 'TEST_HISTORICAL_EVIDENCE_CONFLICT' },
+    { secondScore: '7.0', reportSha256: 'b'.repeat(64),
+      expectedCode: 'TEST_HISTORICAL_EVIDENCE_CONFLICT' },
+  ]) {
+    const { pool, pairs, writes } = fakePool();
+    const intake = createWritingFlowIntake({ pool, encryptionKey: '11'.repeat(32) });
+    const source = input();
+    source.sourceType = 'term_test';
+    source.appId = 'google_classroom';
+    source.tableId = 'course-demo';
+    source.recordId = 'assignment-demo';
+    source.sourceMeta = { teacherNames: [], displayName: 'Test giả' };
+    delete source.larkMeta;
+    delete source.larkModifiedMs;
+    source.expectedCount = 1;
+    source.pairs = [{ essaySlot: 1, taskType: 'task_2', topic: 'Đề Test giả',
+      image: '', essay: 'Bài Test giả', trCcCheck: true, alreadyGraded: true,
+      historicalEvidence: { source: 'google_docs_result_link', sourceRef: source.docId,
+        linkMethod: 'same_doc_task_revision', score: '7.0',
+        reportSha256: 'a'.repeat(64) } }];
+
+    const first = await intake(source);
+    const other = structuredClone(source);
+    other.appId = 'manual';
+    other.tableId = 'manual';
+    other.recordId = 'manual-record';
+    other.classCode = 'MANUAL';
+    other.pairs[0].historicalEvidence = {
+      source: 'restored_legacy_result', sourceRef: '55555555-5555-4555-8555-555555555555',
+      linkMethod: 'verified_record_bridge', score: secondScore, reportSha256 };
+    const second = await intake(other);
+
+    assert.equal(first.receipts[0].revision, second.receipts[0].revision);
+    assert.equal(writes.filter(row => row.sql.includes('INSERT INTO writing_flow.handoff')).length,
+      0, secondScore);
+    assert.equal(second.receipts[0].status, 'needs_review', secondScore);
+    assert.deepEqual(pairs.map(row => row.status), ['delivered', 'needs_review'], secondScore);
+    assert.equal(second.receipts[0].errorCode, expectedCode, secondScore);
+  }
+});
+
+// Nhận vào: bằng chứng legacy giả có mã bản ghi chưa nối với đúng Docs/Task/phiên bản.
+// Việc chính: chặn trước khi tạo một pair hoặc handoff chấm mới.
+// Trả ra: lỗi cầu nối chưa xác minh; nguồn đã giao đầu tiên vẫn nguyên.
+test('D03: không nhận điểm legacy khi cầu nối tới bài Test chưa được xác minh', async () => {
+  const { pool, pairs, writes } = fakePool();
+  const intake = createWritingFlowIntake({ pool, encryptionKey: '11'.repeat(32) });
+  const source = input();
+  source.sourceType = 'term_test';
+  source.appId = 'google_classroom';
+  source.tableId = 'course-demo';
+  source.recordId = 'assignment-demo';
+  source.expectedCount = 1;
+  source.pairs = [{ essaySlot: 1, taskType: 'task_2', topic: 'Đề Test giả', image: '',
+    essay: 'Bài Test giả', trCcCheck: true, alreadyGraded: true }];
+  delete source.larkMeta;
+  delete source.larkModifiedMs;
+  await intake(source);
+  const other = structuredClone(source);
+  other.appId = 'manual'; other.tableId = 'manual'; other.recordId = 'manual-record';
+  other.classCode = 'MANUAL';
+  other.pairs[0].historicalEvidence = { source: 'restored_legacy_result',
+    sourceRef: '66666666-6666-4666-8666-666666666666',
+    linkMethod: 'verified_record_bridge', score: '6.0' };
+  await assert.rejects(intake(other), error => error.code === 'TEST_HISTORICAL_BRIDGE_UNVERIFIED');
+  assert.deepEqual(pairs.map(row => row.status), ['delivered']);
+  assert.equal(writes.some(row => row.sql.includes('INSERT INTO writing_flow.handoff')), false);
 });
 
 // Nhận vào: cùng file và bài viết đã được ghi qua nguồn Homework cũ.

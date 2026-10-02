@@ -482,6 +482,39 @@ test('tiếp nhận từng cặp bắt buộc token nội bộ và identity củ
   assert.equal(invalid.status, 400);
 });
 
+// Nhận vào: một Task Test giả có điểm cũ và nguồn liên kết rõ ràng.
+// Việc chính: kiểm API giữ nguyên bằng chứng theo đúng Task, không nhận bằng chứng sai Docs.
+// Trả ra: service nhận đủ điểm/xuất xứ; input sai dừng trước khi ghi.
+// Khi lỗi: test chỉ ra biên API đã làm rơi hoặc nhận nhầm chứng cứ.
+test('API intake giữ bằng chứng lịch sử đúng Task và chặn chứng cứ sai Docs', async () => {
+  let received;
+  const app = makeApp(null, { intakePairs: async value => {
+    received = value;
+    return { detectedCount: 1, registeredCount: 1, receipts: [] };
+  } });
+  const body = {
+    sourceType: 'term_test', operationKey: 'd03-fake', appId: 'google_classroom',
+    tableId: 'course-fake', recordId: 'assignment-fake', docId: 'doc-fake',
+    linkIndex: 1, classCode: 'IC2200', sourceModifiedAt: '2026-09-27T00:00:00.000Z',
+    sourceMeta: { teacherNames: [] }, documentKind: 'google_docs',
+    verifiedMime: 'application/vnd.google-apps.document', expectedCount: 1,
+    pairs: [{ essaySlot: 1, taskType: 'task_2', topic: 'Đề giả', image: '',
+      essay: 'Bài giả', trCcCheck: true, alreadyGraded: true,
+      historicalEvidence: { source: 'google_docs_result_link', sourceRef: 'doc-fake',
+        linkMethod: 'same_doc_task_revision', score: '7.0' } }],
+  };
+  const url = '/api/v1/internal/writing-flow/intake';
+  const accepted = await request(app).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`).send(body);
+  assert.equal(accepted.status, 202);
+  assert.equal(received.pairs[0].historicalEvidence.score, '7.0');
+  const invalid = await request(app).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`)
+    .send({ ...body, pairs: [{ ...body.pairs[0], historicalEvidence: {
+      ...body.pairs[0].historicalEvidence, sourceRef: 'different-doc' } }] });
+  assert.equal(invalid.status, 400);
+});
+
 test('giai đoạn chỉ chạy qua API nội bộ và mang đúng cặp, phiên bản, bàn giao', async () => {
   let received;
   const app = makeApp(null, {}, { claim: async input => {

@@ -57,11 +57,19 @@ export function verifyWritingRenderResult(result, sourceType = 'lark_homework') 
   }
   const match = /^https:\/\/ducizone\.ddns\.net\/writing\/shared\/writing-essays\/([a-f0-9]{48})\/view\?v=(\d+)$/u
     .exec(String(result?.resultUrl || ''));
+  // Chỉ công nhận trang không có câu sửa khi workflow đã đối chiếu mọi câu
+  // với bản chấm cuối và trả số câu giữ nguyên. Số 0 đơn lẻ vẫn là lỗi.
+  const zeroCorrectionsVerified = result?.correctionsCount === 0
+    && result.noCorrections === true
+    && Number.isInteger(result.keptSentenceCount)
+    && result.keptSentenceCount > 0;
+  const correctedPage = Number.isInteger(result?.correctionsCount)
+    && result.correctionsCount > 0 && result.noCorrections !== true;
   if (result?.readbackOk !== true || !match
     || result.writerGroupId !== match[1]
     || !Number.isInteger(result.version) || result.version < 1
     || Number(match[2]) !== result.version
-    || !Number.isInteger(result.correctionsCount) || result.correctionsCount < 1) {
+    || !(correctedPage || zeroCorrectionsVerified)) {
     throw new ApiError(409, 'RENDER_READBACK_MISSING',
       'Chưa xác nhận đúng trang kết quả của bài này.');
   }
@@ -85,7 +93,9 @@ export function verifyWritingDeliveryResult(result, rendered, pair, sourceType =
   }
   if (!samePlace || typeof result.resultUrl !== 'string'
     || !result.resultUrl.startsWith('https://')
-    || result.resultUrl !== rendered?.resultUrl) {
+    || result.resultUrl !== rendered?.resultUrl
+    || (rendered?.noCorrections === true
+      && result.noCorrectionCommentReadback !== true)) {
     throw new ApiError(409, 'DELIVERY_RESULT_MISMATCH',
       'Link hoặc vị trí ghi không khớp cặp bài đã chấm.');
   }

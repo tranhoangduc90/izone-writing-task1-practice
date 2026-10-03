@@ -46,6 +46,21 @@ export function classifyWritingSourceType(displayName) {
   return value.includes('test') ? 'term_test' : 'google_classroom';
 }
 
+// Chỉ so dữ liệu gốc Classroom; writingFilter và writingAnchorReview là kết luận
+// của bộ đọc, không phải một lần học viên sửa file. Khi nguồn thật đổi mới đọc lại.
+const SOURCE_CHANGED_SQL = `writing_flow.source_record.source_updated_at
+  IS DISTINCT FROM EXCLUDED.source_updated_at OR
+  jsonb_build_object(
+    'submissionId',writing_flow.source_record.metadata->'submissionId',
+    'courseWorkId',writing_flow.source_record.metadata->'courseWorkId',
+    'submissionState',writing_flow.source_record.metadata->'submissionState',
+    'alternateLink',writing_flow.source_record.metadata->'alternateLink')
+  IS DISTINCT FROM jsonb_build_object(
+    'submissionId',EXCLUDED.metadata->'submissionId',
+    'courseWorkId',EXCLUDED.metadata->'courseWorkId',
+    'submissionState',EXCLUDED.metadata->'submissionState',
+    'alternateLink',EXCLUDED.metadata->'alternateLink')`;
+
 // Dữ liệu nhận vào: pool PostgreSQL, khóa mã hóa và lệnh của quản trị viên đã xác thực.
 // Việc chính: thêm nguồn thủ công, tải chi tiết, bỏ qua/khôi phục và retry đúng giai đoạn.
 // Kết quả: mọi lệnh được ghi bằng request ID; dashboard chỉ nhận dữ liệu của đúng bài.
@@ -194,13 +209,13 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
               classroom_url=EXCLUDED.classroom_url,file_url=EXCLUDED.file_url,
               source_status=EXCLUDED.source_status,source_created_at=EXCLUDED.source_created_at,
               source_updated_at=GREATEST(writing_flow.source_record.source_updated_at,EXCLUDED.source_updated_at),
-              metadata=EXCLUDED.metadata,
-              dispatch_status=CASE WHEN writing_flow.source_record.source_updated_at IS DISTINCT FROM EXCLUDED.source_updated_at
-                OR writing_flow.source_record.metadata - 'googleUserId' IS DISTINCT FROM EXCLUDED.metadata - 'googleUserId'
-                THEN 'pending' ELSE writing_flow.source_record.dispatch_status END,
-              next_dispatch_at=CASE WHEN writing_flow.source_record.source_updated_at IS DISTINCT FROM EXCLUDED.source_updated_at
-                OR writing_flow.source_record.metadata - 'googleUserId' IS DISTINCT FROM EXCLUDED.metadata - 'googleUserId'
-                THEN now() ELSE writing_flow.source_record.next_dispatch_at END,updated_at=now()
+              metadata=CASE WHEN (${SOURCE_CHANGED_SQL}) THEN EXCLUDED.metadata
+                ELSE coalesce(writing_flow.source_record.metadata,'{}'::jsonb)
+                  || EXCLUDED.metadata END,
+              dispatch_status=CASE WHEN (${SOURCE_CHANGED_SQL}) THEN 'pending'
+                ELSE writing_flow.source_record.dispatch_status END,
+              next_dispatch_at=CASE WHEN (${SOURCE_CHANGED_SQL}) THEN now()
+                ELSE writing_flow.source_record.next_dispatch_at END,updated_at=now()
             RETURNING source_id,dispatch_status,source_record_id,homework_file_id,source_link_index`,
           [item.courseId, item.submissionId, item.documentId, item.linkIndex, item.displayName || null,
             item.classCode, item.studentName || null, item.teacherNames || [], item.classroomUrl || null,
@@ -595,17 +610,45 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
           FROM writing_flow.pair WHERE pair_id=$1 FOR UPDATE`, [pairId]);
         if (!pair.rowCount) throw new ApiError(404, 'WRITING_PAIR_NOT_FOUND', 'Không tìm thấy bài này.');
         if (pair.rows[0].skipped_at) throw new ApiError(409, 'PAIR_SKIPPED', 'Hãy khôi phục bài trước khi retry.');
+        if (pair.rows[0].source_type === 'term_test') {
+          // Nhận vào: bản Test đã giao có thể không mang lỗi nhưng nguồn lịch sử khác đang tranh chấp.
+          // Việc chính: đối chiếu đúng Docs/ô/Task/phiên bản và khóa nguồn gốc trước mọi Retry.
+          // Kết quả: API cũ cũng không chấm lại bản đã giao; bài khác và phiên bản mới giữ luồng cũ.
+          const historicalPeer = await client.query(`SELECT peer_stage.error_code
+            FROM writing_flow.pair AS current
+            JOIN writing_flow.pair AS peer ON peer.pair_id<>current.pair_id
+              AND peer.source_type='term_test' AND peer.status<>'superseded'
+              AND peer.homework_file_id=current.homework_file_id
+              AND peer.essay_slot=current.essay_slot AND peer.task_type=current.task_type
+              AND peer.submission_revision=current.submission_revision
+              AND NOT (peer.source_app_id=current.source_app_id
+                AND peer.source_table_id=current.source_table_id
+                AND peer.source_record_id=current.source_record_id
+                AND peer.source_link_index=current.source_link_index)
+            JOIN writing_flow.stage_result AS peer_stage ON peer_stage.pair_id=peer.pair_id
+              AND peer_stage.stage_key='precheck'
+            WHERE current.pair_id=$1 AND current.source_type='term_test'
+              AND peer_stage.error_code='TEST_HISTORICAL_EVIDENCE_CONFLICT'
+            LIMIT 1`, [pairId]);
+          if (historicalPeer.rows.length) {
+            throw new ApiError(409, 'TEST_HISTORICAL_EVIDENCE_CONFLICT',
+              'Hai nguồn kết quả cũ trái nhau. Hãy đối chiếu, không chấm lại hoặc tự chọn điểm.');
+          }
+        }
         const stages = await client.query(`SELECT stage_key,status,cycle_no,attempt_count,input_sha256,
             result_sha256,error_code
           FROM writing_flow.stage_result WHERE pair_id=$1 FOR UPDATE`, [pairId]);
         const target = stages.rows.find(row => row.stage_key === stageKey);
         if (!target) throw new ApiError(409, 'STAGE_NOT_READY', 'Bước này chưa được tạo.');
-        // Nhận vào: yêu cầu Retry một nguồn Test đã xác định là trùng.
-        // Việc chính: giữ chốt chống chấm lại cả khi người vận hành bấm Retry.
+        // Nhận vào: yêu cầu Retry một nguồn Test trùng hoặc có điểm lịch sử trái nhau.
+        // Việc chính: chặn bàn giao AI cả khi UI cũ hoặc API trực tiếp yêu cầu Retry.
         // Kết quả: nguồn vẫn ở Cần kiểm tra; bài sửa thật sẽ vào qua revision mới.
-        if (target.error_code === 'TEST_DOCUMENT_PAIR_ALREADY_REGISTERED') {
-          throw new ApiError(409, 'TEST_DOCUMENT_PAIR_ALREADY_REGISTERED',
-            'Bài Test này trùng với nguồn đã có. Hãy đối chiếu rồi bỏ qua nguồn trùng, hoặc quét bản bài mới sau khi sửa.');
+        if (['TEST_DOCUMENT_PAIR_ALREADY_REGISTERED', 'TEST_HISTORICAL_EVIDENCE_CONFLICT']
+          .includes(target.error_code)) {
+          throw new ApiError(409, target.error_code,
+            target.error_code === 'TEST_HISTORICAL_EVIDENCE_CONFLICT'
+              ? 'Hai nguồn kết quả cũ trái nhau. Hãy đối chiếu, không chấm lại hoặc tự chọn điểm.'
+              : 'Bài Test này trùng với nguồn đã có. Hãy đối chiếu rồi bỏ qua nguồn trùng, hoặc quét bản bài mới sau khi sửa.');
         }
         if (!['succeeded','needs_review'].includes(target.status)) {
           throw new ApiError(409, 'STAGE_STILL_AUTOMATIC', 'Bước này đang chờ hệ thống tự xử lý.');

@@ -29,6 +29,8 @@ function makeApp(role, overrides = {}, stageOverrides = {}, aiOverrides = {}, sc
     dailyStats: async () => [{ day: '2026-09-20', completed_count: 2 }],
     syncClassesFromMapping: async () => ({ active: 1, completed: 1 }),
     recordSourceIssue: async input => ({ issue_key: 'a'.repeat(64), reason_code: input.reasonCode }),
+    confirmSourceWarning: async input => ({ issue_key: 'a'.repeat(64),
+      warning_kind: input.warningKind, status: 'open' }),
     requestRetry: async input => ({ reviewId: input.reviewId, status: 'retry_requested' }),
     skipSourceIssue: async input => ({ issueKey: input.issueKey, status: 'skipped' }),
     restoreSourceIssue: async input => ({ issueKey: input.issueKey, status: 'open' }),
@@ -377,6 +379,29 @@ test('lỗi nguồn có danh sách riêng và route ghi chỉ dùng token nội 
   assert.equal(recorded.status, 202);
 });
 
+test('biên nhận cảnh báo đòi token nội bộ và dữ liệu đọc lại hợp lệ', async () => {
+  const url = '/api/v1/internal/writing-flow/source-warning-receipts';
+  const body = { appId: 'google_classroom', tableId: 'course-1',
+    recordId: 'submission-1', docId: 'document-1', linkIndex: 1,
+    essaySlot: 1, classCode: 'IC2180', reasonCode: 'TITLE_WRITING',
+    warningKind: 'TITLE_WRITING', readbackDocumentId: 'document-1',
+    documentRevision: 'revision-2', targetCount: 1 };
+  assert.equal((await request(makeApp(null)).post(url).send(body)).status, 401);
+  assert.equal((await request(makeApp(null)).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`)
+    .send({ ...body, documentRevision: '' })).status, 400);
+  const recorded = await request(makeApp(null)).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`).send(body);
+  assert.equal(recorded.status, 200);
+  assert.equal(recorded.body.receipt.warning_kind, 'TITLE_WRITING');
+  const filtered = await request(makeApp('admin', {
+    listSourceIssues: async input => [{ warning_group: input.warningGroup }],
+  })).get('/api/v1/admin/writing-flow/source-issues?warningGroup=warned');
+  assert.equal(filtered.body.issues[0].warning_group, 'warned');
+  assert.equal((await request(makeApp('admin')).get(
+    '/api/v1/admin/writing-flow/source-issues?warningGroup=other')).status, 400);
+});
+
 test('quản trị viên có thể yêu cầu đọc lại đúng một lỗi nguồn', async () => {
   const issueKey = 'a'.repeat(64);
   let received;
@@ -454,6 +479,39 @@ test('tiếp nhận từng cặp bắt buộc token nội bộ và identity củ
   const invalid = await request(makeApp(null)).post(url)
     .set('Authorization', `Bearer ${config.internalApiToken}`)
     .send({ ...body, linkIndex: 0 });
+  assert.equal(invalid.status, 400);
+});
+
+// Nhận vào: một Task Test giả có điểm cũ và nguồn liên kết rõ ràng.
+// Việc chính: kiểm API giữ nguyên bằng chứng theo đúng Task, không nhận bằng chứng sai Docs.
+// Trả ra: service nhận đủ điểm/xuất xứ; input sai dừng trước khi ghi.
+// Khi lỗi: test chỉ ra biên API đã làm rơi hoặc nhận nhầm chứng cứ.
+test('API intake giữ bằng chứng lịch sử đúng Task và chặn chứng cứ sai Docs', async () => {
+  let received;
+  const app = makeApp(null, { intakePairs: async value => {
+    received = value;
+    return { detectedCount: 1, registeredCount: 1, receipts: [] };
+  } });
+  const body = {
+    sourceType: 'term_test', operationKey: 'd03-fake', appId: 'google_classroom',
+    tableId: 'course-fake', recordId: 'assignment-fake', docId: 'doc-fake',
+    linkIndex: 1, classCode: 'IC2200', sourceModifiedAt: '2026-09-27T00:00:00.000Z',
+    sourceMeta: { teacherNames: [] }, documentKind: 'google_docs',
+    verifiedMime: 'application/vnd.google-apps.document', expectedCount: 1,
+    pairs: [{ essaySlot: 1, taskType: 'task_2', topic: 'Đề giả', image: '',
+      essay: 'Bài giả', trCcCheck: true, alreadyGraded: true,
+      historicalEvidence: { source: 'google_docs_result_link', sourceRef: 'doc-fake',
+        linkMethod: 'same_doc_task_revision', score: '7.0' } }],
+  };
+  const url = '/api/v1/internal/writing-flow/intake';
+  const accepted = await request(app).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`).send(body);
+  assert.equal(accepted.status, 202);
+  assert.equal(received.pairs[0].historicalEvidence.score, '7.0');
+  const invalid = await request(app).post(url)
+    .set('Authorization', `Bearer ${config.internalApiToken}`)
+    .send({ ...body, pairs: [{ ...body.pairs[0], historicalEvidence: {
+      ...body.pairs[0].historicalEvidence, sourceRef: 'different-doc' } }] });
   assert.equal(invalid.status, 400);
 });
 

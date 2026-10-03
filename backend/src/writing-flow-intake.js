@@ -70,6 +70,18 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
         throw new ApiError(400, 'LARK_CHART_LINK_INVALID', 'Link ảnh biểu đồ không hợp lệ.');
       }
       if (!topic || !essay) throw new ApiError(400, 'INTAKE_PAIR_INCOMPLETE', 'Đề hoặc bài làm trống.');
+      const evidence = pair.historicalEvidence;
+      if (evidence && (sourceType !== 'term_test' || pair.alreadyGraded !== true
+        || !['google_docs_result_link', 'restored_legacy_result'].includes(evidence.source)
+        || !evidence.sourceRef || (evidence.source === 'google_docs_result_link'
+          && (evidence.sourceRef !== input.docId
+            || evidence.linkMethod !== 'same_doc_task_revision'))
+        || (evidence.source === 'restored_legacy_result'
+          && (evidence.linkMethod !== 'verified_record_bridge'
+            || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(evidence.sourceRef))))) {
+        throw new ApiError(400, 'TEST_HISTORICAL_EVIDENCE_INVALID',
+          'Bằng chứng kết quả cũ không khớp bài Test đã đọc.');
+      }
       // Dấu nội dung tách khỏi cờ kiểm: đổi cờ Lark tạo phiên bản xử lý mới
       // dù file bài làm không đổi thời điểm sửa.
       const contentSha256 = sha256(JSON.stringify([pair.taskType, topic, image, essay]));
@@ -236,16 +248,50 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
           continue;
         }
         let duplicateTestPair = false;
+        let historicalConflict = false;
         if (sourceType === 'term_test') {
-          const otherSource = await client.query(`SELECT 1 AS duplicate_test_pair
-            FROM writing_flow.pair
-            WHERE homework_file_id=$1
-              AND ((essay_slot=$2 AND submission_revision=$3)
-                OR content_sha256=$4)              AND NOT (source_app_id=$5 AND source_table_id=$6
-                AND source_record_id=$7 AND source_link_index=$8)
-            LIMIT 1`, [input.docId, pair.essaySlot, pair.revision, pair.contentSha256,
+          if (pair.historicalEvidence?.source === 'restored_legacy_result') {
+            // Chỉ nhận bằng chứng cũ khi legacy_record đã được nối tường minh tới
+            // đúng Docs/Task/phiên bản. Tên học viên hoặc lớp không phải cầu nối.
+            const bridge = await client.query(`SELECT 1 FROM writing_flow.legacy_record AS legacy
+              JOIN writing_flow.pair AS linked ON linked.pair_id=legacy.linked_pair_id
+              WHERE legacy.legacy_id=$1::uuid
+                AND legacy.match_status IN ('matched','promoted')
+                AND linked.source_type='term_test'
+                AND linked.homework_file_id=$2 AND linked.essay_slot=$3
+                AND linked.submission_revision=$4
+                AND (legacy.essay_slot IS NULL OR legacy.essay_slot=$3)
+              LIMIT 1`, [pair.historicalEvidence.sourceRef, input.docId,
+              pair.essaySlot, pair.revision]);
+            if (!bridge.rowCount) {
+              throw new ApiError(409, 'TEST_HISTORICAL_BRIDGE_UNVERIFIED',
+                'Nguồn kết quả cũ chưa nối chắc với đúng bài Test.');
+            }
+          }
+          const otherSource = await client.query(`SELECT other.essay_slot,other.submission_revision,
+              historical.historical_evidence
+            FROM writing_flow.pair AS other
+            LEFT JOIN writing_flow.test_pair AS historical ON historical.pair_id=other.pair_id
+            WHERE other.homework_file_id=$1
+              AND ((other.essay_slot=$2 AND other.submission_revision=$3)
+                OR other.content_sha256=$4)
+              AND NOT (other.source_app_id=$5 AND other.source_table_id=$6
+                AND other.source_record_id=$7 AND other.source_link_index=$8)`,
+          [input.docId, pair.essaySlot, pair.revision, pair.contentSha256,
             input.appId, input.tableId, input.recordId, input.linkIndex]);
           duplicateTestPair = otherSource.rowCount > 0;
+          // Chỉ gọi là tranh chấp điểm khi cả hai nguồn có điểm thật và cùng khóa Task/phiên bản.
+          // Thiếu điểm vẫn cần đối chiếu thủ công; tuyệt đối không suy ra hai bản khớp nhau.
+          const currentScore = pair.historicalEvidence?.score;
+          const currentReport = pair.historicalEvidence?.reportSha256;
+          historicalConflict = otherSource.rows.some(other =>
+            Number(other.essay_slot) === pair.essaySlot
+            && other.submission_revision === pair.revision
+            && ((currentScore !== undefined && other.historical_evidence?.score !== undefined
+              && Number(other.historical_evidence.score) !== Number(currentScore))
+              || (currentReport !== undefined
+                && other.historical_evidence?.reportSha256 !== undefined
+                && other.historical_evidence.reportSha256 !== currentReport)));
         }
         await client.query(`
           UPDATE writing_flow.pair SET status = 'superseded', updated_at = now()
@@ -289,18 +335,20 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
           // Nhận vào: nguồn Classroom thứ hai trỏ cùng bài Test đã tiếp nhận.
           // Việc chính: giữ biên nhận của nguồn này để sổ quét chốt được, đưa bài vào
           // Cần kiểm tra và không tạo bàn giao AI. Lỗi hiện ở nhật ký của đúng cặp.
+          const errorCode = historicalConflict
+            ? 'TEST_HISTORICAL_EVIDENCE_CONFLICT' : 'TEST_DOCUMENT_PAIR_ALREADY_REGISTERED';
           await client.query(`UPDATE writing_flow.pair
             SET status='needs_review',updated_at=now() WHERE pair_id=$1`, [pairId]);
           await client.query(`INSERT INTO writing_flow.stage_result
             (pair_id,stage_key,status,cycle_no,attempt_count,input_sha256,error_code)
             VALUES ($1,'precheck','needs_review',1,0,$2,$3)`,
-          [pairId, pair.resultSha256, 'TEST_DOCUMENT_PAIR_ALREADY_REGISTERED']);
+          [pairId, pair.resultSha256, errorCode]);
           await client.query(`INSERT INTO writing_flow.manual_review
             (pair_id,stage_key,cycle_no,error_code)
             VALUES ($1,'precheck',1,$2)`,
-          [pairId, 'TEST_DOCUMENT_PAIR_ALREADY_REGISTERED']);
+          [pairId, errorCode]);
           receipts.push({ essaySlot: pair.essaySlot, pairId, status: 'needs_review',
-            revision: pair.revision, errorCode: 'TEST_DOCUMENT_PAIR_ALREADY_REGISTERED' });
+            revision: pair.revision, errorCode });
         } else if (pair.alreadyGraded) {
           await client.query(`UPDATE writing_flow.pair
             SET status='delivered',finished_at=now(),updated_at=now()
@@ -331,7 +379,8 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
           await client.query(`INSERT INTO writing_flow.test_pair
             (test_group_id,pair_id,task_number,status,delivered_at,historical_evidence)
             VALUES ($1,$2,$3,$4::text,CASE WHEN $4::text='delivered' THEN now() END,
-              CASE WHEN $5::boolean THEN jsonb_build_object('source','google_docs_result_link') ELSE '{}'::jsonb END)
+              CASE WHEN $5::boolean THEN jsonb_build_object('source','google_docs_result_link')
+                || $6::jsonb ELSE '{}'::jsonb END)
             ON CONFLICT (test_group_id,task_number) DO UPDATE SET pair_id=EXCLUDED.pair_id,
               status=EXCLUDED.status,delivered_at=EXCLUDED.delivered_at,
               historical_evidence=EXCLUDED.historical_evidence,updated_at=now()
@@ -339,7 +388,8 @@ export function createWritingFlowIntake({ pool, encryptionKey }) {
           [testGroupId, receipt.pairId, taskNumber,
             receipt.status === 'needs_review' ? 'needs_review'
               : receipt.historicalEvidence === true ? 'delivered' : 'pending',
-            receipt.historicalEvidence === true]);
+            preparedPair?.alreadyGraded === true,
+            JSON.stringify(preparedPair?.historicalEvidence || {})]);
         }
         const groupState = await client.query(`SELECT count(*)::int AS total,
             count(*) FILTER (WHERE status='delivered')::int AS delivered,

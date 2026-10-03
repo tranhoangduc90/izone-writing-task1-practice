@@ -20,13 +20,15 @@ const schema = z.object({
   WRITING_FLOW_ENCRYPTION_KEY: z.string().regex(/^[a-fA-F0-9]{64}$/).optional(),
   WRITING_FLOW_HANDOFF_NOTIFY_URL: z.string().url().optional(),
   WRITING_FLOW_SOURCE_NOTIFY_URL: z.string().url().optional(),
+  WRITING_FLOW_INTAKE_NOTIFY_URL: z.string().url().optional(),
   WRITING_FLOW_NOTIFY_SECRET: z.string().min(32).optional()
 }).superRefine((value, context) => {
   if (value.TEACHER_SESSION_ABSOLUTE_DAYS < value.TEACHER_SESSION_IDLE_DAYS) {
     context.addIssue({ code: 'custom', path: ['TEACHER_SESSION_ABSOLUTE_DAYS'], message: 'Hạn tuyệt đối phải lớn hơn hoặc bằng hạn nhàn rỗi.' });
   }
   const notifyUrls = [value.WRITING_FLOW_HANDOFF_NOTIFY_URL,
-    value.WRITING_FLOW_SOURCE_NOTIFY_URL].filter(Boolean);
+    value.WRITING_FLOW_SOURCE_NOTIFY_URL,
+    value.WRITING_FLOW_INTAKE_NOTIFY_URL].filter(Boolean);
   if (notifyUrls.length && !value.WRITING_FLOW_NOTIFY_SECRET) {
     context.addIssue({ code: 'custom', path: ['WRITING_FLOW_NOTIFY_SECRET'],
       message: 'Đã bật đường đánh thức Writing nhưng thiếu khóa xác thực.' });
@@ -75,6 +77,7 @@ export function loadConfig(env = process.env) {
     writingFlowEncryptionKey: value.WRITING_FLOW_ENCRYPTION_KEY || null,
     writingFlowHandoffNotifyUrl: value.WRITING_FLOW_HANDOFF_NOTIFY_URL || null,
     writingFlowSourceNotifyUrl: value.WRITING_FLOW_SOURCE_NOTIFY_URL || null,
+    writingFlowIntakeNotifyUrl: value.WRITING_FLOW_INTAKE_NOTIFY_URL || null,
     writingFlowNotifySecret: value.WRITING_FLOW_NOTIFY_SECRET || null
   };
 }

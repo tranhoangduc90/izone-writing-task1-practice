@@ -1,0 +1,77 @@
+-- Dữ liệu nhận vào: manifest đã phát hành đúng checksum và bản ghi Prompt Registry đã đọc lại.
+-- Việc chính: tạo duy nhất một activity Task 1 ở trạng thái draft; chưa mở lớp hay nhận bài.
+-- Kết quả: activity có đúng đề, phiên bản, checksum và prompt pin; không đổi activity cũ.
+-- Khi lỗi: transaction rollback; kiểm lại bản ghi registry và manifest trước khi thử lại.
+-- THAY __PROMPT_REGISTRY_KEY__ và __PROMPT_RECORD_REF__ bằng giá trị đã đọc lại; tuyệt đối không chạy nguyên mẫu.
+
+BEGIN;
+
+DO $seed$
+DECLARE
+  v_registry_key TEXT := '__PROMPT_REGISTRY_KEY__';
+  v_record_ref TEXT := '__PROMPT_RECORD_REF__';
+  v_end_date DATE;
+  v_scope_count INTEGER;
+  v_activity_count INTEGER;
+BEGIN
+  IF v_registry_key = '__PROMPT_REGISTRY_KEY__' OR btrim(v_registry_key) = '' THEN
+    RAISE EXCEPTION 'Chưa ghim Redis key thật của gói prompt';
+  END IF;
+  IF v_record_ref = '__PROMPT_RECORD_REF__' OR btrim(v_record_ref) = '' THEN
+    RAISE EXCEPTION 'Chưa ghim record ref thật của gói prompt';
+  END IF;
+
+  -- Lấy hạn học và hai mã lớp từ các scope Task 1 cùng khóa đang hoạt động.
+  SELECT count(DISTINCT scope.class_name_snapshot), max(scope.end_date)
+  INTO v_scope_count, v_end_date
+  FROM writing_practice.activity_class_scope AS scope
+  JOIN writing_practice.activity AS activity
+    ON activity.id = scope.activity_id
+  WHERE activity.slug = 'writing-task2-public-health-spending'
+    AND activity.status = 'active'
+    AND scope.class_name_snapshot IN ('CS.070626', 'CS.160826')
+    AND scope.status = 'active';
+
+  IF v_scope_count <> 2 OR v_end_date IS NULL OR v_end_date < CURRENT_DATE THEN
+    RAISE EXCEPTION 'Chưa xác minh đủ hai lớp CS và hạn học còn hiệu lực';
+  END IF;
+
+  INSERT INTO writing_practice.activity (
+    public_id, slug, content_version, manifest_checksum, title, task_prompt,
+    prompt_registry_key, prompt_record_ref, prompt_version, grading_pool,
+    status, end_date
+  ) VALUES (
+    'ed8162c1-2d54-4998-96a8-458fa75d26aa',
+    'average-earnings-by-sector-2000-2010',
+    'task1-web-activity-v1',
+    'b8cd5a6723853e17e6882638764a83264ed4aa31c16ab4c1f2a16bcc9c7e7e7e',
+    'Luyện Task 1: Thu nhập theo ngành, 2000–2010',
+    'The chart below shows the average earnings of people in various areas of work in one country in 2000 and 2010. The table shows the average salary for all sectors in the same years. Summarise the information by selecting and reporting the main features, and make comparisons where relevant.',
+    v_registry_key,
+    v_record_ref,
+    '1',
+    'task1',
+    'draft',
+    v_end_date
+  ) ON CONFLICT (slug, content_version) DO NOTHING;
+
+  -- Đọc lại đúng bản được ghim; không ghi đè activity nếu đã tồn tại khác nội dung.
+  SELECT count(*) INTO v_activity_count
+  FROM writing_practice.activity
+  WHERE slug = 'average-earnings-by-sector-2000-2010'
+    AND public_id = 'ed8162c1-2d54-4998-96a8-458fa75d26aa'
+    AND content_version = 'task1-web-activity-v1'
+    AND manifest_checksum = 'b8cd5a6723853e17e6882638764a83264ed4aa31c16ab4c1f2a16bcc9c7e7e7e'
+    AND prompt_registry_key = v_registry_key
+    AND prompt_record_ref = v_record_ref
+    AND prompt_version = '1'
+    AND grading_pool = 'task1'
+    AND status = 'draft';
+
+  IF v_activity_count <> 1 THEN
+    RAISE EXCEPTION 'Activity trùng slug/phiên bản nhưng khác cấu hình chuẩn';
+  END IF;
+END
+$seed$;
+
+COMMIT;

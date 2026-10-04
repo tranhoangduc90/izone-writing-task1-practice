@@ -210,7 +210,11 @@ const writingComplete=z.object({pairId:uuid,revision:z.string().regex(/^[0-9a-f]
  nextStage:writingStage.nullable().default(null)});
 const writingFail=z.object({pairId:uuid,revision:z.string().regex(/^[0-9a-f]{64}$/),
  stageKey:writingStage,attemptId:uuid,errorCode:z.string().trim().min(1).max(100),
- unknown:z.boolean().default(false)});
+ unknown:z.boolean().default(false),failureEvidence:z.object({
+  message:z.string().max(2000).optional(),workflowId:z.string().max(128).optional(),
+  workflowVersion:z.string().max(128).optional(),executionId:z.string().max(80).optional(),
+  httpStatus:z.number().int().min(100).max(599).optional()
+ }).optional()});
 // Bộ chấm cũ dùng mã chữ thường cho từng khía cạnh và chữ hoa cho bốn tiêu chí tổng hợp.
 const writingTestComponentCode=z.string().regex(/^(?:[a-z][a-z0-9_]{1,63}|aggregate_(?:TA|TR|CC|LR|GRA))$/);
 const writingTestComponentBase=z.object({pairId:uuid,

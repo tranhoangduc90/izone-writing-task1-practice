@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import {PGlite} from '@electric-sql/pglite';
 import { createWritingFlowOperations, STAGES } from '../src/writing-flow-operations.js';
 const first='11111111-1111-4111-8111-111111111111',second='22222222-2222-4222-8222-222222222222';
-async function runCase({stage='deliver',peerChanges={},expectBlocked=true}={}) {
+async function runCase({stage='deliver',peerChanges={},expectBlocked=true,missingGrade=null}={}) {
   const db=new PGlite();
   try {
     await db.exec(`CREATE SCHEMA writing_flow;
@@ -30,7 +30,9 @@ async function runCase({stage='deliver',peerChanges={},expectBlocked=true}={}) {
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now())`,[id,status,row.source,row.doc,row.slot,row.task,row.revision,row.app,row.table,row.record,row.link]);
     }
     for(const stageKey of STAGES) await db.query(`INSERT INTO writing_flow.stage_result
-      (pair_id,stage_key,status,cycle_no,attempt_count,input_sha256,error_code) VALUES($1,$2,'succeeded',1,1,$3,NULL)`,[first,stageKey,'a'.repeat(64)]);
+      (pair_id,stage_key,status,cycle_no,attempt_count,input_sha256,result_sha256,error_code) VALUES($1,$2,'succeeded',1,1,$3,$3,NULL)`,[first,stageKey,'a'.repeat(64)]);
+    if(missingGrade)await db.query('UPDATE writing_flow.stage_result SET result_sha256=NULL WHERE pair_id=$1 AND stage_key=$2',[first,missingGrade]);
+    const savedGrades=(await db.query(`SELECT stage_key,status,result_sha256,cycle_no,attempt_count FROM writing_flow.stage_result WHERE pair_id=$1 AND stage_key IN ('main','critic','arbiter') ORDER BY stage_key`,[first])).rows;
     await db.query(`INSERT INTO writing_flow.stage_result(pair_id,stage_key,status,cycle_no,attempt_count,error_code)
       VALUES($1,'precheck','needs_review',1,0,'TEST_HISTORICAL_EVIDENCE_CONFLICT')`,[second]);
     const client={async query(...args){const result=await db.query(...args);return {...result,rowCount:result.rows.length||result.affectedRows||0};},release(){}};
@@ -39,10 +41,16 @@ async function runCase({stage='deliver',peerChanges={},expectBlocked=true}={}) {
     try {result=await ops.requestStageRetry({pairId:first,stageKey:stage,requestId:'33333333-3333-4333-8333-333333333333',actorRef:'fixture@example.invalid',reason:'stale UI fixture'});} catch(e){error=e;}
     const state=(await db.query('SELECT status FROM writing_flow.pair WHERE pair_id=$1',[first])).rows[0].status;
     const count=Number((await db.query('SELECT count(*) AS n FROM writing_flow.handoff')).rows[0].n);
-    if(expectBlocked) {assert.equal(count,0,'Canonical có tranh chấp đã phát handoff');assert.equal(error?.code,'TEST_HISTORICAL_EVIDENCE_CONFLICT');assert.equal(state,'delivered');}
+    if(missingGrade) {assert.equal(count,0);assert.equal(error?.code,'TEST_SAVED_GRADE_NOT_READY');assert.equal(state,'delivered');}
+    else if(expectBlocked) {assert.equal(count,0,'Canonical có tranh chấp đã phát handoff');assert.equal(error?.code,'TEST_HISTORICAL_EVIDENCE_CONFLICT');assert.equal(state,'delivered');}
     else {assert.equal(error,undefined,error?.message);assert.equal(result.status,'retry_requested');assert.equal(count,1);assert.equal(state,'running');}
+    if(['render','deliver'].includes(stage))assert.deepEqual((await db.query(`SELECT stage_key,status,result_sha256,cycle_no,attempt_count FROM writing_flow.stage_result WHERE pair_id=$1 AND stage_key IN ('main','critic','arbiter') ORDER BY stage_key`,[first])).rows,savedGrades,'Phục hồi đã đổi bản chấm AI hoặc mở lượt AI mới');
   } finally {await db.close();}
 }
 for(const stage of ['precheck','deliver']) test('SQL guard canonical chặn '+stage,()=>runCase({stage}));
+for(const stage of ['render','deliver']){
+ test('Phục hồi '+stage+' giữ nguyên bản chấm và không tạo lượt AI',()=>runCase({stage,peerChanges:{doc:'other-doc'},expectBlocked:false}));
+ for(const missingGrade of ['main','critic'])test('Phục hồi '+stage+' chặn bản chấm thiếu '+missingGrade,()=>runCase({stage,peerChanges:{doc:'other-doc'},expectBlocked:false,missingGrade}));
+}
 for(const peerChanges of [{doc:'other-doc'},{slot:2},{task:'task_1'},{revision:'n'.repeat(64)},{source:'google_classroom'},{app:'classroom',table:'course',record:'A'},{status:'superseded'}])
   test('SQL guard không ghép nhầm '+JSON.stringify(peerChanges),()=>runCase({peerChanges,expectBlocked:false}));

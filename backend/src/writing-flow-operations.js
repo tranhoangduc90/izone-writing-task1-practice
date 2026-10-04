@@ -553,7 +553,21 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
         if (test) delete test.historical_evidence;
       }
       const { source_ciphertext: _ciphertext, ...safePair } = pair.rows[0];
-      return { pair: safePair, source, stages: stageRows, test };
+      // Chỉ chi tiết bài đã qua quyền quản trị mới đọc hồ sơ lỗi mã hóa.
+      // Giới hạn 100 lượt gần nhất; ciphertext/bài chấm của lượt thành công không trả ở đây.
+      const failures = await pool.query(`SELECT attempt_id,stage_key,cycle_no,attempt_no,status,
+          error_code,n8n_execution_id,started_at,finished_at,result_ciphertext
+        FROM writing_flow.stage_attempt WHERE pair_id=$1 AND status IN ('failed','unknown','late')
+        ORDER BY started_at DESC LIMIT 100`, [pairId]);
+      const failureHistory = failures.rows.map(row => {
+        let evidence = null;
+        if (row.result_ciphertext) {
+          try { evidence = JSON.parse(open(row.result_ciphertext,key)).failureEvidence || null; } catch { /* Giữ trạng thái lỗi thật nếu chưa đọc được metadata. */ }
+        }
+        const {result_ciphertext:_private,...metadata}=row;
+        return {...metadata,evidence};
+      });
+      return { pair: safePair, source, stages: stageRows, test, failureHistory };
     },
 
     async skipPair({ pairId, requestId, actorRef, reason }) {
@@ -652,6 +666,14 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
         }
         if (!['succeeded','needs_review'].includes(target.status)) {
           throw new ApiError(409, 'STAGE_STILL_AUTOMATIC', 'Bước này đang chờ hệ thống tự xử lý.');
+        }
+        if (pair.rows[0].source_type === 'term_test' && ['render','deliver'].includes(stageKey)) {
+          // Phục hồi báo cáo chỉ dùng bản chấm hoàn tất. Thiếu bản đã lưu thì dừng,
+          // không đẩy về AI hoặc xóa upstream để đoán lại điểm.
+          if (['main','critic'].some(key => !stages.rows.some(row => row.stage_key===key
+            && row.status==='succeeded' && row.result_sha256))) {
+            throw new ApiError(409,'TEST_SAVED_GRADE_NOT_READY','Chưa đủ bản chấm đã lưu để phục hồi báo cáo.');
+          }
         }
         // Với Test, ba lỗi của một khía cạnh mở mục Cần kiểm tra. Sau khi quản trị viên
         // bấm Retry, chỉ khía cạnh đó có ba lượt mới; thành quả khác vẫn được tái dùng.

@@ -25,11 +25,12 @@ const NEXT = { precheck: ['main'], main: ['critic'], critic: ['arbiter', 'render
 // ở đây sẽ khiến một bài chờ sáu giờ mới có lần chấm thứ hai.
 export function stageRetryPolicy(stageKey, errorCode) {
   const googleRateLimited = stageKey === 'deliver' && errorCode === 'GOOGLE_API_RATE_LIMIT';
+  const writerBusy = stageKey === 'deliver' && errorCode === 'TEST_WRITER_BUSY';
   const googleRevisionChanged = stageKey === 'deliver'
     && errorCode === 'GOOGLE_DOC_REVISION_CHANGED';
   return {
-    retryImmediately: !(googleRateLimited || googleRevisionChanged),
-    handoffDelaySeconds: googleRateLimited ? 90 : googleRevisionChanged ? 30 : 0,
+    retryImmediately: !(googleRateLimited || writerBusy || googleRevisionChanged),
+    handoffDelaySeconds: googleRateLimited || writerBusy ? 90 : googleRevisionChanged ? 30 : 0,
   };
 }
 
@@ -85,7 +86,10 @@ export function verifyWritingDeliveryResult(result, rendered, pair, sourceType =
     && Number(result.sourceLinkIndex) === Number(pair.source_link_index);
   if (sourceType === 'term_test') {
     if (!samePlace || result.resultUrl || !rendered?.reportMarkdown
-      || result.writerPayloadHash !== sha256(rendered.reportMarkdown)) {
+      || result.writerPayloadHash !== sha256(rendered.reportMarkdown)
+      || (rendered.verificationRequired === true && (result.verification?.native_format_ok !== true
+        || result.verification?.source_preserved !== true || result.verification?.criteria_count !== 4
+        || result.verification?.detail_count !== rendered.testComponents?.length))) {
       throw new ApiError(409, 'DELIVERY_TEST_READBACK_MISMATCH',
         'Bản nhận xét trong tài liệu không khớp bài Test đã chấm.');
     }
@@ -269,6 +273,23 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
         // giữ ngân sách chung giữa nhiều API instance và mọi bài Homework/Test.
         // AI ở các bước trước vẫn chạy theo concurrency của n8n.
         await client.query(`SELECT pg_advisory_xact_lock(hashtext('writing_flow_docs_delivery_budget'))`);
+        if (pair.source_type === 'term_test') {
+          // Khóa ngân sách ở trên tuần tự hóa việc xem và cấp lease giữa nhiều API.
+          // Bài chưa đến lượt giữ handoff pending, không tạo attempt hoặc tiêu lượt.
+          const writer = await client.query(`SELECT EXISTS (
+            SELECT 1 FROM writing_flow.stage_result AS active
+            JOIN writing_flow.pair AS owner ON owner.pair_id=active.pair_id
+            WHERE active.stage_key='deliver' AND active.status='running'
+              AND active.lease_expires_at>now() AND owner.source_type='term_test'
+              AND owner.status='running' AND active.pair_id<>$1
+          ) AS writer_active`, [pairId]);
+          if (writer.rows[0]?.writer_active === true) {
+            await client.query(`UPDATE writing_flow.handoff SET status='pending',
+              next_send_at=now()+interval '15 seconds' WHERE handoff_id=$1`, [handoffId]);
+            await client.query(`SELECT pg_notify('writing_flow_work_ready','handoff')`);
+            return {status:'deferred',pairId,stageKey,retryAfterSeconds:15,reason:'TEST_WRITER_BUSY'};
+          }
+        }
         const recent = await client.query(`SELECT count(*) AS recent_count
           FROM writing_flow.stage_attempt
           WHERE stage_key='deliver' AND started_at>now()-interval '60 seconds'`);
@@ -480,8 +501,9 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
   }
 
   // Một bước lỗi được gửi lại ngay; đúng lượt thứ ba mới mở mục Cần kiểm tra.
-  async function fail({ pairId, revision, stageKey, attemptId, errorCode, unknown = false }) {
+  async function fail({ pairId, revision, stageKey, attemptId, errorCode, unknown = false, failureEvidence = {} }) {
     if (!STAGES.includes(stageKey)) throw new ApiError(400, 'STAGE_INVALID', 'Bước chấm không hợp lệ.');
+    if (!key) throw new ApiError(503, 'WRITING_FLOW_ENCRYPTION_NOT_READY', 'Chưa cấu hình nơi lưu hồ sơ lỗi.');
     return withTransaction(pool, async client => {
       const pairResult = await client.query(`SELECT submission_revision,status
         FROM writing_flow.pair WHERE pair_id=$1 FOR UPDATE`, [pairId]);
@@ -493,7 +515,7 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
       const stageResult = await client.query(`SELECT status,cycle_no,attempt_count
         FROM writing_flow.stage_result
         WHERE pair_id=$1 AND stage_key=$2 FOR UPDATE`, [pairId, stageKey]);
-      const attemptResult = await client.query(`SELECT cycle_no,attempt_no,status
+      const attemptResult = await client.query(`SELECT cycle_no,attempt_no,status,n8n_execution_id
         FROM writing_flow.stage_attempt
         WHERE attempt_id=$1 AND pair_id=$2 AND stage_key=$3 FOR UPDATE`,
       [attemptId, pairId, stageKey]);
@@ -505,9 +527,23 @@ export function createWritingFlowStage({ pool, encryptionKey }) {
       if (attempt.status !== 'sent') return { status: 'already_recorded', pairId, stageKey };
       const stale = pair.status === 'superseded' || pair.status === 'delivered'
         || stage.status === 'succeeded' || stage.cycle_no !== attempt.cycle_no;
+      // Thông báo lỗi sống cùng attempt, mã hóa như bài chấm; không phụ thuộc log n8n.
+      // Chỉ nhận metadata hẹp, giới hạn độ dài và bỏ credential khỏi thông báo.
+      const message = String(failureEvidence.message || errorCode)
+        .replace(/\b(Bearer|Basic)\s+[^\s,;"']+/giu, '$1 [đã loại khóa]')
+        .replace(/(["']?(?:authorization|cookie|token|password|api[_ -]?key|secret)["']?\s*[=:]\s*)(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^\s,;}]+)/giu, '$1[đã loại khóa]')
+        .slice(0,2000);
+      const evidence = {failureEvidence:{errorCode,stageKey,attemptId,
+        cycleNo:attempt.cycle_no,attemptNo:attempt.attempt_no,message,
+        workflowId:failureEvidence.workflowId ? String(failureEvidence.workflowId).slice(0,128) : null,
+        workflowVersion:failureEvidence.workflowVersion ? String(failureEvidence.workflowVersion).slice(0,128) : null,
+        executionId:String(failureEvidence.executionId || attempt.n8n_execution_id || '').slice(0,80) || null,
+        httpStatus:Number.isInteger(failureEvidence.httpStatus) ? failureEvidence.httpStatus : null,
+        recordedAt:new Date().toISOString()}};
+      const encoded = JSON.stringify(evidence);
       await client.query(`UPDATE writing_flow.stage_attempt
-        SET status=$2,error_code=$3,finished_at=now() WHERE attempt_id=$1`,
-      [attemptId, stale ? 'late' : unknown ? 'unknown' : 'failed', errorCode]);
+        SET status=$2,error_code=$3,finished_at=now(),result_ciphertext=$4,result_sha256=$5 WHERE attempt_id=$1`,
+      [attemptId, stale ? 'late' : unknown ? 'unknown' : 'failed', errorCode,seal(encoded,key),sha256(encoded)]);
       await client.query(`UPDATE writing_flow.ai_call
         SET status='failed',error_code=$2,finished_at=COALESCE(finished_at,now())
         WHERE attempt_id=$1 AND status='sent'`, [attemptId, errorCode]);

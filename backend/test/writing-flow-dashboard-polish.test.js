@@ -91,7 +91,7 @@ test('popup dùng cờ TRCC cứu hộ và ghi rõ nguồn thay vì hiện Khôn
     if (call === 1) return { rowCount: 1, rows: [{ pair_id: 'pair-demo',
       source_ciphertext: ciphertext, trcc_required_override: true,
       trcc_repair_status: 'succeeded' }] };
-    assert.match(sql, /FROM writing_flow\.stage_result/iu);
+    assert.match(sql, /FROM writing_flow\.(?:stage_result|stage_attempt)/iu);
     return { rows: [] };
   } };
   const detail = await createWritingFlowOperations({ pool, encryptionKey: key }).pairDetail({

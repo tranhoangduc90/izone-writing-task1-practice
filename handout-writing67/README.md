@@ -2,7 +2,7 @@
 
 Học viên xác nhận lớp/tên, làm Topic Sentence rồi lần lượt B–A–X của từng ý. API lưu bài và quyết định mở bước; n8n chỉ nhận một lượt chấm đã khóa định danh, gọi AI và gửi nhận xét về đúng phiên. Không import server, queue hoặc cấu hình sản phẩm Writing khác.
 
-**Trạng thái:** candidate local. Có kiểm HTTP/SQL, lưu trên đĩa, callback và workflow contract. Chưa nối frontend mẫu, chưa chạy Docker/PostgreSQL server/n8n/AI thật; không dùng cho lớp ở trạng thái này. [Kế hoạch](PLAN.md) và [cổng chất lượng](quality-gate.json) giữ phạm vi và bằng chứng.
+**Trạng thái:** bản thử riêng đã dựng và kiểm trên VPS, PostgreSQL/n8n/AI thật cùng Pages, chỉ lớp giả. Backend có21ca local, giao diện8ca hồi phục; native7bước/2bộ từ vựng, quyền database, lease hết hạn, restart và metadata consumer cũ đã readback. Chưa mở lớp thật; roster/tải30/canary/owner/quota/retention còn cổng riêng. [Kế hoạch](PLAN.md) và [cổng chất lượng](quality-gate.json) giữ phạm vi và bằng chứng.
 
 ## Chạy kiểm local
 
@@ -14,7 +14,7 @@ Build context là chính thư mục này; image chỉ chứa package lock, src v
 
 Các biến bắt buộc: `HANDOUT67_DATABASE_URL`, `HANDOUT67_ALLOWED_ORIGINS`, `HANDOUT67_SESSION_SECRET`, `HANDOUT67_INTERNAL_SECRET`, `HANDOUT67_ROSTER_URL`, `HANDOUT67_ALLOWED_CLASSES`, `HANDOUT67_PROMPT_FILE`, `HANDOUT67_N8N_WAKE_URL`, `HANDOUT67_N8N_WAKE_SECRET`. Compose còn nhận `HANDOUT67_IMAGE` và `HANDOUT67_PROMPT_SOURCE`. Chỉ dùng tên biến ở tài liệu; giá trị thật giữ trong cấu hình riêng tư.
 
-Rubric JSON đặt ngoài repo/image vì repo nguồn công khai. File có version `lesson5-rubric-v2` và `rubrics` gồm `topic`, `b1`, `b2`, `a`, `x`, `vocab`; cần chuyển đầy đủ rubric Lesson 5 đã duyệt, không dùng chữ placeholder hoặc prompt test. Backend tự gắn đúng ý và lịch sử của bước đang chấm. Nội dung chuyên môn vẫn cần giáo viên kiểm AI thật.
+Rubric JSON đặt ngoài repo/image vì repo nguồn công khai. File có version `lesson5-rubric-v3` và `rubrics` gồm `topic`, `b1`, `b2`, `a`, `x`, `vocab`; cần chuyển đầy đủ rubric Lesson 5 đã duyệt, không dùng chữ placeholder hoặc prompt test. Backend tự gắn đúng ý và lịch sử của bước đang chấm. Đã kiểm AI thật bằng bài giả. Prompt được ghim trong job trước ACK và không đổi khi cấp lại lease; không dùng rubricv2 với runtimev3. Giáo viên vẫn cần kiểm canary học viên thật trước mở lớp.
 
 ## Các cổng trước mở lớp
 

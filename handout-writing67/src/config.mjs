@@ -19,7 +19,10 @@ export function config(env=process.env) {
   const wakeSecret=must('HANDOUT67_N8N_WAKE_SECRET');
   if(wakeUrl.protocol!=='https:' || wakeSecret.length<32 || [secret,internalSecret].includes(wakeSecret))throw new Error('Cần webhook HTTPS và secret đánh thức riêng.');
   const promptFile=must('HANDOUT67_PROMPT_FILE');
-  return {databaseUrl,origins,port,secret,internalSecret,rosterUrl:rosterUrl.href,classes,promptFile,wakeUrl:wakeUrl.href,wakeSecret};
+  const teacherFile=env.HANDOUT67_TEACHER_FILE||null;
+  const teacherSecret=teacherFile?must('HANDOUT67_TEACHER_SECRET'):null;
+  if(teacherFile&&(teacherSecret.length<32||[secret,internalSecret,wakeSecret].includes(teacherSecret)))throw new Error('Cần secret giảng viên riêng.');
+  return {databaseUrl,origins,port,secret,internalSecret,rosterUrl:rosterUrl.href,classes,promptFile,wakeUrl:wakeUrl.href,wakeSecret,teacherFile,teacherSecret};
 }
 
 export function rosterAdapter({rosterUrl,classes}, fetcher=fetch) {

@@ -13,17 +13,19 @@ async function jsonBody(req) {
 
 // Nhận HTTP, kiểm origin/token và dữ liệu trước khi gọi nghiệp vụ; chỉ trả mã lỗi an toàn.
 // ACK Check sau transaction. Không in bài, credential hoặc token khi SQL/AI lỗi.
-export function createApi({service,origins,internalSecret}) {
+export function createApi({service,teacher=null,origins,internalSecret}) {
   const limits=new Map();
   const server=createServer(async(req,res)=>{
     res.setHeader('Content-Type','application/json; charset=utf-8');
     res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');
     try {
       const origin=req.headers.origin;
+      const requestUrl=new URL(req.url,'http://localhost');
+      const teacherPath=requestUrl.pathname.startsWith(prefix+'/teacher/');
       if(origin && !origins.includes(origin))fail('ORIGIN_NOT_ALLOWED',403);
-      if(origin){res.setHeader('Access-Control-Allow-Origin',origin);res.setHeader('Vary','Origin');}
-      if(req.method==='OPTIONS') {res.setHeader('Access-Control-Allow-Methods','GET,POST,PUT,OPTIONS');res.setHeader('Access-Control-Allow-Headers','Content-Type,Authorization');res.writeHead(204);res.end();return;}
-      const path=new URL(req.url,'http://localhost').pathname;
+      if(origin){res.setHeader('Access-Control-Allow-Origin',origin);res.setHeader('Vary','Origin');if(teacherPath)res.setHeader('Access-Control-Allow-Credentials','true');}
+      if(req.method==='OPTIONS') {res.setHeader('Access-Control-Allow-Methods','GET,POST,PUT,DELETE,OPTIONS');res.setHeader('Access-Control-Allow-Headers','Content-Type,Authorization,X-Handout67-CSRF');res.writeHead(204);res.end();return;}
+      const path=requestUrl.pathname;
       const internal=path.startsWith(prefix+'/internal/');
       if(internal && !equal(req.headers.authorization,`Bearer ${internalSecret}`))fail('INTERNAL_UNAUTHORIZED',401);
       if(!internal && path!==prefix+'/health'){
@@ -40,7 +42,32 @@ export function createApi({service,origins,internalSecret}) {
         if(bucket.count>120){res.setHeader('Retry-After','60');fail('RATE_LIMITED',429);}
       }
       let value,status=200;
-      if(path===prefix+'/health'&&req.method==='GET')value={productId:PRODUCT,version:'0.1.0',status:'alive'};
+      if(teacherPath){
+        if(!teacher)fail('NOT_FOUND',404);
+        const cookieName='izone_handout67_teacher';
+        const cookie=value=>`${cookieName}=${value}; Path=${prefix}/teacher; HttpOnly; Secure; SameSite=None; Partitioned; Max-Age=${value?43200:0}`;
+        const csrf=()=>{if(!origin||!origins.includes(origin)||req.headers['x-handout67-csrf']!=='1')fail('CSRF_REJECTED',403);};
+        const raw=String(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith(cookieName+'='))?.slice(cookieName.length+1);
+        if(path===prefix+'/teacher/config'&&req.method==='GET')value={clientId:teacher.clientId()};
+        else if(path===prefix+'/teacher/session'&&req.method==='POST'){
+          csrf();const login=await teacher.login((await jsonBody(req)).credential);
+          res.setHeader('Set-Cookie',cookie(login.token));value={reviewer:login.reviewer};
+        }else if(path===prefix+'/teacher/session'&&req.method==='DELETE'){
+          csrf();res.setHeader('Set-Cookie',cookie(''));value={loggedOut:true};
+        }else{
+          const actor=teacher.authorize(raw);
+          if(path===prefix+'/teacher/session'&&req.method==='GET')value={reviewer:teacher.actor(actor)};
+          else if(path===prefix+'/teacher/classes'&&req.method==='GET')value={classes:await teacher.classes(actor)};
+          else if(path===prefix+'/teacher/students'&&req.method==='GET')value=await teacher.summary(actor,requestUrl.searchParams.get('class'));
+          else{
+            const match=path.match(/^\/api\/handout67\/v1\/teacher\/sessions\/([^/]+)(\/comments)?$/);
+            if(!match||!uuid.test(match[1]))fail('NOT_FOUND',404);
+            if(req.method==='GET'&&!match[2])value={session:await teacher.detail(actor,match[1])};
+            else if(req.method==='POST'&&match[2]){csrf();value={session:await teacher.comment(actor,match[1],await jsonBody(req))};}
+            else fail('NOT_FOUND',404);
+          }
+        }
+      }else if(path===prefix+'/health'&&req.method==='GET')value={productId:PRODUCT,version:'0.1.0',status:'alive'};
       else if(path===prefix+'/roster'&&req.method==='GET')value={classes:await service.roster()};
       else if(path===prefix+'/sessions'&&req.method==='POST'){value=await service.open(await jsonBody(req));status=201;}
       else if(path===prefix+'/internal/jobs/claim'&&req.method==='POST'){await jsonBody(req);value={jobs:await service.claim()};}

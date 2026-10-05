@@ -6,6 +6,7 @@ services:
     env_file: .env
     volumes:
       - ${HANDOUT67_PROMPT_SOURCE:?Cần rubric riêng tư}:/run/handout67/prompts.json:ro
+      - ${HANDOUT67_TEACHER_SOURCE:?Cần quyền giảng viên riêng tư}:/run/handout67/teachers.json:ro
     ports:
       - "127.0.0.1:3187:3187"
     cpus: 0.5

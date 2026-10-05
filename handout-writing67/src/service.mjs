@@ -9,6 +9,7 @@ export function fail(code, status=400) { throw Object.assign(new Error(code), {s
 const string = value => typeof value==='string' && value.trim().length>0 && value.length<=4000;
 const id = value => typeof value==='string' && /^[a-zA-Z0-9_.:-]{1,128}$/.test(value);
 const object = value => value!==null && typeof value==='object' && !Array.isArray(value);
+export const publicTeacherComments = s => (s.teacherComments||[]).map(c=>({ref:c.ref,section:c.section,feedback:c.feedback,authorName:c.authorName,createdAt:c.createdAt,snapshot:c.snapshot}));
 const passed = (s,key) => s.steps[key].status==='passed';
 const ideaPassed = (s,n) => ['b','a','x'].every(k=>passed(s,k+n));
 const available = (s,key) => ORDER.includes(key) && (key==='topic' || passed(s,ORDER[ORDER.indexOf(key)-1])) && (!key.endsWith('2') || s.idea2Open);
@@ -16,7 +17,7 @@ const available = (s,key) => ORDER.includes(key) && (key==='topic' || passed(s,O
 export function createService({store, roster, secret, clock=Date.now, leaseMs=300000, sessionMs=43200000, maxLeases=2, renderJob, promptVersion='lesson5-rubric-v3'}) {
   if (typeof secret!=='string' || secret.length<32 || leaseMs<=180000) fail('CONFIG_INVALID');
   const sign = value => createHmac('sha256',secret).update(value).digest('base64url');
-  const publicSession = s => ({ref:s.ref,activity:s.activity,classRef:s.classRef,studentRef:s.studentRef,responses:s.responses,version:s.version,idea2Open:s.idea2Open,steps:s.steps,vocabulary:s.vocabulary});
+  const publicSession = s => ({ref:s.ref,activity:s.activity,classRef:s.classRef,studentRef:s.studentRef,responses:s.responses,version:s.version,idea2Open:s.idea2Open,steps:s.steps,vocabulary:s.vocabulary,teacherComments:publicTeacherComments(s)});
   const issue = ref => {const content=`${ref}.${clock()+sessionMs}`;return `${content}.${sign(content)}`;};
   const authorize = (ref,token) => {
     if (typeof token!=='string') fail('SESSION_UNAUTHORIZED',401);

@@ -24,3 +24,9 @@ Rubric JSON đặt ngoài repo/image vì repo nguồn công khai. File có versi
 4. Nối Pages với API, kiểm hành trình trên trình duyệt và canary lớp; đọc lại metadata runtime/cấu hình các sản phẩm cũ trước/sau.
 
 Chi tiết trong [runbook](RUNBOOK.md). Không có automatic migration, tự bật workflow, tự xóa lịch sử hoặc tự chuyển bài Docs.
+
+## Production IC2304 · 05/10/2026, cập nhật sau checkpoint thử
+
+Đã mở16học viên IC2304; runtime698c623ea584222aee1029fa8cb34ac8f25ce120, image riêng sha256:0be8599fcc2168eb4bef1f7498e986312433904b21be137a592cecc336d0b886. Trang học viên: https://tranhoangduc90.github.io/izone-ai-team-pages/writing-handouts/lesson5/ ; giảng viên: https://tranhoangduc90.github.io/izone-ai-team-pages/writing-handouts/lesson5/teacher.html . Google thật và cookie reload đã kiểm; ACL3 subject-bound chỉIC2304. Góp ýfixture thấy ởHV, currentAI Topic trả1Comment; canaryhọc viên thật rỗng, không tạo bài giả.
+
+Roster16/ACL3 đăng ký riêng từ nguồn đã duyệt; Đức cập nhật khi lớp đổi người, rà12/10 trước mở thêm lớp. Không tự xóa dữ liệu. Workflow riêng đã chuyển keep.40container cũ vàNginx không đổi. Tải30trên kết nối đã thiết lập đạt; kết nối mới từng10s, chưa cam kếtSLAAI. Bằng chứng riêng tư: E:/Codex-Data/handout67-isolation-20261005/real-class-ic2304-20261005 ; hai cổng cuối pass/verified. Các checkpoint chưa mở lớp ở trên là lịch sử đã được thay bởi checkpoint này.

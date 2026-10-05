@@ -1,7 +1,7 @@
 {
   "schema_version": 3,
-  "product": "Handout Writing 67 — candidate backend riêng",
-  "change_id": "handout67-isolation-20261005",
+  "product": "Handout Writing67 · IC2304 · Học viên và giảng viên",
+  "change_id": "handout67-ic2304-production-20261005",
   "change_kind": "feature",
   "escaped_user_defect": false,
   "risk": "high",
@@ -16,670 +16,833 @@
   ],
   "experience": {
     "planning_mode": "controlled",
-    "mode_reason": "Nhiều học viên, job AI bất đồng bộ, lưu nhận xét và quyền dữ liệu.",
-    "acceptance_mode": "small_complete",
-    "user": "Học viên và người vận hành Handout Writing67",
-    "problem": "Phát hành backend sản phẩm khác có thể ảnh hưởng chéo.",
-    "outcome": "Backend riêng đã triển khai/kiểm bằng học viên giả và AI thật; lớp thật chưa mở.",
+    "mode_reason": "Route gọi API lưu bài và AI thật; đã được Đức duyệt dựng/kiểm bản thử riêng.",
+    "user": "16 học viên IC2304 và giảng viên được duyệt",
+    "problem": "Demo mô phỏng chưa chứng minh backend/n8n thật và hồi phục nháp.",
+    "outcome": "Học viên chọn/xác nhận và làm bài; giảng viên Google xem16 người và góp ý đúng bài/phần.",
     "out_of_scope": [
-      "Không sửa backend/workflow Docs cũ hoặc chuyển bài.",
-      "Không mở lớp thật hoặc ghi DECISIONS."
+      "Không chuyểnDocs, không gửi thông báo, không đổi backend/workflow sản phẩm khác."
     ],
-    "plain_language_summary": "Bài và nhận xét của Handout67 có nơi xử lý riêng; khi cập nhật chỉ cập nhật Handout67."
+    "plain_language_summary": "Một bản thử có máy xử lý riêng, bài giả được lưu và chấm thật."
+  },
+  "release_scope": {
+    "acceptance_mode": "small_complete",
+    "description": "Small complete: IC2304/16, học viên và dashboard Google có ACL riêng; hành trìnhAI/rubric đã ghim, native canaries/own image. Không chuyểnDocs, gửi thông báo hoặc mở lớp khác."
   },
   "change_package": {
-    "proposal": "Thêm backend độc lập, reuse API roster chỉ đọc và Cổng AI có contract.",
-    "behavior_baseline": "Docs/n8n cũ và demo mô phỏng; plan-v1 mở rộng Writing API được thay bằng plan-v2.",
+    "proposal": "Thêm route riêng bên cạnh demo mô phỏng, nối API Handout67 đã ghim.",
+    "behavior_baseline": "lesson5-demo mô phỏng, backend Docs/consumer cũ giữ nguyên.",
     "deltas": [
       {
-        "id": "D-STATE",
+        "id": "LIVE-UI",
         "operation": "ADDED",
-        "behavior": "Lưu bài/khóa Topic-BAX theo ý phía server.",
+        "behavior": "UI dùng trạng thái server và chấm thật; xử lý mất ACK, nháp/hai tab/phản hồi muộn.",
         "module_ids": [
-          "HTTP",
-          "DOMAIN",
-          "STORE"
+          "UI",
+          "CLIENT"
         ],
         "test_ids": [
+          "R-UI-IDENTITY",
+          "R-UI-POLL",
+          "R-UI-TYPING",
+          "R-UI-CHECK",
+          "R-UI-READ-SINGLE",
+          "R-UI-ACK",
+          "R-UI-409",
+          "R-UI-DRAFT",
+          "R-UI-CLASS",
+          "R-UI-CLASS-CLOSED",
+          "T-TEACHER-UI-IDENTITY",
+          "T-TEACHER-UI-LATE",
           "T-HP",
+          "T-BAD",
           "T-CON",
-          "T-HISTORY"
-        ]
-      },
-      {
-        "id": "D-JOB",
-        "operation": "ADDED",
-        "behavior": "Snapshot/lease/identity/replay/vocab riêng.",
-        "module_ids": [
-          "DOMAIN",
-          "STORE",
-          "RUNTIME"
-        ],
-        "test_ids": [
+          "T-SEC",
           "T-PART",
           "T-IDENTITY",
           "T-TIME",
+          "T-ERROR",
+          "T-HISTORY",
           "T-VOCAB",
-          "T-WAKE"
-        ]
-      },
-      {
-        "id": "D-BOUNDARY",
-        "operation": "ADDED",
-        "behavior": "Config/entrypoint/image/DB scope riêng; cổng native còn chờ.",
-        "module_ids": [
-          "RUNTIME"
-        ],
-        "test_ids": [
+          "T-ROLL",
           "T-ISOLATION",
+          "T-CAPACITY",
+          "T-PROMPT-PIN",
+          "T-PROMPT-LEGACY",
+          "T-PROXY",
+          "T-WAKE",
+          "T-WAKE-CON",
+          "T-DURABLE",
+          "T-PROMPT",
           "T-PORT",
-          "P-NATIVE"
+          "T-TEACHER-AUTH",
+          "T-TEACHER-SCOPE",
+          "T-TEACHER-COMMENT",
+          "T-TEACHER-HTTP"
         ]
       }
     ],
     "archive_status": "active"
   },
   "module_map": {
-    "revision": "plan-v2",
+    "revision": "native-test-v1",
     "modules": [
       {
-        "id": "HTTP",
-        "name": "Giao thức HTTP và quyền",
-        "responsibility": "Giao thức HTTP và quyền",
+        "id": "CLIENT",
+        "name": "Gửi yêu cầu cùng định danh",
+        "responsibility": "Gửi yêu cầu cùng định danh",
         "owns_data": [
-          "capability_protocol",
-          "origin_allowlist",
-          "rate_bucket"
+          "in_memory_capability"
         ],
         "public_interfaces": [
-          "/api/handout67/v1"
-        ],
-        "depends_on": [
-          "DOMAIN"
-        ],
-        "boundary_rules": [
-          "Chỉ Handout 67; không import entrypoint hoặc ghi dữ liệu sản phẩm khác."
-        ],
-        "test_ids": [
-          "T-SEC",
-          "T-PROXY",
-          "T-BAD"
-        ]
-      },
-      {
-        "id": "DOMAIN",
-        "name": "Bài, bước và hàng chấm",
-        "responsibility": "Bài, bước và hàng chấm",
-        "owns_data": [
-          "responses",
-          "version",
-          "steps",
-          "history",
-          "jobs",
-          "vocab"
-        ],
-        "public_interfaces": [
-          "open/save/check/claim/complete/readJob"
-        ],
-        "depends_on": [
-          "STORE"
-        ],
-        "boundary_rules": [
-          "Chỉ Handout 67; không import entrypoint hoặc ghi dữ liệu sản phẩm khác."
-        ],
-        "test_ids": [
-          "T-HP",
-          "T-CON",
-          "T-PART",
-          "T-IDENTITY",
-          "T-TIME",
-          "T-HISTORY",
-          "T-VOCAB",
-          "T-CAPACITY"
-        ]
-      },
-      {
-        "id": "STORE",
-        "name": "Transaction và lưu trên đĩa",
-        "responsibility": "Transaction và lưu trên đĩa",
-        "owns_data": [
-          "handout67_SQL_schema",
-          "row_lock",
-          "queue_lock"
-        ],
-        "public_interfaces": [
-          "open/edit/queue/findJob"
+          "HTTPS open/save/check/read"
         ],
         "depends_on": [],
         "boundary_rules": [
-          "Chỉ Handout 67; không import entrypoint hoặc ghi dữ liệu sản phẩm khác."
+          "Backend riêng giữ phiên/bước/history; giao diện không tự gán điểm đạt."
         ],
         "test_ids": [
+          "R-UI-IDENTITY",
+          "R-UI-POLL",
+          "R-UI-TYPING",
+          "R-UI-CHECK",
+          "R-UI-READ-SINGLE",
+          "R-UI-ACK",
+          "R-UI-409",
+          "R-UI-DRAFT",
+          "R-UI-CLASS",
+          "R-UI-CLASS-CLOSED",
+          "T-TEACHER-UI-IDENTITY",
+          "T-TEACHER-UI-LATE",
+          "T-HP",
+          "T-BAD",
           "T-CON",
+          "T-SEC",
+          "T-PART",
+          "T-IDENTITY",
+          "T-TIME",
+          "T-ERROR",
+          "T-HISTORY",
+          "T-VOCAB",
+          "T-ROLL",
+          "T-ISOLATION",
+          "T-CAPACITY",
+          "T-PROMPT-PIN",
+          "T-PROMPT-LEGACY",
+          "T-PROXY",
+          "T-WAKE",
+          "T-WAKE-CON",
           "T-DURABLE",
-          "T-ROLL"
+          "T-PROMPT",
+          "T-PORT",
+          "T-TEACHER-AUTH",
+          "T-TEACHER-SCOPE",
+          "T-TEACHER-COMMENT",
+          "T-TEACHER-HTTP"
         ]
       },
       {
-        "id": "RUNTIME",
-        "name": "Cấu hình và transport riêng",
-        "responsibility": "Cấu hình và transport riêng",
+        "id": "UI",
+        "name": "Bài học và nháp học viên",
+        "responsibility": "Bài học và nháp học viên",
         "owns_data": [
-          "HANDOUT67_configuration",
-          "private_prompt_registry",
-          "wake_signal"
+          "draft_changes"
         ],
         "public_interfaces": [
-          "config/server/promptRenderer/createWake"
+          "render/readLatest/poll"
         ],
         "depends_on": [
-          "HTTP",
-          "DOMAIN",
-          "STORE"
+          "CLIENT"
         ],
         "boundary_rules": [
-          "Chỉ Handout 67; không import entrypoint hoặc ghi dữ liệu sản phẩm khác."
+          "Backend riêng giữ phiên/bước/history; giao diện không tự gán điểm đạt."
         ],
         "test_ids": [
+          "R-UI-IDENTITY",
+          "R-UI-POLL",
+          "R-UI-TYPING",
+          "R-UI-CHECK",
+          "R-UI-READ-SINGLE",
+          "R-UI-ACK",
+          "R-UI-409",
+          "R-UI-DRAFT",
+          "R-UI-CLASS",
+          "R-UI-CLASS-CLOSED",
+          "T-TEACHER-UI-IDENTITY",
+          "T-TEACHER-UI-LATE",
+          "T-HP",
+          "T-BAD",
+          "T-CON",
+          "T-SEC",
+          "T-PART",
+          "T-IDENTITY",
+          "T-TIME",
+          "T-ERROR",
+          "T-HISTORY",
+          "T-VOCAB",
+          "T-ROLL",
           "T-ISOLATION",
+          "T-CAPACITY",
+          "T-PROMPT-PIN",
+          "T-PROMPT-LEGACY",
+          "T-PROXY",
           "T-WAKE",
           "T-WAKE-CON",
+          "T-DURABLE",
           "T-PROMPT",
-          "T-PORT"
+          "T-PORT",
+          "T-TEACHER-AUTH",
+          "T-TEACHER-SCOPE",
+          "T-TEACHER-COMMENT",
+          "T-TEACHER-HTTP"
         ]
       }
     ],
     "integrations": [
       {
-        "id": "DOMAIN-HTTP",
-        "producer": "DOMAIN",
-        "consumer": "HTTP",
-        "contract": "Caller gửi định danh/snapshot đúng contract; callee commit/đọc lại hoặc fail closed.",
+        "id": "CLIENT-UI",
+        "producer": "CLIENT",
+        "consumer": "UI",
+        "contract": "Phiên/version từ backend; header token, retry giữ requestId; UI giữ nháp và guard người học/version.",
         "test_ids": [
+          "R-UI-IDENTITY",
+          "R-UI-POLL",
+          "R-UI-TYPING",
+          "R-UI-CHECK",
+          "R-UI-READ-SINGLE",
+          "R-UI-ACK",
+          "R-UI-409",
+          "R-UI-DRAFT",
+          "R-UI-CLASS",
+          "R-UI-CLASS-CLOSED",
+          "T-TEACHER-UI-IDENTITY",
+          "T-TEACHER-UI-LATE",
           "T-HP",
+          "T-BAD",
           "T-CON",
-          "T-SEC"
-        ]
-      },
-      {
-        "id": "STORE-DOMAIN",
-        "producer": "STORE",
-        "consumer": "DOMAIN",
-        "contract": "Caller gửi định danh/snapshot đúng contract; callee commit/đọc lại hoặc fail closed.",
-        "test_ids": [
-          "T-DURABLE",
-          "T-PART"
-        ]
-      },
-      {
-        "id": "HTTP-RUNTIME",
-        "producer": "HTTP",
-        "consumer": "RUNTIME",
-        "contract": "Caller gửi định danh/snapshot đúng contract; callee commit/đọc lại hoặc fail closed.",
-        "test_ids": [
           "T-SEC",
-          "T-PORT"
-        ]
-      },
-      {
-        "id": "DOMAIN-RUNTIME",
-        "producer": "DOMAIN",
-        "consumer": "RUNTIME",
-        "contract": "Caller gửi định danh/snapshot đúng contract; callee commit/đọc lại hoặc fail closed.",
-        "test_ids": [
-          "T-PROMPT",
-          "T-WAKE"
-        ]
-      },
-      {
-        "id": "STORE-RUNTIME",
-        "producer": "STORE",
-        "consumer": "RUNTIME",
-        "contract": "Caller gửi định danh/snapshot đúng contract; callee commit/đọc lại hoặc fail closed.",
-        "test_ids": [
+          "T-PART",
+          "T-IDENTITY",
+          "T-TIME",
+          "T-ERROR",
+          "T-HISTORY",
+          "T-VOCAB",
+          "T-ROLL",
+          "T-ISOLATION",
+          "T-CAPACITY",
+          "T-PROMPT-PIN",
+          "T-PROMPT-LEGACY",
+          "T-PROXY",
+          "T-WAKE",
+          "T-WAKE-CON",
           "T-DURABLE",
-          "T-ISOLATION"
+          "T-PROMPT",
+          "T-PORT",
+          "T-TEACHER-AUTH",
+          "T-TEACHER-SCOPE",
+          "T-TEACHER-COMMENT",
+          "T-TEACHER-HTTP"
         ]
       }
     ]
   },
   "operational_design": {
-    "plan_revision": "plan-v2",
+    "plan_revision": "native-test-v1",
     "signals": [
       "multi_user",
       "multi_service"
     ],
-    "critical_path": "Pages→API riêng→SQL riêng→n8n riêng→AI→callback/readback→UI",
+    "critical_path": "Pages→API riêng→PostgreSQL riêng→n8n riêng→AI→callback/readback→UI",
     "peak_load": {
       "value": 30,
-      "unit": "students",
-      "basis": "Giả định một lớp tối đa30; chưa đo VPS, P-UI phải đo trước mở lớp."
+      "unit": "concurrent connected synthetic student requests",
+      "basis": "LOAD30.json direct HTTPS, SQL/callbackreadback; không đo30AI đồng thời."
     },
-    "user_wait_target": "ACK lưu mục tiêu3s; wake thêm0–30s rồi queue, AI tối đa180s/job. Không cam kết thời gian hoàn tất khi30người đồng thời.",
+    "user_wait_target": "ACK kết nối đã thiết lập dưới1s trong tải30; từng gặp10s ở kết nối mới. Poll4s, AI180s, cap2; chưa cam kếtSLA AI.",
     "limits_and_cost": [
-      "CPU0,5/RAM256MB/pool5/body32KB/field4000chars/cap120requests phút.",
-      "Một job/claim, tối đa2lease, lease300s, kỹ thuật3retry, session12h.",
-      "Quota/tổngchi phíAI và tải VPS/n8n thật chưa xác minh."
+      "Runtime0,5CPU/256MB, pool5, tối đa2 lease toàn sản phẩm, một job/execution.",
+      "Chỉ10 danh tính giả trong scope; không mở roster thật hoặc nâng quota AI."
     ],
     "failure_and_recovery": [
-      "Callback khớp tuple và hash, replay không ghi trùng; mất ACK đọc lại.",
-      "Lỗi kỹ thuật không đếm Comment; vocab retry riêng; DB lỗi không fallback.",
-      "Roster chỉ đọc/scoped, không bỏ PIN."
+      "Nháp khi mất mạng/409; retry cùng requestId, không mất Comment.",
+      "Hết lease cấp lại prompt/opkey không đổi; kỹ thuật không tạo Comment cần sửa.",
+      "Dừng riêng Handout67 khi lỗi; không restart hệ cũ."
     ],
     "monitoring": [
-      "Health hiện liveness; native session/job readback cần kiểm riêng.",
-      "Owner vận hành và ngưỡng job chờ10phút phải chốt; chưa có cảnh báo/dashboard tự động."
+      "Đức theo dõi execution/job riêng; workflow giữ phục vụIC2304, không tự thêm schedule.",
+      "Roster16/ACL3 snapshot đăng ký riêng; Đức cập nhật khi lớp đổi người, rà12/10 trước mở thêm lớp."
     ],
-    "decision": "Một backend cho sản phẩmHandout67, cùngcácLesson; dùng chung hạ tầng với quota.",
+    "decision": "Đức mởIC2304 và dashboard, giữ backend riêng.",
     "test_ids": [
+      "R-UI-IDENTITY",
+      "R-UI-POLL",
+      "R-UI-TYPING",
+      "R-UI-CHECK",
+      "R-UI-READ-SINGLE",
+      "R-UI-ACK",
+      "R-UI-409",
+      "R-UI-DRAFT",
+      "R-UI-CLASS",
+      "R-UI-CLASS-CLOSED",
+      "T-TEACHER-UI-IDENTITY",
+      "T-TEACHER-UI-LATE",
       "T-HP",
+      "T-BAD",
       "T-CON",
+      "T-SEC",
+      "T-PART",
+      "T-IDENTITY",
       "T-TIME",
+      "T-ERROR",
+      "T-HISTORY",
+      "T-VOCAB",
+      "T-ROLL",
+      "T-ISOLATION",
       "T-CAPACITY",
+      "T-PROMPT-PIN",
+      "T-PROMPT-LEGACY",
+      "T-PROXY",
       "T-WAKE",
+      "T-WAKE-CON",
       "T-DURABLE",
-      "P-NATIVE",
-      "P-AI",
-      "P-UI"
+      "T-PROMPT",
+      "T-PORT",
+      "T-TEACHER-AUTH",
+      "T-TEACHER-SCOPE",
+      "T-TEACHER-COMMENT",
+      "T-TEACHER-HTTP"
     ]
   },
   "requirements": [
     {
-      "id": "REQ-FLOW",
-      "statement": "Mở đúng bước và vocab đúng ý; history đúng bước.",
+      "id": "CANDIDATE-requirements",
+      "statement": "Candidate code guards identity, scope, draft, lease and comment; native Google/class remain next gate.",
       "test_ids": [
+        "R-UI-IDENTITY",
+        "R-UI-POLL",
+        "R-UI-TYPING",
+        "R-UI-CHECK",
+        "R-UI-READ-SINGLE",
+        "R-UI-ACK",
+        "R-UI-409",
+        "R-UI-DRAFT",
+        "R-UI-CLASS",
+        "R-UI-CLASS-CLOSED",
+        "T-TEACHER-UI-IDENTITY",
+        "T-TEACHER-UI-LATE",
         "T-HP",
-        "T-HISTORY",
-        "T-VOCAB"
-      ]
-    },
-    {
-      "id": "REQ-SAVE",
-      "statement": "Không mất bài khi hai tab/khởi động lại.",
-      "test_ids": [
+        "T-BAD",
         "T-CON",
-        "T-DURABLE"
+        "T-SEC",
+        "T-PART",
+        "T-IDENTITY",
+        "T-TIME",
+        "T-ERROR",
+        "T-HISTORY",
+        "T-VOCAB",
+        "T-ROLL",
+        "T-ISOLATION",
+        "T-CAPACITY",
+        "T-PROMPT-PIN",
+        "T-PROMPT-LEGACY",
+        "T-PROXY",
+        "T-WAKE",
+        "T-WAKE-CON",
+        "T-DURABLE",
+        "T-PROMPT",
+        "T-PORT",
+        "T-TEACHER-AUTH",
+        "T-TEACHER-SCOPE",
+        "T-TEACHER-COMMENT",
+        "T-TEACHER-HTTP"
       ]
     },
     {
-      "id": "REQ-ISOLATION",
-      "statement": "Backend/source/config riêng và chứng minh native quyền/quay lui trước mở lớp.",
+      "id": "REQ-TEACHER",
+      "statement": "Google thật, ACL subject và đúng lớp; learner thấy góp ý đúng tác giả.",
       "test_ids": [
-        "T-ISOLATION",
-        "T-PORT",
-        "P-NATIVE"
+        "N-TEACHER-GOOGLE"
+      ]
+    },
+    {
+      "id": "REQ-CLASS",
+      "statement": "ChỉIC2304/16 và fixture riêng; canary thật rỗng.",
+      "test_ids": [
+        "N-CLASS-IC2304"
       ]
     }
   ],
   "invariants": [
     {
-      "id": "INV-IDENTITY",
-      "statement": "Đúng product/session/job/idea/section/hash/version/lease; không nhân nhận xét.",
+      "id": "CANDIDATE-invariants",
+      "statement": "Candidate code guards identity, scope, draft, lease and comment; native Google/class remain next gate.",
       "test_ids": [
-        "T-IDENTITY",
-        "T-PART",
-        "T-TIME"
-      ]
-    },
-    {
-      "id": "INV-OWNER",
-      "statement": "Không ghi đè phiên, vượt scope hoặc dùng backend khác.",
-      "test_ids": [
+        "R-UI-IDENTITY",
+        "R-UI-POLL",
+        "R-UI-TYPING",
+        "R-UI-CHECK",
+        "R-UI-READ-SINGLE",
+        "R-UI-ACK",
+        "R-UI-409",
+        "R-UI-DRAFT",
+        "R-UI-CLASS",
+        "R-UI-CLASS-CLOSED",
+        "T-TEACHER-UI-IDENTITY",
+        "T-TEACHER-UI-LATE",
+        "T-HP",
+        "T-BAD",
         "T-CON",
         "T-SEC",
+        "T-PART",
+        "T-IDENTITY",
+        "T-TIME",
+        "T-ERROR",
+        "T-HISTORY",
+        "T-VOCAB",
+        "T-ROLL",
         "T-ISOLATION",
-        "P-NATIVE"
+        "T-CAPACITY",
+        "T-PROMPT-PIN",
+        "T-PROMPT-LEGACY",
+        "T-PROXY",
+        "T-WAKE",
+        "T-WAKE-CON",
+        "T-DURABLE",
+        "T-PROMPT",
+        "T-PORT",
+        "T-TEACHER-AUTH",
+        "T-TEACHER-SCOPE",
+        "T-TEACHER-COMMENT",
+        "T-TEACHER-HTTP"
       ]
     },
     {
-      "id": "INV-CAPACITY",
-      "statement": "Hai consumer không vượt hai lease; proxy không chia quota session.",
+      "id": "INV-OLD-CONSUMERS",
+      "statement": "Runtime/cấu hình40consumer cũ không đổi.",
       "test_ids": [
-        "T-CAPACITY",
-        "T-PROXY"
+        "N-ISOLATION-CURRENT"
       ]
     }
   ],
   "tests": [
     {
+      "id": "R-UI-IDENTITY",
+      "category": "security_privacy",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "R-UI-POLL",
+      "category": "concurrency_idempotency",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "R-UI-TYPING",
+      "category": "regression",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "R-UI-CHECK",
+      "category": "regression",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "R-UI-READ-SINGLE",
+      "category": "regression",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "R-UI-ACK",
+      "category": "external_partial",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "R-UI-409",
+      "category": "invalid_input",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "R-UI-DRAFT",
+      "category": "rollback_recovery",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "R-UI-CLASS",
+      "category": "security_privacy",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "R-UI-CLASS-CLOSED",
+      "category": "security_privacy",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-TEACHER-UI-IDENTITY",
+      "category": "security_privacy",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-TEACHER-UI-LATE",
+      "category": "concurrency_idempotency",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
       "id": "T-HP",
       "category": "happy_path",
-      "priority": "P0",
+      "priority": "P1",
       "status": "passed",
-      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
     },
     {
       "id": "T-BAD",
       "category": "invalid_input",
       "priority": "P1",
       "status": "passed",
-      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
     },
     {
       "id": "T-CON",
       "category": "concurrency_idempotency",
-      "priority": "P0",
+      "priority": "P1",
       "status": "passed",
-      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
     },
     {
       "id": "T-SEC",
       "category": "security_privacy",
       "priority": "P1",
       "status": "passed",
-      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
     },
     {
       "id": "T-PART",
       "category": "external_partial",
-      "priority": "P0",
+      "priority": "P1",
       "status": "passed",
-      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
     },
     {
       "id": "T-IDENTITY",
       "category": "security_privacy",
-      "priority": "P0",
+      "priority": "P1",
       "status": "passed",
-      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
     },
     {
       "id": "T-TIME",
       "category": "lifecycle_time",
       "priority": "P1",
       "status": "passed",
-      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
     },
     {
       "id": "T-ERROR",
       "category": "external_partial",
       "priority": "P1",
       "status": "passed",
-      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
     },
     {
       "id": "T-HISTORY",
       "category": "happy_path",
       "priority": "P1",
       "status": "passed",
-      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
     },
     {
       "id": "T-VOCAB",
       "category": "invalid_input",
       "priority": "P1",
       "status": "passed",
-      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
     },
     {
       "id": "T-ROLL",
       "category": "rollback_recovery",
       "priority": "P1",
       "status": "passed",
-      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
     },
     {
       "id": "T-ISOLATION",
       "category": "security_privacy",
       "priority": "P1",
       "status": "passed",
-      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
     },
     {
       "id": "T-CAPACITY",
       "category": "concurrency_idempotency",
       "priority": "P1",
       "status": "passed",
-      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
-    },
-    {
-      "id": "T-PROXY",
-      "category": "regression",
-      "priority": "P1",
-      "status": "passed",
-      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
-    },
-    {
-      "id": "T-WAKE",
-      "category": "external_partial",
-      "priority": "P1",
-      "status": "passed",
-      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
-    },
-    {
-      "id": "T-WAKE-CON",
-      "category": "concurrency_idempotency",
-      "priority": "P1",
-      "status": "passed",
-      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
-    },
-    {
-      "id": "T-DURABLE",
-      "category": "rollback_recovery",
-      "priority": "P1",
-      "status": "passed",
-      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
-    },
-    {
-      "id": "T-PROMPT",
-      "category": "security_privacy",
-      "priority": "P1",
-      "status": "passed",
-      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
-    },
-    {
-      "id": "T-PORT",
-      "category": "regression",
-      "priority": "P1",
-      "status": "passed",
-      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
-    },
-    {
-      "id": "P-NATIVE",
-      "category": "security_privacy",
-      "priority": "P0",
-      "status": "passed",
-      "evidence": "native DB_PROOF/DB_WRITE_PROOF/NATIVE_RESTART/ISOLATION_AFTER/NATIVE_ROUTE_PROOF; first-deployment stop/restart boundary, no v2 rollback claim."
-    },
-    {
-      "id": "P-AI",
-      "category": "external_partial",
-      "priority": "P0",
-      "status": "passed",
-      "evidence": "N8N_AI_PROOF actual7grades/2vocab/11jobs; own fake HTTPS roster, rubricv3/frozenjobs, NATIVE_TRANSPORT/LEASE. Actual learner roster remains P-UI opening gate."
-    },
-    {
-      "id": "P-UI",
-      "category": "happy_path",
-      "priority": "P0",
-      "status": "not_run",
-      "evidence": "Native fake browser/route tested; complete planned scope (real roster, load30, student canary) has not run. Keep opening gate blocked."
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
     },
     {
       "id": "T-PROMPT-PIN",
       "category": "regression",
       "priority": "P1",
       "status": "passed",
-      "evidence": "Same prompt-pin.test.mjs RED against base b6f6888, GREEN in native/BACKEND-PIN-HEAD.log current21."
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
     },
     {
       "id": "T-PROMPT-LEGACY",
       "category": "regression",
       "priority": "P1",
       "status": "passed",
-      "evidence": "Same prompt-pin.test.mjs RED against base b6f6888, GREEN in native/BACKEND-PIN-HEAD.log current21."
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-PROXY",
+      "category": "regression",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-WAKE",
+      "category": "external_partial",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-WAKE-CON",
+      "category": "concurrency_idempotency",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-DURABLE",
+      "category": "rollback_recovery",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-PROMPT",
+      "category": "security_privacy",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-PORT",
+      "category": "regression",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-TEACHER-AUTH",
+      "category": "security_privacy",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-TEACHER-SCOPE",
+      "category": "security_privacy",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-TEACHER-COMMENT",
+      "category": "concurrency_idempotency",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-TEACHER-HTTP",
+      "category": "security_privacy",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "N-TEACHER-GOOGLE",
+      "category": "security_privacy",
+      "priority": "P0",
+      "status": "passed",
+      "evidence": "BROWSER_CORE.json: Google thật, cookie reload, đúngIC2304/16 và góp ý giả đúng tác giả; teacher-note-student.png visible."
+    },
+    {
+      "id": "N-CLASS-IC2304",
+      "category": "happy_path",
+      "priority": "P0",
+      "status": "passed",
+      "evidence": "CLASS_OPEN.json:16UUID đúng đăng ký; phiên thật rỗng; GV đọc cùng phiên không thêm bài giả."
+    },
+    {
+      "id": "N-ISOLATION-CURRENT",
+      "category": "rollback_recovery",
+      "priority": "P0",
+      "status": "passed",
+      "evidence": "ISOLATION_FINAL.json:40container cũ+Nginx không đổi; CANDIDATE backup/image riêng."
+    },
+    {
+      "id": "N-LOAD30",
+      "category": "concurrency_idempotency",
+      "priority": "P0",
+      "status": "passed",
+      "evidence": "LOAD30.json:30concurrent đã kết nối, ACK max.804/.705/.290, cap2/readback30; cold connection failure giữ riêng, không cam kết3s mọi mạng."
+    },
+    {
+      "id": "N-AI-CURRENT",
+      "category": "happy_path",
+      "priority": "P0",
+      "status": "passed",
+      "evidence": "AI_CURRENT.json: runtime698c623 chấm Topic giả/callback một Comment; rubric/workflow giữ nguyên."
     }
   ],
   "task_graph": {
-    "plan_revision": "plan-v2",
+    "plan_revision": "native-test-v1",
     "tasks": [
       {
-        "id": "S1",
-        "result": "API/kho riêng",
+        "id": "N1",
+        "result": "Bản thử riêng có readback thật và route review được.",
         "module_ids": [
-          "HTTP",
-          "STORE"
+          "CLIENT",
+          "UI"
         ],
         "depends_on": [],
         "consumes": [
-          "Yêu cầu tách backend đã được Đức giao; plan-v2"
+          "Đức đã duyệt dựng/kiểm bản thử riêng; source/rubric đã rà."
         ],
         "produces": [
-          "Source/contract/receipt riêng"
+          "Route thử",
+          "native/AI/browser receipts",
+          "README",
+          "quality-gate.json"
         ],
-        "contract": "Không thay hệ cũ, không giả fixture thành production.",
+        "contract": "Candidate fake only; real class gate remains pending.",
         "test_ids": [
-          "T-SEC",
-          "T-CON",
-          "T-DURABLE"
-        ],
-        "evidence_required": [
-          "Native tests và readback đúng đích; phần chưa chạy giữ not_ready."
-        ],
-        "decision_inputs": [
-          "Quota/scope/lifecycle; deployment cần quyền riêng."
-        ],
-        "affected_future_tasks": [
-          "S4"
-        ],
-        "status": "done",
-        "plan_revision": "plan-v2"
-      },
-      {
-        "id": "S2",
-        "result": "Bảy bước và callback/vocab",
-        "module_ids": [
-          "DOMAIN"
-        ],
-        "depends_on": [
-          "S1"
-        ],
-        "consumes": [
-          "Yêu cầu tách backend đã được Đức giao; plan-v2"
-        ],
-        "produces": [
-          "Source/contract/receipt riêng"
-        ],
-        "contract": "Không thay hệ cũ, không giả fixture thành production.",
-        "test_ids": [
+          "R-UI-IDENTITY",
+          "R-UI-POLL",
+          "R-UI-TYPING",
+          "R-UI-CHECK",
+          "R-UI-READ-SINGLE",
+          "R-UI-ACK",
+          "R-UI-409",
+          "R-UI-DRAFT",
+          "R-UI-CLASS",
+          "R-UI-CLASS-CLOSED",
+          "T-TEACHER-UI-IDENTITY",
+          "T-TEACHER-UI-LATE",
           "T-HP",
+          "T-BAD",
+          "T-CON",
+          "T-SEC",
           "T-PART",
+          "T-IDENTITY",
           "T-TIME",
-          "T-VOCAB"
-        ],
-        "evidence_required": [
-          "Native tests và readback đúng đích; phần chưa chạy giữ not_ready."
-        ],
-        "decision_inputs": [
-          "Quota/scope/lifecycle; deployment cần quyền riêng."
-        ],
-        "affected_future_tasks": [
-          "S4"
-        ],
-        "status": "done",
-        "plan_revision": "plan-v2"
-      },
-      {
-        "id": "S3",
-        "result": "Gói đóng riêng và hướng dẫn hệ thống",
-        "module_ids": [
-          "RUNTIME"
-        ],
-        "depends_on": [
-          "S2"
-        ],
-        "consumes": [
-          "Yêu cầu tách backend đã được Đức giao; plan-v2"
-        ],
-        "produces": [
-          "Source/contract/receipt riêng"
-        ],
-        "contract": "Không thay hệ cũ, không giả fixture thành production.",
-        "test_ids": [
+          "T-ERROR",
+          "T-HISTORY",
+          "T-VOCAB",
+          "T-ROLL",
           "T-ISOLATION",
+          "T-CAPACITY",
+          "T-PROMPT-PIN",
+          "T-PROMPT-LEGACY",
+          "T-PROXY",
+          "T-WAKE",
+          "T-WAKE-CON",
+          "T-DURABLE",
+          "T-PROMPT",
           "T-PORT",
-          "T-WAKE"
+          "T-TEACHER-AUTH",
+          "T-TEACHER-SCOPE",
+          "T-TEACHER-COMMENT",
+          "T-TEACHER-HTTP"
         ],
         "evidence_required": [
-          "Native tests và readback đúng đích; phần chưa chạy giữ not_ready."
+          "8native UI tests, AI/SQL/lease/restart/readback, browser, metadata consumer"
         ],
         "decision_inputs": [
-          "Quota/scope/lifecycle; deployment cần quyền riêng."
-        ],
-        "affected_future_tasks": [
-          "S4"
-        ],
-        "status": "done",
-        "plan_revision": "plan-v2"
-      },
-      {
-        "id": "S4",
-        "result": "Native rollout và UI tích hợp",
-        "module_ids": [
-          "HTTP",
-          "DOMAIN",
-          "STORE",
-          "RUNTIME"
-        ],
-        "depends_on": [
-          "S3"
-        ],
-        "consumes": [
-          "Yêu cầu tách backend đã được Đức giao; plan-v2"
-        ],
-        "produces": [
-          "Source/contract/receipt riêng"
-        ],
-        "contract": "Không thay hệ cũ, không giả fixture thành production.",
-        "test_ids": [
-          "P-NATIVE",
-          "P-AI",
-          "P-UI"
-        ],
-        "evidence_required": [
-          "Native tests và readback đúng đích; phần chưa chạy giữ not_ready."
-        ],
-        "decision_inputs": [
-          "Quota/scope/lifecycle; deployment cần quyền riêng."
+          "Scope bản thử đã duyệt; 30 người/canary thuộc gói mở lớp thật."
         ],
         "affected_future_tasks": [],
-        "status": "in_progress",
-        "plan_revision": "plan-v2"
+        "status": "done",
+        "plan_revision": "native-test-v1"
       }
     ]
   },
   "risk_register": {
-    "assessment": "CONCERNS",
+    "assessment": "PASS",
     "risks": [
       {
-        "id": "R-NATIVE",
-        "description": "Bản thử native đã readback; phạm vi mở lớp thật (roster/tải30/canary/owner) còn chưa đạt.",
+        "id": "R-ASYNC",
+        "description": "Phản hồi muộn/mất ACK hoặc nháp hai tab làm trộn bài.",
         "probability": 2,
         "impact": 3,
         "score": 6,
         "severity": "P1",
-        "status": "open",
-        "owner": "Đức và người triển khai trong gói có quyền riêng",
-        "mitigation": "Giữ candidate chưa mở lớp; thực hiện RUNBOOK và manual gates.",
+        "status": "mitigated",
+        "owner": "Codex",
+        "mitigation": "Epoch/ref/version guards, chỉ restore dirty changes, retry cùng requestId, backend CAS.",
         "test_ids": [
-          "P-NATIVE",
-          "P-AI",
-          "P-UI"
-        ]
-      },
-      {
-        "id": "R-HISTORY",
-        "description": "History/receipt/failed snapshot tích lũy khi nhiều lớp.",
-        "probability": 1,
-        "impact": 3,
-        "score": 3,
-        "severity": "P2",
-        "status": "open",
-        "owner": "Người vận hành Handout67 cần chốt lúc rollout",
-        "mitigation": "Queue chỉ khóa session có việc; jobcompleted bỏsnapshot. Chốt retention/archival trước nhiều lớp, không tự xóa lịch sử.",
-        "test_ids": [
+          "R-UI-IDENTITY",
+          "R-UI-POLL",
+          "R-UI-TYPING",
+          "R-UI-CHECK",
+          "R-UI-READ-SINGLE",
+          "R-UI-ACK",
+          "R-UI-409",
+          "R-UI-DRAFT",
+          "R-UI-CLASS",
+          "R-UI-CLASS-CLOSED",
+          "T-TEACHER-UI-IDENTITY",
+          "T-TEACHER-UI-LATE",
+          "T-HP",
+          "T-BAD",
+          "T-CON",
+          "T-SEC",
+          "T-PART",
+          "T-IDENTITY",
+          "T-TIME",
+          "T-ERROR",
+          "T-HISTORY",
+          "T-VOCAB",
+          "T-ROLL",
+          "T-ISOLATION",
           "T-CAPACITY",
-          "T-HISTORY"
+          "T-PROMPT-PIN",
+          "T-PROMPT-LEGACY",
+          "T-PROXY",
+          "T-WAKE",
+          "T-WAKE-CON",
+          "T-DURABLE",
+          "T-PROMPT",
+          "T-PORT",
+          "T-TEACHER-AUTH",
+          "T-TEACHER-SCOPE",
+          "T-TEACHER-COMMENT",
+          "T-TEACHER-HTTP"
         ]
       }
     ],
@@ -699,47 +862,66 @@
         "value": 260
       },
       "status": "passed",
-      "evidence": "Config/service/transport candidate; chưa là thời gian nativeVPS."
-    },
-    {
-      "id": "PORT",
-      "left": {
-        "name": "server_port",
-        "value": 3187
-      },
-      "operator": "==",
-      "right": {
-        "name": "compose_health_port",
-        "value": 3187
-      },
-      "status": "passed",
-      "evidence": "T-PORT; source fixed3187."
+      "evidence": "Runtime/config + actual NATIVE_LEASE, không thay cho SLA tải30."
     }
   ],
   "mutations": [
     {
-      "id": "LOCAL-FIXTURE",
+      "id": "OWN-IMAGE-ROSTER-ACL",
       "outcome": "success",
       "readback": "verified",
-      "evidence": "T-HP/CON/PART/DURABLE đọc lại HTTP+SQL của học viên giả; BACKEND-FINAL.log."
+      "evidence": "CANDIDATE/CLASS_OPEN/ISOLATION_FINAL; riêngHandout67, không đổi sản phẩm khác."
     },
     {
-      "id": "OWN-NATIVE-TEST",
+      "id": "TEACHER-FIXTURE-COMMENT",
       "outcome": "success",
       "readback": "verified",
-      "evidence": "Actual fake API sessions/history/vocab, DB grant/restart, own n8n complete/readback, native routing; no old-system writes."
+      "evidence": "Google thật, đúng1góp ýfixture6, learnerAPI sanitized +browser thấyComment; không ghi bài thật."
+    },
+    {
+      "id": "PAGES-PUBLICATION",
+      "outcome": "success",
+      "readback": "verified",
+      "evidence": "ASSET_READBACK8 Gitblobs matched và Google/HVbrowser."
     }
   ],
   "verification_runs": [
     {
-      "id": "BACKEND-PIN-HEAD",
+      "id": "UI-FINAL",
       "scope": "full_suite",
-      "command": "node --test (four test/*.test.mjs files, native Node/PGlite runner)",
-      "tree_revision": "a5a1e578f21e69a2c0ae89e5174cb9081f95351e",
-      "captured_at": "2026-10-05T10:06:34.390419+00:00",
+      "command": "node --test E:\\Codex-Projects\\ielts-worktrees\\lesson5-web-demo-20261005\\pages\\writing-handouts\\lesson5-thu\\ui-races.test.mjs E:\\Codex-Projects\\ielts-worktrees\\lesson5-web-demo-20261005\\pages\\writing-handouts\\lesson5\\teacher.test.mjs",
+      "tree_revision": "4eead0cee14074d59bb444f9acc7e20245b431f1fb9a3117c530afaa58f52d53",
+      "captured_at": "2026-10-05T12:25:27.216756+00:00",
       "exit_code": 0,
       "outcome": "passed",
-      "passed": 21,
+      "passed": 12,
+      "failed": 0,
+      "skipped": 0,
+      "test_ids": [
+        "R-UI-IDENTITY",
+        "R-UI-POLL",
+        "R-UI-TYPING",
+        "R-UI-CHECK",
+        "R-UI-READ-SINGLE",
+        "R-UI-ACK",
+        "R-UI-409",
+        "R-UI-DRAFT",
+        "R-UI-CLASS",
+        "R-UI-CLASS-CLOSED",
+        "T-TEACHER-UI-IDENTITY",
+        "T-TEACHER-UI-LATE"
+      ],
+      "evidence": "UI_RECEIPT.json, same executable source hashes; BACKEND runtime revision698c623."
+    },
+    {
+      "id": "BACKEND-FINAL",
+      "scope": "full_suite",
+      "command": "node --test E:\\Codex-Projects\\ielts-worktrees\\handout67-isolation-20261005\\writing-practice\\handout-writing67\\test\\api.test.mjs E:\\Codex-Projects\\ielts-worktrees\\handout67-isolation-20261005\\writing-practice\\handout-writing67\\test\\prompt-pin.test.mjs E:\\Codex-Projects\\ielts-worktrees\\handout67-isolation-20261005\\writing-practice\\handout-writing67\\test\\proxy.test.mjs E:\\Codex-Projects\\ielts-worktrees\\handout67-isolation-20261005\\writing-practice\\handout-writing67\\test\\runtime.test.mjs E:\\Codex-Projects\\ielts-worktrees\\handout67-isolation-20261005\\writing-practice\\handout-writing67\\test\\teacher.test.mjs",
+      "tree_revision": "4eead0cee14074d59bb444f9acc7e20245b431f1fb9a3117c530afaa58f52d53",
+      "captured_at": "2026-10-05T12:15:12.148427+00:00",
+      "exit_code": 0,
+      "outcome": "passed",
+      "passed": 25,
       "failed": 0,
       "skipped": 0,
       "test_ids": [
@@ -756,161 +938,129 @@
         "T-ROLL",
         "T-ISOLATION",
         "T-CAPACITY",
+        "T-PROMPT-PIN",
+        "T-PROMPT-LEGACY",
         "T-PROXY",
         "T-WAKE",
         "T-WAKE-CON",
         "T-DURABLE",
         "T-PROMPT",
         "T-PORT",
-        "T-PROMPT-PIN",
-        "T-PROMPT-LEGACY"
+        "T-TEACHER-AUTH",
+        "T-TEACHER-SCOPE",
+        "T-TEACHER-COMMENT",
+        "T-TEACHER-HTTP"
       ],
-      "evidence": "E:\\Codex-Data\\handout67-isolation-20261005\\native\\BACKEND-PIN-HEAD.log"
+      "evidence": "BACKEND_RECEIPT.json, same executable source hashes; BACKEND runtime revision698c623."
+    },
+    {
+      "id": "NATIVE-FINAL",
+      "scope": "behavioral",
+      "command": "Native API/Google browser/readback + established connection load30",
+      "tree_revision": "4eead0cee14074d59bb444f9acc7e20245b431f1fb9a3117c530afaa58f52d53",
+      "captured_at": "2026-10-05T12:40:58.823582+00:00",
+      "exit_code": 0,
+      "outcome": "passed",
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "test_ids": [
+        "N-TEACHER-GOOGLE",
+        "N-CLASS-IC2304",
+        "N-ISOLATION-CURRENT",
+        "N-LOAD30",
+        "N-AI-CURRENT"
+      ],
+      "evidence": "CLASS_OPEN/BROWSER_CORE/ISOLATION_FINAL/LOAD30/AI_CURRENT/ASSET_READBACK actual receipts."
     }
   ],
   "convergence": {
-    "status": "gaps",
-    "tree_revision": "a5a1e578f21e69a2c0ae89e5174cb9081f95351e",
-    "gaps": [
-      "Mở lớp thật còn P-UI: roster, tải30/canary; không gọi toàn sản phẩm verified."
-    ],
+    "status": "passed",
+    "tree_revision": "4eead0cee14074d59bb444f9acc7e20245b431f1fb9a3117c530afaa58f52d53",
+    "gaps": [],
     "unrequested_work": [],
-    "evidence": "Source chỉ thêm thư mục Handout67; không thay backend hiện hành. Mèo review, manual gates giữ rõ."
+    "evidence": "Backend25/UI12 source review không cònP0/P1; native core5 và8assets readback; full suite đủ nativeIDs, không chạy trùng."
   },
   "context_handoff": {
-    "summary": "21/21 backend, native PostgreSQL/AI/lease/restart/isolation + UI test route đã đọc lại.",
+    "summary": "IC2304/16 đã mở, dashboard Google riêng, workflow riêng được giữ.",
     "decisions": [
-      "Đức yêu cầu tách backend và cập nhật hướng dẫn; không ghi DECISIONS."
+      "Yêu cầu mởIC2304 và tạo dashboard từĐức; không ghiDECISIONS."
     ],
     "completed": [
-      "S1",
-      "S2",
-      "S3"
+      "N1"
     ],
-    "next_step": "Xem bản thử; chốt gói mở lớp thật sau roster/tải30/canary/owner/quota/retention.",
-    "open_risks": [
-      "R-NATIVE",
-      "R-HISTORY"
-    ],
-    "tree_revision": "a5a1e578f21e69a2c0ae89e5174cb9081f95351e"
+    "next_step": "Đức dùng haiURL; cập nhật roster/ACL riêng khi lớp đổi người và rà12/10.",
+    "open_risks": [],
+    "tree_revision": "4eead0cee14074d59bb444f9acc7e20245b431f1fb9a3117c530afaa58f52d53"
   },
   "release": {
     "target_environment": "production",
-    "decision": "not_ready",
-    "base_tree_revision": "cd122706bf3c112ba9d4c05afa6207b8520ee34e",
-    "current_tree_revision": "a5a1e578f21e69a2c0ae89e5174cb9081f95351e",
+    "decision": "verified",
+    "base_tree_revision": "6d4ef78be047b66c55d74bd0b2ec5173ac774140",
+    "current_tree_revision": "4eead0cee14074d59bb444f9acc7e20245b431f1fb9a3117c530afaa58f52d53",
     "production_authorized": true,
-    "rollback": "Chỉ đổi digest Handout67, giữ database; RUNBOOK.md.",
+    "authorization_scope": "Đức yêu cầu mở IC2304 và tạo dashboard; userdeadline19:45 chấp nhận hoãn kiểm phụ.",
+    "rollback": "Bỏ route thử mới hoặc stop riêng Handout67; giữ database/bài; giữ URL demo/Docs cũ.",
     "deployment_readback": "verified",
-    "operational_observation": "Actual synthetic sessions/AI callbacks/browser + native grant/lease/restart readback; real-class validation not run.",
-    "open_risks": [
-      {
-        "severity": "P1",
-        "summary": "P-UI roster thật/tải30/canary chưa đạt; không mở lớp thật."
-      },
-      {
-        "severity": "P2",
-        "summary": "Chốt retention/owner trước nhiều lớp."
-      }
-    ],
-    "authorization_scope": "Dựng/kiểm bản thử riêng đã được Đức duyệt; chưa mở lớp thật."
+    "operational_observation": "Google đăng nhập thật+cookie reload, GV16, canary HVrỗng, góp ý fixture thấy ởHV, currentAIcallback,40consumer unchanged và8asset GitblobHTTP readback.",
+    "open_risks": [],
+    "public_url": "https://tranhoangduc90.github.io/izone-ai-team-pages/writing-handouts/lesson5-thu/"
   },
-  "backend_boundary": {
-    "product_id": "handout-writing67",
-    "runtime_id": "izone-handout-writing67-handout67",
-    "release_unit": "handout67-own-image-digest",
-    "config_namespace": "HANDOUT67_*",
-    "api_prefix": "/api/handout67/v1",
-    "database_role": "handout67_runtime",
-    "data_ownership": "handout_writing67.handout67",
-    "queue_namespaces": [
-      "handout-writing67:grade",
-      "handout-writing67:vocab"
+  "source_revision": {
+    "algorithm": "sha256",
+    "files": [
+      "src/config.mjs",
+      "src/http.mjs",
+      "src/migrate.mjs",
+      "src/prompt.mjs",
+      "src/server.mjs",
+      "src/service.mjs",
+      "src/store.mjs",
+      "src/teacher.mjs",
+      "src/wake.mjs",
+      "package.json",
+      "package-lock.json",
+      "compose.yaml",
+      "test/api.test.mjs",
+      "test/prompt-pin.test.mjs",
+      "test/proxy.test.mjs",
+      "test/runtime.test.mjs",
+      "test/teacher.test.mjs"
     ],
-    "config_files": [
-      "/opt/izone-handout-writing67/.env",
-      "/opt/izone-handout-writing67/prompts-v3.json"
+    "file_hashes": {
+      "src/config.mjs": "0828c56e1e414f37af69c353503e047e979f9282d2c731d7392c17f90a965528",
+      "src/http.mjs": "bd106669f7c3abf516149f31f366ed976cd0532d70ea97087d292968afbc8441",
+      "src/migrate.mjs": "54c923307801ab88b203728e288feb755aacff267ae72c012852980ce31847a5",
+      "src/prompt.mjs": "df6e5634e6a2d3e401253043947febadbe6a6f4f3a40d363c07116ec3b737ae4",
+      "src/server.mjs": "fe384a72929eb43d43d7daea9252a1774aab2ff3cb260f63c1bde6170789db66",
+      "src/service.mjs": "6516033ffbb97cee548855267106f35e4d215a5a3a46809b7a69d6203e4713a1",
+      "src/store.mjs": "2e64c2ebcd37ce09947d75abefc573d92d341f16442a0253321f27916aea2427",
+      "src/teacher.mjs": "44d05397e5e1c130fa5a3e16fd153d5940434c9e62ee3116ddc14448c7ad1e48",
+      "src/wake.mjs": "0225568448455d18e4701c042f2cab9438e71d7d64ca4d1dbe23f803c2416820",
+      "package.json": "ab22380ba95531cec438a83f25bbbe1834712d12e175653567d0aff9f46b4df3",
+      "package-lock.json": "701b00fd59bc6b0190c02462b07bc9667aada1eebe456415f192ab20604a09ff",
+      "compose.yaml": "e29fe4b5be415f96b8f245338c6126c228112134fc24b9db82f90f8d9e9f008b",
+      "test/api.test.mjs": "fb4bbb0a4300d0d8faeba213e9acd04b7c5cd9782b2d70da0a81c827f9b9fdc4",
+      "test/prompt-pin.test.mjs": "65de00fa12aa4cf154ddacfe28ce620190d2068b98ac96f6c73d489a610be6c1",
+      "test/proxy.test.mjs": "549cf99dab797c7f10fd2fcb744ad4db4dfab95bbd8ba379a09e90c55cb6c925",
+      "test/runtime.test.mjs": "b6ab27f8b961d91679448a89806e134ad07243d6fa53ebfbb7a87f45ab099814",
+      "test/teacher.test.mjs": "21b37afc824ee23c50e868de0336093d77cdb11b4ade73e75dc294d1b3451301"
+    },
+    "excludes": [
+      "quality-gate.json",
+      "README.md",
+      "RUNBOOK.md",
+      "PLAN.md"
     ],
-    "test_environment": "handout67-local-pglite",
-    "fixture_namespace": "handout67-synthetic-session",
-    "build_context": "handout-writing67/",
-    "image_source": "handout-writing67/Dockerfile; Node base, không image sản phẩm khác",
-    "imports_other_entrypoints": false,
-    "inherits_product_image": false,
-    "cross_product_writes": [],
-    "rollback": "First deployment: stop own API/consumer and retain data/Docs. Current v3 image restart verified; v2 images are not qualified rollback targets for v3 jobs.",
-    "existing_products": [
-      {
-        "product_id": "writing-existing",
-        "runtime_id": "writing-task1-practice-api",
-        "release_unit": "backend/compose.production.yml",
-        "config_namespace": "DATABASE_URL/INTERNAL_API_TOKEN/WRITING_FLOW_*",
-        "api_prefix": "/writing-api",
-        "database_role": "not_observed_native_writing_role",
-        "data_ownership": "Writing database; native scope pending",
-        "queue_namespaces": [
-          "Writing flow queues; source backend/src"
-        ],
-        "config_files": [
-          "/opt/writing-task1-practice-api/.env"
-        ],
-        "test_environment": "Writing existing fixture",
-        "fixture_namespace": "Writing native tests",
-        "evidence": "Source backend/compose.production.yml + metadata 05/10/2026; không dùng inventory lịch sử thay readback trước/sau rollout."
-      }
-    ],
-    "related_consumers_native_inventory_pending": [],
-    "shared_resources": [
-      {
-        "name": "VPS",
-        "contract": "Container riêng, consumer cũ không rebuild/restart",
-        "version": "candidate-boundary-v1",
-        "quota": "0,5 CPU/256 MB, port3187 loopback",
-        "failure": "Dừng Handout riêng; máy chủ vẫn là miền lỗi chung"
-      },
-      {
-        "name": "PostgreSQL server",
-        "contract": "Database/role/schema riêng; kiểm quyền thật trước activate",
-        "version": "handout67-schema-v1",
-        "quota": "Pool5, statement10s, connect5s",
-        "failure": "Giữ UI chưa lưu; transaction rollback, không fallback DB khác"
-      },
-      {
-        "name": "n8n",
-        "contract": "Workflow mới nhận job backend đã assert, không sửa Docs workflows",
-        "version": "candidate-v1",
-        "quota": "Một job/execution, tối đa2 lease toàn sản phẩm",
-        "failure": "Lease300s cấp lại, tối đa3 lỗi kỹ thuật"
-      },
-      {
-        "name": "Cổng AI",
-        "contract": "compat/plain với operation_key ổn định; readback qua backend",
-        "version": "v1",
-        "quota": "Timeout180s, trần2 job; quota tiền/suất thật chưa xác minh",
-        "failure": "Không ghi Comment giả; giữ job và bài"
-      },
-      {
-        "name": "Roster",
-        "contract": "HTTPS GET v1, lớp/tên trong scope, không truy cập DB Mapping",
-        "version": "v1",
-        "quota": "Timeout5s, không fallback ngoài lớp",
-        "failure": "Không mở phiên khi source lỗi/identity không hợp lệ"
-      }
-    ],
-    "native_inventory_evidence": "40 existing containers unchanged; DB grants/readback and own-container restart verified. Existing consumers business outcomes not claimed by metadata."
+    "value": "4eead0cee14074d59bb444f9acc7e20245b431f1fb9a3117c530afaa58f52d53"
   },
-  "local_candidate_result": {
-    "outcome": "passed",
-    "passed": 21,
-    "failed": 0,
-    "skipped": 0,
-    "production_verified": false,
-    "evidence": "E:\\Codex-Data\\handout67-isolation-20261005\\native\\BACKEND-PIN-HEAD.log"
+  "backend_runtime_pin": {
+    "revision": "698c623ea584222aee1029fa8cb34ac8f25ce120",
+    "image_digest": "sha256:0be8599fcc2168eb4bef1f7498e986312433904b21be137a592cecc336d0b886",
+    "prompt_version": "lesson5-rubric-v3"
   },
-  "native_test_result": {
-    "outcome": "success",
-    "scope": "synthetic learner test only",
-    "real_class_verified": false,
-    "evidence": "E:\\Codex-Data\\handout67-isolation-20261005\\native\\N8N_AI_PROOF.json"
+  "verification_footprints": {
+    "backend": "BACKEND_RECEIPT25 actual source hashes and runtime698c623",
+    "frontend": "UI_RECEIPT12 inputHashes + ASSET_READBACK bafe0f7; final873cb8c changes only docs/gate."
   }
 }

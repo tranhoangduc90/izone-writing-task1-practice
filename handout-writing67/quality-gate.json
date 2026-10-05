@@ -20,10 +20,10 @@
     "acceptance_mode": "small_complete",
     "user": "Học viên và người vận hành Handout Writing67",
     "problem": "Phát hành backend sản phẩm khác có thể ảnh hưởng chéo.",
-    "outcome": "Gói backend riêng đã kiểm local, hướng dẫn chống dùng chung đã cài; chưa mở lớp.",
+    "outcome": "Backend riêng đã triển khai/kiểm bằng học viên giả và AI thật; lớp thật chưa mở.",
     "out_of_scope": [
-      "Không sửa backend/workflow Docs đang chạy hoặc chuyển dữ liệu cũ.",
-      "Không phát hành VPS/Pages hoặc tự chốt DECISIONS."
+      "Không sửa backend/workflow Docs cũ hoặc chuyển bài.",
+      "Không mở lớp thật hoặc ghi DECISIONS."
     ],
     "plain_language_summary": "Bài và nhận xét của Handout67 có nơi xử lý riêng; khi cập nhật chỉ cập nhật Handout67."
   },
@@ -346,154 +346,168 @@
       "category": "happy_path",
       "priority": "P0",
       "status": "passed",
-      "evidence": "E:\\Codex-Data\\handout67-isolation-20261005\\BACKEND-FINAL.log; native19/19, không skip, sha256:e08f3b78f2482fca88e80725af9c43b734eefb7993b3036e2dd9003a2d209f6e"
+      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
     },
     {
       "id": "T-BAD",
       "category": "invalid_input",
       "priority": "P1",
       "status": "passed",
-      "evidence": "E:\\Codex-Data\\handout67-isolation-20261005\\BACKEND-FINAL.log; native19/19, không skip, sha256:e08f3b78f2482fca88e80725af9c43b734eefb7993b3036e2dd9003a2d209f6e"
+      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
     },
     {
       "id": "T-CON",
       "category": "concurrency_idempotency",
       "priority": "P0",
       "status": "passed",
-      "evidence": "E:\\Codex-Data\\handout67-isolation-20261005\\BACKEND-FINAL.log; native19/19, không skip, sha256:e08f3b78f2482fca88e80725af9c43b734eefb7993b3036e2dd9003a2d209f6e"
+      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
     },
     {
       "id": "T-SEC",
       "category": "security_privacy",
       "priority": "P1",
       "status": "passed",
-      "evidence": "E:\\Codex-Data\\handout67-isolation-20261005\\BACKEND-FINAL.log; native19/19, không skip, sha256:e08f3b78f2482fca88e80725af9c43b734eefb7993b3036e2dd9003a2d209f6e"
+      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
     },
     {
       "id": "T-PART",
       "category": "external_partial",
       "priority": "P0",
       "status": "passed",
-      "evidence": "E:\\Codex-Data\\handout67-isolation-20261005\\BACKEND-FINAL.log; native19/19, không skip, sha256:e08f3b78f2482fca88e80725af9c43b734eefb7993b3036e2dd9003a2d209f6e"
+      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
     },
     {
       "id": "T-IDENTITY",
       "category": "security_privacy",
       "priority": "P0",
       "status": "passed",
-      "evidence": "E:\\Codex-Data\\handout67-isolation-20261005\\BACKEND-FINAL.log; native19/19, không skip, sha256:e08f3b78f2482fca88e80725af9c43b734eefb7993b3036e2dd9003a2d209f6e"
+      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
     },
     {
       "id": "T-TIME",
       "category": "lifecycle_time",
       "priority": "P1",
       "status": "passed",
-      "evidence": "E:\\Codex-Data\\handout67-isolation-20261005\\BACKEND-FINAL.log; native19/19, không skip, sha256:e08f3b78f2482fca88e80725af9c43b734eefb7993b3036e2dd9003a2d209f6e"
+      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
     },
     {
       "id": "T-ERROR",
       "category": "external_partial",
       "priority": "P1",
       "status": "passed",
-      "evidence": "E:\\Codex-Data\\handout67-isolation-20261005\\BACKEND-FINAL.log; native19/19, không skip, sha256:e08f3b78f2482fca88e80725af9c43b734eefb7993b3036e2dd9003a2d209f6e"
+      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
     },
     {
       "id": "T-HISTORY",
       "category": "happy_path",
       "priority": "P1",
       "status": "passed",
-      "evidence": "E:\\Codex-Data\\handout67-isolation-20261005\\BACKEND-FINAL.log; native19/19, không skip, sha256:e08f3b78f2482fca88e80725af9c43b734eefb7993b3036e2dd9003a2d209f6e"
+      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
     },
     {
       "id": "T-VOCAB",
       "category": "invalid_input",
       "priority": "P1",
       "status": "passed",
-      "evidence": "E:\\Codex-Data\\handout67-isolation-20261005\\BACKEND-FINAL.log; native19/19, không skip, sha256:e08f3b78f2482fca88e80725af9c43b734eefb7993b3036e2dd9003a2d209f6e"
+      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
     },
     {
       "id": "T-ROLL",
       "category": "rollback_recovery",
       "priority": "P1",
       "status": "passed",
-      "evidence": "E:\\Codex-Data\\handout67-isolation-20261005\\BACKEND-FINAL.log; native19/19, không skip, sha256:e08f3b78f2482fca88e80725af9c43b734eefb7993b3036e2dd9003a2d209f6e"
+      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
     },
     {
       "id": "T-ISOLATION",
       "category": "security_privacy",
       "priority": "P1",
       "status": "passed",
-      "evidence": "E:\\Codex-Data\\handout67-isolation-20261005\\BACKEND-FINAL.log; native19/19, không skip, sha256:e08f3b78f2482fca88e80725af9c43b734eefb7993b3036e2dd9003a2d209f6e"
+      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
     },
     {
       "id": "T-CAPACITY",
       "category": "concurrency_idempotency",
       "priority": "P1",
       "status": "passed",
-      "evidence": "E:\\Codex-Data\\handout67-isolation-20261005\\BACKEND-FINAL.log; native19/19, không skip, sha256:e08f3b78f2482fca88e80725af9c43b734eefb7993b3036e2dd9003a2d209f6e"
+      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
     },
     {
       "id": "T-PROXY",
       "category": "regression",
       "priority": "P1",
       "status": "passed",
-      "evidence": "E:\\Codex-Data\\handout67-isolation-20261005\\BACKEND-FINAL.log; native19/19, không skip, sha256:e08f3b78f2482fca88e80725af9c43b734eefb7993b3036e2dd9003a2d209f6e"
+      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
     },
     {
       "id": "T-WAKE",
       "category": "external_partial",
       "priority": "P1",
       "status": "passed",
-      "evidence": "E:\\Codex-Data\\handout67-isolation-20261005\\BACKEND-FINAL.log; native19/19, không skip, sha256:e08f3b78f2482fca88e80725af9c43b734eefb7993b3036e2dd9003a2d209f6e"
+      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
     },
     {
       "id": "T-WAKE-CON",
       "category": "concurrency_idempotency",
       "priority": "P1",
       "status": "passed",
-      "evidence": "E:\\Codex-Data\\handout67-isolation-20261005\\BACKEND-FINAL.log; native19/19, không skip, sha256:e08f3b78f2482fca88e80725af9c43b734eefb7993b3036e2dd9003a2d209f6e"
+      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
     },
     {
       "id": "T-DURABLE",
       "category": "rollback_recovery",
       "priority": "P1",
       "status": "passed",
-      "evidence": "E:\\Codex-Data\\handout67-isolation-20261005\\BACKEND-FINAL.log; native19/19, không skip, sha256:e08f3b78f2482fca88e80725af9c43b734eefb7993b3036e2dd9003a2d209f6e"
+      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
     },
     {
       "id": "T-PROMPT",
       "category": "security_privacy",
       "priority": "P1",
       "status": "passed",
-      "evidence": "E:\\Codex-Data\\handout67-isolation-20261005\\BACKEND-FINAL.log; native19/19, không skip, sha256:e08f3b78f2482fca88e80725af9c43b734eefb7993b3036e2dd9003a2d209f6e"
+      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
     },
     {
       "id": "T-PORT",
       "category": "regression",
       "priority": "P1",
       "status": "passed",
-      "evidence": "E:\\Codex-Data\\handout67-isolation-20261005\\BACKEND-FINAL.log; native19/19, không skip, sha256:e08f3b78f2482fca88e80725af9c43b734eefb7993b3036e2dd9003a2d209f6e"
+      "evidence": "native/BACKEND-PIN-HEAD.log, 21/21 on runtime source a5a1e578f21e69a2c0ae89e5174cb9081f95351e; later changes only operational documents/manifest."
     },
     {
       "id": "P-NATIVE",
       "category": "security_privacy",
       "priority": "P0",
-      "status": "not_run",
-      "evidence": "Manual gate chưa chạy: PostgreSQL role grants, Docker/proxy, deploy/rollback và metadata consumer trước/sau; không dùng fixture local thay thế."
+      "status": "passed",
+      "evidence": "native DB_PROOF/DB_WRITE_PROOF/NATIVE_RESTART/ISOLATION_AFTER/NATIVE_ROUTE_PROOF; first-deployment stop/restart boundary, no v2 rollback claim."
     },
     {
       "id": "P-AI",
       "category": "external_partial",
       "priority": "P0",
-      "status": "not_run",
-      "evidence": "Manual gate chưa chạy: Roster, rubric chuyên môn, n8n/gateway execution/callback/readback và mất ACK thật; không dùng fixture local thay thế."
+      "status": "passed",
+      "evidence": "N8N_AI_PROOF actual7grades/2vocab/11jobs; own fake HTTPS roster, rubricv3/frozenjobs, NATIVE_TRANSPORT/LEASE. Actual learner roster remains P-UI opening gate."
     },
     {
       "id": "P-UI",
       "category": "happy_path",
       "priority": "P0",
       "status": "not_run",
-      "evidence": "Manual gate chưa chạy: Pages nối API, trình duyệt, tải lớp30 và canary; không dùng fixture local thay thế."
+      "evidence": "Native fake browser/route tested; complete planned scope (real roster, load30, student canary) has not run. Keep opening gate blocked."
+    },
+    {
+      "id": "T-PROMPT-PIN",
+      "category": "regression",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "Same prompt-pin.test.mjs RED against base b6f6888, GREEN in native/BACKEND-PIN-HEAD.log current21."
+    },
+    {
+      "id": "T-PROMPT-LEGACY",
+      "category": "regression",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "Same prompt-pin.test.mjs RED against base b6f6888, GREEN in native/BACKEND-PIN-HEAD.log current21."
     }
   ],
   "task_graph": {
@@ -629,7 +643,7 @@
           "Quota/scope/lifecycle; deployment cần quyền riêng."
         ],
         "affected_future_tasks": [],
-        "status": "planned",
+        "status": "in_progress",
         "plan_revision": "plan-v2"
       }
     ]
@@ -639,7 +653,7 @@
     "risks": [
       {
         "id": "R-NATIVE",
-        "description": "Chưa có quyền database/Docker/proxy/AI/UI/canary và readback consumer thật.",
+        "description": "Bản thử native đã readback; phạm vi mở lớp thật (roster/tải30/canary/owner) còn chưa đạt.",
         "probability": 2,
         "impact": 3,
         "score": 6,
@@ -708,18 +722,24 @@
       "outcome": "success",
       "readback": "verified",
       "evidence": "T-HP/CON/PART/DURABLE đọc lại HTTP+SQL của học viên giả; BACKEND-FINAL.log."
+    },
+    {
+      "id": "OWN-NATIVE-TEST",
+      "outcome": "success",
+      "readback": "verified",
+      "evidence": "Actual fake API sessions/history/vocab, DB grant/restart, own n8n complete/readback, native routing; no old-system writes."
     }
   ],
   "verification_runs": [
     {
-      "id": "BACKEND-FINAL",
+      "id": "BACKEND-PIN-HEAD",
       "scope": "full_suite",
-      "command": "node --test --test-reporter=tap test/api.test.mjs test/proxy.test.mjs test/runtime.test.mjs",
-      "tree_revision": "sha256:e08f3b78f2482fca88e80725af9c43b734eefb7993b3036e2dd9003a2d209f6e",
-      "captured_at": "2026-10-05T08:57:28.402328+00:00",
+      "command": "node --test (four test/*.test.mjs files, native Node/PGlite runner)",
+      "tree_revision": "a5a1e578f21e69a2c0ae89e5174cb9081f95351e",
+      "captured_at": "2026-10-05T10:06:34.390419+00:00",
       "exit_code": 0,
       "outcome": "passed",
-      "passed": 19,
+      "passed": 21,
       "failed": 0,
       "skipped": 0,
       "test_ids": [
@@ -741,22 +761,24 @@
         "T-WAKE-CON",
         "T-DURABLE",
         "T-PROMPT",
-        "T-PORT"
+        "T-PORT",
+        "T-PROMPT-PIN",
+        "T-PROMPT-LEGACY"
       ],
-      "evidence": "E:\\Codex-Data\\handout67-isolation-20261005\\BACKEND-FINAL.log"
+      "evidence": "E:\\Codex-Data\\handout67-isolation-20261005\\native\\BACKEND-PIN-HEAD.log"
     }
   ],
   "convergence": {
     "status": "gaps",
-    "tree_revision": "sha256:e08f3b78f2482fca88e80725af9c43b734eefb7993b3036e2dd9003a2d209f6e",
+    "tree_revision": "a5a1e578f21e69a2c0ae89e5174cb9081f95351e",
     "gaps": [
-      "S4 native+UI chưa thực hiện; không gọi toàn webapp đã hoàn tất."
+      "Mở lớp thật còn P-UI: roster, tải30/canary; không gọi toàn sản phẩm verified."
     ],
     "unrequested_work": [],
     "evidence": "Source chỉ thêm thư mục Handout67; không thay backend hiện hành. Mèo review, manual gates giữ rõ."
   },
   "context_handoff": {
-    "summary": "19/19backend local; n8n/policy có receipt source riêng; hướng dẫn6file cài/readback.",
+    "summary": "21/21 backend, native PostgreSQL/AI/lease/restart/isolation + UI test route đã đọc lại.",
     "decisions": [
       "Đức yêu cầu tách backend và cập nhật hướng dẫn; không ghi DECISIONS."
     ],
@@ -765,32 +787,33 @@
       "S2",
       "S3"
     ],
-    "next_step": "Review RUNBOOK rồi lấy quyền riêng cho VPS; native tests, nối Pages và canary.",
+    "next_step": "Xem bản thử; chốt gói mở lớp thật sau roster/tải30/canary/owner/quota/retention.",
     "open_risks": [
       "R-NATIVE",
       "R-HISTORY"
     ],
-    "tree_revision": "sha256:e08f3b78f2482fca88e80725af9c43b734eefb7993b3036e2dd9003a2d209f6e"
+    "tree_revision": "a5a1e578f21e69a2c0ae89e5174cb9081f95351e"
   },
   "release": {
     "target_environment": "production",
     "decision": "not_ready",
     "base_tree_revision": "cd122706bf3c112ba9d4c05afa6207b8520ee34e",
-    "current_tree_revision": "sha256:e08f3b78f2482fca88e80725af9c43b734eefb7993b3036e2dd9003a2d209f6e",
-    "production_authorized": false,
+    "current_tree_revision": "a5a1e578f21e69a2c0ae89e5174cb9081f95351e",
+    "production_authorized": true,
     "rollback": "Chỉ đổi digest Handout67, giữ database; RUNBOOK.md.",
-    "deployment_readback": "not_done",
-    "operational_observation": "unknown",
+    "deployment_readback": "verified",
+    "operational_observation": "Actual synthetic sessions/AI callbacks/browser + native grant/lease/restart readback; real-class validation not run.",
     "open_risks": [
       {
         "severity": "P1",
-        "summary": "P-NATIVE/P-AI/P-UI chưa chạy, cần quyền và nativeevidence."
+        "summary": "P-UI roster thật/tải30/canary chưa đạt; không mở lớp thật."
       },
       {
         "severity": "P2",
         "summary": "Chốt retention/owner trước nhiều lớp."
       }
-    ]
+    ],
+    "authorization_scope": "Dựng/kiểm bản thử riêng đã được Đức duyệt; chưa mở lớp thật."
   },
   "backend_boundary": {
     "product_id": "handout-writing67",
@@ -806,7 +829,7 @@
     ],
     "config_files": [
       "/opt/izone-handout-writing67/.env",
-      "private-handout67-prompts.json"
+      "/opt/izone-handout-writing67/prompts-v3.json"
     ],
     "test_environment": "handout67-local-pglite",
     "fixture_namespace": "handout67-synthetic-session",
@@ -815,7 +838,7 @@
     "imports_other_entrypoints": false,
     "inherits_product_image": false,
     "cross_product_writes": [],
-    "rollback": "Chỉ đổi image digest Handout 67, giữ database; đọc lại phiên/bài/job và metadata consumer cũ.",
+    "rollback": "First deployment: stop own API/consumer and retain data/Docs. Current v3 image restart verified; v2 images are not qualified rollback targets for v3 jobs.",
     "existing_products": [
       {
         "product_id": "writing-existing",
@@ -836,12 +859,7 @@
         "evidence": "Source backend/compose.production.yml + metadata 05/10/2026; không dùng inventory lịch sử thay readback trước/sau rollout."
       }
     ],
-    "related_consumers_native_inventory_pending": [
-      "Mapping",
-      "Progress Log",
-      "Term Test",
-      "Speaking homework"
-    ],
+    "related_consumers_native_inventory_pending": [],
     "shared_resources": [
       {
         "name": "VPS",
@@ -878,14 +896,21 @@
         "quota": "Timeout5s, không fallback ngoài lớp",
         "failure": "Không mở phiên khi source lỗi/identity không hợp lệ"
       }
-    ]
+    ],
+    "native_inventory_evidence": "40 existing containers unchanged; DB grants/readback and own-container restart verified. Existing consumers business outcomes not claimed by metadata."
   },
   "local_candidate_result": {
     "outcome": "passed",
-    "passed": 19,
+    "passed": 21,
     "failed": 0,
     "skipped": 0,
     "production_verified": false,
-    "evidence": "E:\\Codex-Data\\handout67-isolation-20261005\\FINAL_VERIFICATION.json"
+    "evidence": "E:\\Codex-Data\\handout67-isolation-20261005\\native\\BACKEND-PIN-HEAD.log"
+  },
+  "native_test_result": {
+    "outcome": "success",
+    "scope": "synthetic learner test only",
+    "real_class_verified": false,
+    "evidence": "E:\\Codex-Data\\handout67-isolation-20261005\\native\\N8N_AI_PROOF.json"
   }
 }

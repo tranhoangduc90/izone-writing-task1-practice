@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "status": "candidate_only",
+  "inventory_status": "partial_native_role_and_rollout_unknown",
+  "backend_boundary": {
+    "product_id": "handout-writing67",
+    "runtime_id": "izone-handout-writing67-handout67",
+    "release_unit": "handout67-own-image-digest",
+    "config_namespace": "HANDOUT67_*",
+    "api_prefix": "/api/handout67/v1",
+    "database_role": "handout67_runtime",
+    "data_ownership": "handout_writing67.handout67",
+    "queue_namespaces": ["handout-writing67:grade", "handout-writing67:vocab"],
+    "config_files": ["/opt/izone-handout-writing67/.env", "private-handout67-prompts.json"],
+    "test_environment": "handout67-local-pglite",
+    "fixture_namespace": "handout67-synthetic-session",
+    "build_context": "handout-writing67/",
+    "image_source": "handout-writing67/Dockerfile; Node base, không image sản phẩm khác",
+    "imports_other_entrypoints": false,
+    "inherits_product_image": false,
+    "cross_product_writes": [],
+    "rollback": "Chỉ đổi image digest Handout 67, giữ database; đọc lại phiên/bài/job và metadata consumer cũ.",
+    "existing_products": [
+      {
+        "product_id": "writing-existing",
+        "runtime_id": "writing-task1-practice-api",
+        "release_unit": "backend/compose.production.yml",
+        "config_namespace": "DATABASE_URL/INTERNAL_API_TOKEN/WRITING_FLOW_*",
+        "api_prefix": "/writing-api",
+        "database_role": "not_observed_native_writing_role",
+        "data_ownership": "Writing database; native scope pending",
+        "queue_namespaces": ["Writing flow queues; source backend/src"],
+        "config_files": ["/opt/writing-task1-practice-api/.env"],
+        "test_environment": "Writing existing fixture",
+        "fixture_namespace": "Writing native tests",
+        "evidence": "Source backend/compose.production.yml + metadata 05/10/2026; không dùng inventory lịch sử thay readback trước/sau rollout."
+      }
+    ],
+    "related_consumers_native_inventory_pending": ["Mapping", "Progress Log", "Term Test", "Speaking homework"],
+    "shared_resources": [
+      {"name":"VPS", "contract":"Container riêng, consumer cũ không rebuild/restart", "version":"candidate-boundary-v1", "quota":"0,5 CPU/256 MB, port3187 loopback", "failure":"Dừng Handout riêng; máy chủ vẫn là miền lỗi chung"},
+      {"name":"PostgreSQL server", "contract":"Database/role/schema riêng; kiểm quyền thật trước activate", "version":"handout67-schema-v1", "quota":"Pool5, statement10s, connect5s", "failure":"Giữ UI chưa lưu; transaction rollback, không fallback DB khác"},
+      {"name":"n8n", "contract":"Workflow mới nhận job backend đã assert, không sửa Docs workflows", "version":"candidate-v1", "quota":"Một job/execution, tối đa2 lease toàn sản phẩm", "failure":"Lease300s cấp lại, tối đa3 lỗi kỹ thuật"},
+      {"name":"Cổng AI", "contract":"compat/plain với operation_key ổn định; readback qua backend", "version":"v1", "quota":"Timeout180s, trần2 job; quota tiền/suất thật chưa xác minh", "failure":"Không ghi Comment giả; giữ job và bài"},
+      {"name":"Roster", "contract":"HTTPS GET v1, lớp/tên trong scope, không truy cập DB Mapping", "version":"v1", "quota":"Timeout5s, không fallback ngoài lớp", "failure":"Không mở phiên khi source lỗi/identity không hợp lệ"}
+    ]
+  }
+}

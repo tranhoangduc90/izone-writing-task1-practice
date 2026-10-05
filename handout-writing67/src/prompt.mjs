@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 // Không dùng ví dụ/historical comment từ Docs của người khác. Thiếu rubric thì dừng trước AI.
 export async function promptRenderer(path) {
   const registry=JSON.parse(await readFile(path,'utf8'));
-  if(registry.version!=='lesson5-rubric-v2' || ['topic','b1','b2','a','x','vocab'].some(k=>typeof registry.rubrics?.[k]!=='string'||!registry.rubrics[k].trim()))throw new Error('PROMPT_REGISTRY_INVALID');
+  if(registry.version!=='lesson5-rubric-v3' || ['topic','b1','b2','a','x','vocab'].some(k=>typeof registry.rubrics?.[k]!=='string'||!registry.rubrics[k].trim()))throw new Error('PROMPT_REGISTRY_INVALID');
   return job=>{
     const r=job.snapshot.responses,n=job.ideaIndex;
     const key=job.kind==='vocab'?'vocab':job.section==='topic'?'topic':job.section[0]==='b'?job.section:job.section[0];

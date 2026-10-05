@@ -51,7 +51,7 @@ test('T-PROMPT · rubric riêng ngoài public image; payload đúng A2 và histo
   const {writeFile}=await import('node:fs/promises');
   try {
     const file=join(folder,'fixture.json');
-    await writeFile(file,JSON.stringify({version:'lesson5-rubric-v2',rubrics:Object.fromEntries(['topic','b1','b2','a','x','vocab'].map(k=>[k,'Rubric fixture '+k]))}));
+    await writeFile(file,JSON.stringify({version:'lesson5-rubric-v3',rubrics:Object.fromEntries(['topic','b1','b2','a','x','vocab'].map(k=>[k,'Rubric fixture '+k]))}));
     const render=await promptRenderer(file);
     const text=render({kind:'grade',section:'a2',ideaIndex:2,snapshot:{topic:'Đề fixture',responses:{a1:'Câu khác của ý 1',a2:'Câu đúng ý 2',b2:'B đã duyệt ý 2',idea2:'Idea 2',topicSentence:'TS'},history:[{feedback:'Comment đúng A2'}]}});
     assert.ok(text.includes('Câu đúng ý 2'));assert.ok(text.includes('Comment đúng A2'));assert.ok(!text.includes('Câu khác của ý 1'));

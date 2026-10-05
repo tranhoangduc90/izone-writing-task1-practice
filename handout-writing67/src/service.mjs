@@ -13,7 +13,7 @@ const passed = (s,key) => s.steps[key].status==='passed';
 const ideaPassed = (s,n) => ['b','a','x'].every(k=>passed(s,k+n));
 const available = (s,key) => ORDER.includes(key) && (key==='topic' || passed(s,ORDER[ORDER.indexOf(key)-1])) && (!key.endsWith('2') || s.idea2Open);
 
-export function createService({store, roster, secret, clock=Date.now, leaseMs=300000, sessionMs=43200000, maxLeases=2, renderJob}) {
+export function createService({store, roster, secret, clock=Date.now, leaseMs=300000, sessionMs=43200000, maxLeases=2, renderJob, promptVersion='lesson5-rubric-v3'}) {
   if (typeof secret!=='string' || secret.length<32 || leaseMs<=180000) fail('CONFIG_INVALID');
   const sign = value => createHmac('sha256',secret).update(value).digest('base64url');
   const publicSession = s => ({ref:s.ref,activity:s.activity,classRef:s.classRef,studentRef:s.studentRef,responses:s.responses,version:s.version,idea2Open:s.idea2Open,steps:s.steps,vocabulary:s.vocabulary});
@@ -32,8 +32,10 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
   };
   function makeJob(s,kind,section,ideaIndex) {
     const snapshot = {topic:TOPIC,responses:structuredClone(s.responses),history:section?s.steps[section].history.map(h=>({feedback:h.feedback,status:h.status,snapshot:h.snapshot})):[],ideaIndex};
-    const job = {productId:PRODUCT,sessionRef:s.ref,jobRef:randomUUID(),kind,section,ideaIndex,snapshotHash:hash(snapshot),snapshot,promptVersion:'lesson5-rubric-v2',status:'queued',tries:0,createdAt:clock(),leaseUntil:0,leaseToken:null};
+    const job = {productId:PRODUCT,sessionRef:s.ref,jobRef:randomUUID(),kind,section,ideaIndex,snapshotHash:hash(snapshot),snapshot,promptVersion,status:'queued',tries:0,createdAt:clock(),leaseUntil:0,leaseToken:null};
     job.operationKey = `${PRODUCT}:${job.jobRef}:${job.promptVersion}`;
+    // Ghim nguyên prompt vào job trước ACK; retry/redeploy giữ cùng payload và operationKey.
+    if(renderJob)job.prompt=renderJob({...envelope(job),snapshot});
     s.jobs.push(job);
     return job;
   }
@@ -106,7 +108,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
         let capacity=Math.max(0,maxLeases-active);const claimed=[];
         for(const s of sessions) for(const j of s.jobs) {
           if(!['queued','leased'].includes(j.status) || (j.status==='leased'&&j.leaseUntil>now))continue;
-          if(j.tries>=3) {
+          if((renderJob && !j.prompt && j.promptVersion!==promptVersion) || j.tries>=3) {
             j.status='failed';j.error='TECHNICAL_RETRIES_EXHAUSTED';
             if(j.kind==='grade') {s.steps[j.section].status='technical_error';s.steps[j.section].error=j.error;}
             else s.vocabulary[j.ideaIndex]={status:'failed',jobRef:j.jobRef};
@@ -114,9 +116,9 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
           }
           if(!capacity || claimed.length>=1)continue;
           j.status='leased';j.tries++;j.leaseUntil=now+leaseMs;j.leaseToken=randomUUID();capacity--;
-          claimed.push({...envelope(j),snapshot:j.snapshot,leaseUntil:j.leaseUntil});
+          claimed.push({...envelope(j),snapshot:j.snapshot,leaseUntil:j.leaseUntil,...(j.prompt?{prompt:j.prompt}:{})});
         }
-        return claimed.map(job=>renderJob?{...job,prompt:renderJob(job)}:job);
+        return claimed.map(job=>renderJob&&!job.prompt?{...job,prompt:renderJob(job)}:job);
       });
     },
     async complete(input) {
@@ -146,7 +148,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
           s.vocabulary[j.ideaIndex]={status:'ready',jobRef:j.jobRef,sourceHash:j.snapshotHash,groups:input.result};
         }
         // Giữ receipt identity/hash để replay; nội dung đã nằm trong history/vocab của phiên.
-        delete j.snapshot;delete j.result;
+        delete j.snapshot;delete j.result;delete j.prompt;
         return {jobRef:j.jobRef,status:j.status,resultHash:j.resultHash};
       });
       if(!result)fail('SESSION_NOT_FOUND',404);

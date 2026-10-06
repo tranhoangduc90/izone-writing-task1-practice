@@ -73,7 +73,7 @@ test('H67-COMMENT · GV bám đoạn, HV reply, replay và status không đổi 
  await h.teacher.thread(h.actor,h.ref,body);await h.teacher.thread(h.actor,h.ref,body);let current=await h.read();assert.equal(current.commentThreads.length,1);assert.equal(current.version,s.version);assert.equal(current.steps.topic.status,'pending');const thread=current.commentThreads[0];
  const reply={action:'reply',threadRef:thread.ref,body:'Em đã hiểu',requestId:'reply-one'};await h.service.replyComment(h.ref,h.token,reply);await h.service.replyComment(h.ref,h.token,reply);
  await assert.rejects(()=>h.service.replyComment(h.ref,h.token,{action:'status',threadRef:thread.ref,status:'addressed',requestId:'fake-status'}),/COMMENT_FORBIDDEN/);
- await h.teacher.thread(h.actor,h.ref,{action:'status',threadRef:thread.ref,status:'addressed',requestId:'status-one',expectedActor:h.actor.email});
+ await h.teacher.thread(h.actor,h.ref,{action:'status',threadRef:thread.ref,status:'addressed',expectedCommentVersion:(await h.read()).commentVersion,requestId:'status-one',expectedActor:h.actor.email});
  await h.revise('idea1','Nội dung đã thay hoàn toàn');current=await h.read();assert.equal(current.commentThreads[0].messages.length,2);assert.equal(current.commentThreads[0].status,'addressed');
  await h.revise('idea1','Xóa trích đoạn');assert.equal((await h.read()).commentThreads[0].anchor.detached,true);assert.equal((await h.read()).commentThreads[0].originalContent,s.responses.idea1);
  await assert.rejects(()=>h.teacher.thread({...h.actor,classes:['other']},h.ref,body),/TEACHER_FORBIDDEN/);

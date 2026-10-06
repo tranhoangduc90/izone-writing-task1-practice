@@ -48,6 +48,8 @@ export function changeThread(s,actor,input,now){
     if(input.action==='status'){
       if(actor.role!=='teacher')fail('COMMENT_FORBIDDEN',403);
       if(!['open','addressed'].includes(input.status))fail('COMMENT_INVALID');
+      // Biên nhận được kiểm trước: retry cùng mã vẫn hợp lệ, bản trao đổi cũ không ghi đè bản mới.
+      if(!Number.isSafeInteger(input.expectedCommentVersion)||input.expectedCommentVersion!==(s.commentVersion||0))fail('COMMENT_VERSION_CONFLICT',409);
       thread.status=input.status;
       thread.statusChangedBy=actor.name;thread.statusChangedAt=new Date(now).toISOString();
     }else if(typeof input.body!=='string'||!input.body.trim()||input.body.length>5000)fail('COMMENT_INVALID');

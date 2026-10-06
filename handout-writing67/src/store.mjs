@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {auditChange,createAudit} from './audit.mjs';
+import {markDashboardActivity} from './dashboard.mjs';
 
 // Nhận adapter PostgreSQL có transaction; lưu/đọc lại đúng phiên, khóa trước thay đổi.
 // Không biết hoặc truy cập bảng của sản phẩm khác. Lỗi SQL trả về caller, không giả thành công.
@@ -27,6 +28,7 @@ export function createStore(db,{clock=Date.now}={}) {
         const before=structuredClone(session);
         const answer = await change(session);
         if(JSON.stringify(before)===JSON.stringify(session))return answer;
+        markDashboardActivity(before,session,clock());
         await tx.query('UPDATE handout67.session SET payload=$2::jsonb, updated_at=now() WHERE ref=$1', [ref,JSON.stringify(session)]);
         await auditChange(tx,before,session,clock());
         return answer;
@@ -46,6 +48,7 @@ export function createStore(db,{clock=Date.now}={}) {
         const answer = await change(sessions);
         for (const session of sessions) {
           if(JSON.stringify(session)===originals.get(session.ref))continue;
+          markDashboardActivity(JSON.parse(originals.get(session.ref)),session,clock());
           await tx.query('UPDATE handout67.session SET payload=$2::jsonb, updated_at=now() WHERE ref=$1', [session.ref,JSON.stringify(session)]);
           await auditChange(tx,JSON.parse(originals.get(session.ref)),session,clock());
         }

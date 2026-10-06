@@ -1,6 +1,7 @@
 import {createHmac,randomUUID,timingSafeEqual} from 'node:crypto';
 import {fail,ORDER,FIELDS,publicTeacherComments} from './service.mjs';
 import {publicThreads,changeThread} from './comments.mjs';
+import {dashboardProjection} from './dashboard.mjs';
 
 // Nhận danh tính Google đã xác minh và quyền lớp riêng; chỉ đọc/ghi bảng Handout67.
 // Token giảng viên có secret riêng. Không trả job/prompt/lease/capability cho dashboard.
@@ -25,7 +26,7 @@ export function createTeacher({db,store,roster,registry,secret,verifyGoogleToken
     if(s.activity!=='lesson5'||!row.students.some(x=>x.studentRef===s.studentRef))fail('TEACHER_FORBIDDEN',403);
     return s;
   }
-  const publicSession=s=>({ref:s.ref,classRef:s.classRef,studentRef:s.studentRef,version:s.version,responses:s.responses,steps:s.steps,vocabulary:s.vocabulary,idea2Open:s.idea2Open,teacherComments:publicTeacherComments(s),commentThreads:publicThreads(s),commentVersion:s.commentVersion||0});
+  const publicSession=s=>({ref:s.ref,classRef:s.classRef,studentRef:s.studentRef,version:s.version,responses:s.responses,steps:s.steps,vocabulary:s.vocabulary,idea2Open:s.idea2Open,teacherComments:publicTeacherComments(s),commentThreads:publicThreads(s),commentVersion:s.commentVersion||0,dashboard:dashboardProjection(s,clock()),processing:dashboardProjection(s,clock()).processing});
   return {
     clientId:()=>registry().clientId,
     async login(credential){
@@ -53,7 +54,7 @@ export function createTeacher({db,store,roster,registry,secret,verifyGoogleToken
       const sessions=new Map(result.rows.map(r=>[r.payload.studentRef,r]));
       return {classRef,className:row.className,students:row.students.map(student=>{
         const r=sessions.get(student.studentRef),s=r?.payload;
-        return {...student,sessionRef:s?.ref||null,updatedAt:r?.updated_at||null,passed:s?ORDER.filter(k=>s.steps[k].status==='passed').length:0,steps:s?Object.fromEntries(ORDER.map(k=>[k,s.steps[k].status])):{},comments:s?(s.teacherComments||[]).length+(s.commentThreads||[]).length:0};
+        return {...student,sessionRef:s?.ref||null,updatedAt:r?.updated_at||null,passed:s?ORDER.filter(k=>s.steps[k].status==='passed').length:0,steps:s?Object.fromEntries(ORDER.map(k=>[k,s.steps[k].status])):{},comments:s?(s.teacherComments||[]).length+(s.commentThreads||[]).length:0,dashboard:s?dashboardProjection(s,clock()):null};
       })};
     },
     async detail(actor,ref){return publicSession(await sessionFor(actor,ref));},

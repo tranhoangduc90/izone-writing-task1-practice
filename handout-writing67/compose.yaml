@@ -1,0 +1,26 @@
+name: izone-handout-writing67
+services:
+  handout67:
+    image: ${HANDOUT67_IMAGE:?Cần image digest đã kiểm}
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ${HANDOUT67_PROMPT_SOURCE:?Cần rubric riêng tư}:/run/handout67/prompts.json:ro
+      - ${HANDOUT67_TEACHER_SOURCE:?Cần quyền giảng viên riêng tư}:/run/handout67/teachers.json:ro
+    ports:
+      - "127.0.0.1:3187:3187"
+    cpus: 0.5
+    mem_limit: 256m
+    pids_limit: 100
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - handout67
+networks:
+  handout67:
+    name: izone-handout-writing67

@@ -1,0 +1,1066 @@
+{
+  "schema_version": 3,
+  "product": "Handout Writing67 · IC2304 · Học viên và giảng viên",
+  "change_id": "handout67-ic2304-production-20261005",
+  "change_kind": "feature",
+  "escaped_user_defect": false,
+  "risk": "high",
+  "system_traits": [
+    "stateful",
+    "asynchronous",
+    "concurrent",
+    "external_side_effects",
+    "authentication",
+    "multi_user",
+    "multi_service"
+  ],
+  "experience": {
+    "planning_mode": "controlled",
+    "mode_reason": "Route gọi API lưu bài và AI thật; đã được Đức duyệt dựng/kiểm bản thử riêng.",
+    "user": "16 học viên IC2304 và giảng viên được duyệt",
+    "problem": "Demo mô phỏng chưa chứng minh backend/n8n thật và hồi phục nháp.",
+    "outcome": "Học viên chọn/xác nhận và làm bài; giảng viên Google xem16 người và góp ý đúng bài/phần.",
+    "out_of_scope": [
+      "Không chuyểnDocs, không gửi thông báo, không đổi backend/workflow sản phẩm khác."
+    ],
+    "plain_language_summary": "Một bản thử có máy xử lý riêng, bài giả được lưu và chấm thật."
+  },
+  "release_scope": {
+    "acceptance_mode": "small_complete",
+    "description": "Small complete: IC2304/16, học viên và dashboard Google có ACL riêng; hành trìnhAI/rubric đã ghim, native canaries/own image. Không chuyểnDocs, gửi thông báo hoặc mở lớp khác."
+  },
+  "change_package": {
+    "proposal": "Thêm route riêng bên cạnh demo mô phỏng, nối API Handout67 đã ghim.",
+    "behavior_baseline": "lesson5-demo mô phỏng, backend Docs/consumer cũ giữ nguyên.",
+    "deltas": [
+      {
+        "id": "LIVE-UI",
+        "operation": "ADDED",
+        "behavior": "UI dùng trạng thái server và chấm thật; xử lý mất ACK, nháp/hai tab/phản hồi muộn.",
+        "module_ids": [
+          "UI",
+          "CLIENT"
+        ],
+        "test_ids": [
+          "R-UI-IDENTITY",
+          "R-UI-POLL",
+          "R-UI-TYPING",
+          "R-UI-CHECK",
+          "R-UI-READ-SINGLE",
+          "R-UI-ACK",
+          "R-UI-409",
+          "R-UI-DRAFT",
+          "R-UI-CLASS",
+          "R-UI-CLASS-CLOSED",
+          "T-TEACHER-UI-IDENTITY",
+          "T-TEACHER-UI-LATE",
+          "T-HP",
+          "T-BAD",
+          "T-CON",
+          "T-SEC",
+          "T-PART",
+          "T-IDENTITY",
+          "T-TIME",
+          "T-ERROR",
+          "T-HISTORY",
+          "T-VOCAB",
+          "T-ROLL",
+          "T-ISOLATION",
+          "T-CAPACITY",
+          "T-PROMPT-PIN",
+          "T-PROMPT-LEGACY",
+          "T-PROXY",
+          "T-WAKE",
+          "T-WAKE-CON",
+          "T-DURABLE",
+          "T-PROMPT",
+          "T-PORT",
+          "T-TEACHER-AUTH",
+          "T-TEACHER-SCOPE",
+          "T-TEACHER-COMMENT",
+          "T-TEACHER-HTTP"
+        ]
+      }
+    ],
+    "archive_status": "active"
+  },
+  "module_map": {
+    "revision": "native-test-v1",
+    "modules": [
+      {
+        "id": "CLIENT",
+        "name": "Gửi yêu cầu cùng định danh",
+        "responsibility": "Gửi yêu cầu cùng định danh",
+        "owns_data": [
+          "in_memory_capability"
+        ],
+        "public_interfaces": [
+          "HTTPS open/save/check/read"
+        ],
+        "depends_on": [],
+        "boundary_rules": [
+          "Backend riêng giữ phiên/bước/history; giao diện không tự gán điểm đạt."
+        ],
+        "test_ids": [
+          "R-UI-IDENTITY",
+          "R-UI-POLL",
+          "R-UI-TYPING",
+          "R-UI-CHECK",
+          "R-UI-READ-SINGLE",
+          "R-UI-ACK",
+          "R-UI-409",
+          "R-UI-DRAFT",
+          "R-UI-CLASS",
+          "R-UI-CLASS-CLOSED",
+          "T-TEACHER-UI-IDENTITY",
+          "T-TEACHER-UI-LATE",
+          "T-HP",
+          "T-BAD",
+          "T-CON",
+          "T-SEC",
+          "T-PART",
+          "T-IDENTITY",
+          "T-TIME",
+          "T-ERROR",
+          "T-HISTORY",
+          "T-VOCAB",
+          "T-ROLL",
+          "T-ISOLATION",
+          "T-CAPACITY",
+          "T-PROMPT-PIN",
+          "T-PROMPT-LEGACY",
+          "T-PROXY",
+          "T-WAKE",
+          "T-WAKE-CON",
+          "T-DURABLE",
+          "T-PROMPT",
+          "T-PORT",
+          "T-TEACHER-AUTH",
+          "T-TEACHER-SCOPE",
+          "T-TEACHER-COMMENT",
+          "T-TEACHER-HTTP"
+        ]
+      },
+      {
+        "id": "UI",
+        "name": "Bài học và nháp học viên",
+        "responsibility": "Bài học và nháp học viên",
+        "owns_data": [
+          "draft_changes"
+        ],
+        "public_interfaces": [
+          "render/readLatest/poll"
+        ],
+        "depends_on": [
+          "CLIENT"
+        ],
+        "boundary_rules": [
+          "Backend riêng giữ phiên/bước/history; giao diện không tự gán điểm đạt."
+        ],
+        "test_ids": [
+          "R-UI-IDENTITY",
+          "R-UI-POLL",
+          "R-UI-TYPING",
+          "R-UI-CHECK",
+          "R-UI-READ-SINGLE",
+          "R-UI-ACK",
+          "R-UI-409",
+          "R-UI-DRAFT",
+          "R-UI-CLASS",
+          "R-UI-CLASS-CLOSED",
+          "T-TEACHER-UI-IDENTITY",
+          "T-TEACHER-UI-LATE",
+          "T-HP",
+          "T-BAD",
+          "T-CON",
+          "T-SEC",
+          "T-PART",
+          "T-IDENTITY",
+          "T-TIME",
+          "T-ERROR",
+          "T-HISTORY",
+          "T-VOCAB",
+          "T-ROLL",
+          "T-ISOLATION",
+          "T-CAPACITY",
+          "T-PROMPT-PIN",
+          "T-PROMPT-LEGACY",
+          "T-PROXY",
+          "T-WAKE",
+          "T-WAKE-CON",
+          "T-DURABLE",
+          "T-PROMPT",
+          "T-PORT",
+          "T-TEACHER-AUTH",
+          "T-TEACHER-SCOPE",
+          "T-TEACHER-COMMENT",
+          "T-TEACHER-HTTP"
+        ]
+      }
+    ],
+    "integrations": [
+      {
+        "id": "CLIENT-UI",
+        "producer": "CLIENT",
+        "consumer": "UI",
+        "contract": "Phiên/version từ backend; header token, retry giữ requestId; UI giữ nháp và guard người học/version.",
+        "test_ids": [
+          "R-UI-IDENTITY",
+          "R-UI-POLL",
+          "R-UI-TYPING",
+          "R-UI-CHECK",
+          "R-UI-READ-SINGLE",
+          "R-UI-ACK",
+          "R-UI-409",
+          "R-UI-DRAFT",
+          "R-UI-CLASS",
+          "R-UI-CLASS-CLOSED",
+          "T-TEACHER-UI-IDENTITY",
+          "T-TEACHER-UI-LATE",
+          "T-HP",
+          "T-BAD",
+          "T-CON",
+          "T-SEC",
+          "T-PART",
+          "T-IDENTITY",
+          "T-TIME",
+          "T-ERROR",
+          "T-HISTORY",
+          "T-VOCAB",
+          "T-ROLL",
+          "T-ISOLATION",
+          "T-CAPACITY",
+          "T-PROMPT-PIN",
+          "T-PROMPT-LEGACY",
+          "T-PROXY",
+          "T-WAKE",
+          "T-WAKE-CON",
+          "T-DURABLE",
+          "T-PROMPT",
+          "T-PORT",
+          "T-TEACHER-AUTH",
+          "T-TEACHER-SCOPE",
+          "T-TEACHER-COMMENT",
+          "T-TEACHER-HTTP"
+        ]
+      }
+    ]
+  },
+  "operational_design": {
+    "plan_revision": "native-test-v1",
+    "signals": [
+      "multi_user",
+      "multi_service"
+    ],
+    "critical_path": "Pages→API riêng→PostgreSQL riêng→n8n riêng→AI→callback/readback→UI",
+    "peak_load": {
+      "value": 30,
+      "unit": "concurrent connected synthetic student requests",
+      "basis": "LOAD30.json direct HTTPS, SQL/callbackreadback; không đo30AI đồng thời."
+    },
+    "user_wait_target": "ACK kết nối đã thiết lập dưới1s trong tải30; từng gặp10s ở kết nối mới. Poll4s, AI180s, cap2; chưa cam kếtSLA AI.",
+    "limits_and_cost": [
+      "Runtime0,5CPU/256MB, pool5, tối đa2 lease toàn sản phẩm, một job/execution.",
+      "Chỉ10 danh tính giả trong scope; không mở roster thật hoặc nâng quota AI."
+    ],
+    "failure_and_recovery": [
+      "Nháp khi mất mạng/409; retry cùng requestId, không mất Comment.",
+      "Hết lease cấp lại prompt/opkey không đổi; kỹ thuật không tạo Comment cần sửa.",
+      "Dừng riêng Handout67 khi lỗi; không restart hệ cũ."
+    ],
+    "monitoring": [
+      "Đức theo dõi execution/job riêng; workflow giữ phục vụIC2304, không tự thêm schedule.",
+      "Roster16/ACL3 snapshot đăng ký riêng; Đức cập nhật khi lớp đổi người, rà12/10 trước mở thêm lớp."
+    ],
+    "decision": "Đức mởIC2304 và dashboard, giữ backend riêng.",
+    "test_ids": [
+      "R-UI-IDENTITY",
+      "R-UI-POLL",
+      "R-UI-TYPING",
+      "R-UI-CHECK",
+      "R-UI-READ-SINGLE",
+      "R-UI-ACK",
+      "R-UI-409",
+      "R-UI-DRAFT",
+      "R-UI-CLASS",
+      "R-UI-CLASS-CLOSED",
+      "T-TEACHER-UI-IDENTITY",
+      "T-TEACHER-UI-LATE",
+      "T-HP",
+      "T-BAD",
+      "T-CON",
+      "T-SEC",
+      "T-PART",
+      "T-IDENTITY",
+      "T-TIME",
+      "T-ERROR",
+      "T-HISTORY",
+      "T-VOCAB",
+      "T-ROLL",
+      "T-ISOLATION",
+      "T-CAPACITY",
+      "T-PROMPT-PIN",
+      "T-PROMPT-LEGACY",
+      "T-PROXY",
+      "T-WAKE",
+      "T-WAKE-CON",
+      "T-DURABLE",
+      "T-PROMPT",
+      "T-PORT",
+      "T-TEACHER-AUTH",
+      "T-TEACHER-SCOPE",
+      "T-TEACHER-COMMENT",
+      "T-TEACHER-HTTP"
+    ]
+  },
+  "requirements": [
+    {
+      "id": "CANDIDATE-requirements",
+      "statement": "Candidate code guards identity, scope, draft, lease and comment; native Google/class remain next gate.",
+      "test_ids": [
+        "R-UI-IDENTITY",
+        "R-UI-POLL",
+        "R-UI-TYPING",
+        "R-UI-CHECK",
+        "R-UI-READ-SINGLE",
+        "R-UI-ACK",
+        "R-UI-409",
+        "R-UI-DRAFT",
+        "R-UI-CLASS",
+        "R-UI-CLASS-CLOSED",
+        "T-TEACHER-UI-IDENTITY",
+        "T-TEACHER-UI-LATE",
+        "T-HP",
+        "T-BAD",
+        "T-CON",
+        "T-SEC",
+        "T-PART",
+        "T-IDENTITY",
+        "T-TIME",
+        "T-ERROR",
+        "T-HISTORY",
+        "T-VOCAB",
+        "T-ROLL",
+        "T-ISOLATION",
+        "T-CAPACITY",
+        "T-PROMPT-PIN",
+        "T-PROMPT-LEGACY",
+        "T-PROXY",
+        "T-WAKE",
+        "T-WAKE-CON",
+        "T-DURABLE",
+        "T-PROMPT",
+        "T-PORT",
+        "T-TEACHER-AUTH",
+        "T-TEACHER-SCOPE",
+        "T-TEACHER-COMMENT",
+        "T-TEACHER-HTTP"
+      ]
+    },
+    {
+      "id": "REQ-TEACHER",
+      "statement": "Google thật, ACL subject và đúng lớp; learner thấy góp ý đúng tác giả.",
+      "test_ids": [
+        "N-TEACHER-GOOGLE"
+      ]
+    },
+    {
+      "id": "REQ-CLASS",
+      "statement": "ChỉIC2304/16 và fixture riêng; canary thật rỗng.",
+      "test_ids": [
+        "N-CLASS-IC2304"
+      ]
+    }
+  ],
+  "invariants": [
+    {
+      "id": "CANDIDATE-invariants",
+      "statement": "Candidate code guards identity, scope, draft, lease and comment; native Google/class remain next gate.",
+      "test_ids": [
+        "R-UI-IDENTITY",
+        "R-UI-POLL",
+        "R-UI-TYPING",
+        "R-UI-CHECK",
+        "R-UI-READ-SINGLE",
+        "R-UI-ACK",
+        "R-UI-409",
+        "R-UI-DRAFT",
+        "R-UI-CLASS",
+        "R-UI-CLASS-CLOSED",
+        "T-TEACHER-UI-IDENTITY",
+        "T-TEACHER-UI-LATE",
+        "T-HP",
+        "T-BAD",
+        "T-CON",
+        "T-SEC",
+        "T-PART",
+        "T-IDENTITY",
+        "T-TIME",
+        "T-ERROR",
+        "T-HISTORY",
+        "T-VOCAB",
+        "T-ROLL",
+        "T-ISOLATION",
+        "T-CAPACITY",
+        "T-PROMPT-PIN",
+        "T-PROMPT-LEGACY",
+        "T-PROXY",
+        "T-WAKE",
+        "T-WAKE-CON",
+        "T-DURABLE",
+        "T-PROMPT",
+        "T-PORT",
+        "T-TEACHER-AUTH",
+        "T-TEACHER-SCOPE",
+        "T-TEACHER-COMMENT",
+        "T-TEACHER-HTTP"
+      ]
+    },
+    {
+      "id": "INV-OLD-CONSUMERS",
+      "statement": "Runtime/cấu hình40consumer cũ không đổi.",
+      "test_ids": [
+        "N-ISOLATION-CURRENT"
+      ]
+    }
+  ],
+  "tests": [
+    {
+      "id": "R-UI-IDENTITY",
+      "category": "security_privacy",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "R-UI-POLL",
+      "category": "concurrency_idempotency",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "R-UI-TYPING",
+      "category": "regression",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "R-UI-CHECK",
+      "category": "regression",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "R-UI-READ-SINGLE",
+      "category": "regression",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "R-UI-ACK",
+      "category": "external_partial",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "R-UI-409",
+      "category": "invalid_input",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "R-UI-DRAFT",
+      "category": "rollback_recovery",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "R-UI-CLASS",
+      "category": "security_privacy",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "R-UI-CLASS-CLOSED",
+      "category": "security_privacy",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-TEACHER-UI-IDENTITY",
+      "category": "security_privacy",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-TEACHER-UI-LATE",
+      "category": "concurrency_idempotency",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-HP",
+      "category": "happy_path",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-BAD",
+      "category": "invalid_input",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-CON",
+      "category": "concurrency_idempotency",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-SEC",
+      "category": "security_privacy",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-PART",
+      "category": "external_partial",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-IDENTITY",
+      "category": "security_privacy",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-TIME",
+      "category": "lifecycle_time",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-ERROR",
+      "category": "external_partial",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-HISTORY",
+      "category": "happy_path",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-VOCAB",
+      "category": "invalid_input",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-ROLL",
+      "category": "rollback_recovery",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-ISOLATION",
+      "category": "security_privacy",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-CAPACITY",
+      "category": "concurrency_idempotency",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-PROMPT-PIN",
+      "category": "regression",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-PROMPT-LEGACY",
+      "category": "regression",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-PROXY",
+      "category": "regression",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-WAKE",
+      "category": "external_partial",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-WAKE-CON",
+      "category": "concurrency_idempotency",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-DURABLE",
+      "category": "rollback_recovery",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-PROMPT",
+      "category": "security_privacy",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-PORT",
+      "category": "regression",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-TEACHER-AUTH",
+      "category": "security_privacy",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-TEACHER-SCOPE",
+      "category": "security_privacy",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-TEACHER-COMMENT",
+      "category": "concurrency_idempotency",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "T-TEACHER-HTTP",
+      "category": "security_privacy",
+      "priority": "P1",
+      "status": "passed",
+      "evidence": "UI12/BACKEND25 actual receipts input hashes; independent source review P0/P1 closed."
+    },
+    {
+      "id": "N-TEACHER-GOOGLE",
+      "category": "security_privacy",
+      "priority": "P0",
+      "status": "passed",
+      "evidence": "BROWSER_CORE.json: Google thật, cookie reload, đúngIC2304/16 và góp ý giả đúng tác giả; teacher-note-student.png visible."
+    },
+    {
+      "id": "N-CLASS-IC2304",
+      "category": "happy_path",
+      "priority": "P0",
+      "status": "passed",
+      "evidence": "CLASS_OPEN.json:16UUID đúng đăng ký; phiên thật rỗng; GV đọc cùng phiên không thêm bài giả."
+    },
+    {
+      "id": "N-ISOLATION-CURRENT",
+      "category": "rollback_recovery",
+      "priority": "P0",
+      "status": "passed",
+      "evidence": "ISOLATION_FINAL.json:40container cũ+Nginx không đổi; CANDIDATE backup/image riêng."
+    },
+    {
+      "id": "N-LOAD30",
+      "category": "concurrency_idempotency",
+      "priority": "P0",
+      "status": "passed",
+      "evidence": "LOAD30.json:30concurrent đã kết nối, ACK max.804/.705/.290, cap2/readback30; cold connection failure giữ riêng, không cam kết3s mọi mạng."
+    },
+    {
+      "id": "N-AI-CURRENT",
+      "category": "happy_path",
+      "priority": "P0",
+      "status": "passed",
+      "evidence": "AI_CURRENT.json: runtime698c623 chấm Topic giả/callback một Comment; rubric/workflow giữ nguyên."
+    }
+  ],
+  "task_graph": {
+    "plan_revision": "native-test-v1",
+    "tasks": [
+      {
+        "id": "N1",
+        "result": "Bản thử riêng có readback thật và route review được.",
+        "module_ids": [
+          "CLIENT",
+          "UI"
+        ],
+        "depends_on": [],
+        "consumes": [
+          "Đức đã duyệt dựng/kiểm bản thử riêng; source/rubric đã rà."
+        ],
+        "produces": [
+          "Route thử",
+          "native/AI/browser receipts",
+          "README",
+          "quality-gate.json"
+        ],
+        "contract": "Candidate fake only; real class gate remains pending.",
+        "test_ids": [
+          "R-UI-IDENTITY",
+          "R-UI-POLL",
+          "R-UI-TYPING",
+          "R-UI-CHECK",
+          "R-UI-READ-SINGLE",
+          "R-UI-ACK",
+          "R-UI-409",
+          "R-UI-DRAFT",
+          "R-UI-CLASS",
+          "R-UI-CLASS-CLOSED",
+          "T-TEACHER-UI-IDENTITY",
+          "T-TEACHER-UI-LATE",
+          "T-HP",
+          "T-BAD",
+          "T-CON",
+          "T-SEC",
+          "T-PART",
+          "T-IDENTITY",
+          "T-TIME",
+          "T-ERROR",
+          "T-HISTORY",
+          "T-VOCAB",
+          "T-ROLL",
+          "T-ISOLATION",
+          "T-CAPACITY",
+          "T-PROMPT-PIN",
+          "T-PROMPT-LEGACY",
+          "T-PROXY",
+          "T-WAKE",
+          "T-WAKE-CON",
+          "T-DURABLE",
+          "T-PROMPT",
+          "T-PORT",
+          "T-TEACHER-AUTH",
+          "T-TEACHER-SCOPE",
+          "T-TEACHER-COMMENT",
+          "T-TEACHER-HTTP"
+        ],
+        "evidence_required": [
+          "8native UI tests, AI/SQL/lease/restart/readback, browser, metadata consumer"
+        ],
+        "decision_inputs": [
+          "Scope bản thử đã duyệt; 30 người/canary thuộc gói mở lớp thật."
+        ],
+        "affected_future_tasks": [],
+        "status": "done",
+        "plan_revision": "native-test-v1"
+      }
+    ]
+  },
+  "risk_register": {
+    "assessment": "PASS",
+    "risks": [
+      {
+        "id": "R-ASYNC",
+        "description": "Phản hồi muộn/mất ACK hoặc nháp hai tab làm trộn bài.",
+        "probability": 2,
+        "impact": 3,
+        "score": 6,
+        "severity": "P1",
+        "status": "mitigated",
+        "owner": "Codex",
+        "mitigation": "Epoch/ref/version guards, chỉ restore dirty changes, retry cùng requestId, backend CAS.",
+        "test_ids": [
+          "R-UI-IDENTITY",
+          "R-UI-POLL",
+          "R-UI-TYPING",
+          "R-UI-CHECK",
+          "R-UI-READ-SINGLE",
+          "R-UI-ACK",
+          "R-UI-409",
+          "R-UI-DRAFT",
+          "R-UI-CLASS",
+          "R-UI-CLASS-CLOSED",
+          "T-TEACHER-UI-IDENTITY",
+          "T-TEACHER-UI-LATE",
+          "T-HP",
+          "T-BAD",
+          "T-CON",
+          "T-SEC",
+          "T-PART",
+          "T-IDENTITY",
+          "T-TIME",
+          "T-ERROR",
+          "T-HISTORY",
+          "T-VOCAB",
+          "T-ROLL",
+          "T-ISOLATION",
+          "T-CAPACITY",
+          "T-PROMPT-PIN",
+          "T-PROMPT-LEGACY",
+          "T-PROXY",
+          "T-WAKE",
+          "T-WAKE-CON",
+          "T-DURABLE",
+          "T-PROMPT",
+          "T-PORT",
+          "T-TEACHER-AUTH",
+          "T-TEACHER-SCOPE",
+          "T-TEACHER-COMMENT",
+          "T-TEACHER-HTTP"
+        ]
+      }
+    ],
+    "waivers": []
+  },
+  "coverage_exemptions": {},
+  "cross_constraints": [
+    {
+      "id": "LEASE-AI",
+      "left": {
+        "name": "lease_seconds",
+        "value": 300
+      },
+      "operator": ">",
+      "right": {
+        "name": "AI180_callback20_margin60",
+        "value": 260
+      },
+      "status": "passed",
+      "evidence": "Runtime/config + actual NATIVE_LEASE, không thay cho SLA tải30."
+    }
+  ],
+  "mutations": [
+    {
+      "id": "OWN-IMAGE-ROSTER-ACL",
+      "outcome": "success",
+      "readback": "verified",
+      "evidence": "CANDIDATE/CLASS_OPEN/ISOLATION_FINAL; riêngHandout67, không đổi sản phẩm khác."
+    },
+    {
+      "id": "TEACHER-FIXTURE-COMMENT",
+      "outcome": "success",
+      "readback": "verified",
+      "evidence": "Google thật, đúng1góp ýfixture6, learnerAPI sanitized +browser thấyComment; không ghi bài thật."
+    },
+    {
+      "id": "PAGES-PUBLICATION",
+      "outcome": "success",
+      "readback": "verified",
+      "evidence": "ASSET_READBACK8 Gitblobs matched và Google/HVbrowser."
+    }
+  ],
+  "verification_runs": [
+    {
+      "id": "UI-FINAL",
+      "scope": "full_suite",
+      "command": "node --test E:\\Codex-Projects\\ielts-worktrees\\lesson5-web-demo-20261005\\pages\\writing-handouts\\lesson5-thu\\ui-races.test.mjs E:\\Codex-Projects\\ielts-worktrees\\lesson5-web-demo-20261005\\pages\\writing-handouts\\lesson5\\teacher.test.mjs",
+      "tree_revision": "4eead0cee14074d59bb444f9acc7e20245b431f1fb9a3117c530afaa58f52d53",
+      "captured_at": "2026-10-05T12:25:27.216756+00:00",
+      "exit_code": 0,
+      "outcome": "passed",
+      "passed": 12,
+      "failed": 0,
+      "skipped": 0,
+      "test_ids": [
+        "R-UI-IDENTITY",
+        "R-UI-POLL",
+        "R-UI-TYPING",
+        "R-UI-CHECK",
+        "R-UI-READ-SINGLE",
+        "R-UI-ACK",
+        "R-UI-409",
+        "R-UI-DRAFT",
+        "R-UI-CLASS",
+        "R-UI-CLASS-CLOSED",
+        "T-TEACHER-UI-IDENTITY",
+        "T-TEACHER-UI-LATE"
+      ],
+      "evidence": "UI_RECEIPT.json, same executable source hashes; BACKEND runtime revision698c623."
+    },
+    {
+      "id": "BACKEND-FINAL",
+      "scope": "full_suite",
+      "command": "node --test E:\\Codex-Projects\\ielts-worktrees\\handout67-isolation-20261005\\writing-practice\\handout-writing67\\test\\api.test.mjs E:\\Codex-Projects\\ielts-worktrees\\handout67-isolation-20261005\\writing-practice\\handout-writing67\\test\\prompt-pin.test.mjs E:\\Codex-Projects\\ielts-worktrees\\handout67-isolation-20261005\\writing-practice\\handout-writing67\\test\\proxy.test.mjs E:\\Codex-Projects\\ielts-worktrees\\handout67-isolation-20261005\\writing-practice\\handout-writing67\\test\\runtime.test.mjs E:\\Codex-Projects\\ielts-worktrees\\handout67-isolation-20261005\\writing-practice\\handout-writing67\\test\\teacher.test.mjs",
+      "tree_revision": "4eead0cee14074d59bb444f9acc7e20245b431f1fb9a3117c530afaa58f52d53",
+      "captured_at": "2026-10-05T12:15:12.148427+00:00",
+      "exit_code": 0,
+      "outcome": "passed",
+      "passed": 25,
+      "failed": 0,
+      "skipped": 0,
+      "test_ids": [
+        "T-HP",
+        "T-BAD",
+        "T-CON",
+        "T-SEC",
+        "T-PART",
+        "T-IDENTITY",
+        "T-TIME",
+        "T-ERROR",
+        "T-HISTORY",
+        "T-VOCAB",
+        "T-ROLL",
+        "T-ISOLATION",
+        "T-CAPACITY",
+        "T-PROMPT-PIN",
+        "T-PROMPT-LEGACY",
+        "T-PROXY",
+        "T-WAKE",
+        "T-WAKE-CON",
+        "T-DURABLE",
+        "T-PROMPT",
+        "T-PORT",
+        "T-TEACHER-AUTH",
+        "T-TEACHER-SCOPE",
+        "T-TEACHER-COMMENT",
+        "T-TEACHER-HTTP"
+      ],
+      "evidence": "BACKEND_RECEIPT.json, same executable source hashes; BACKEND runtime revision698c623."
+    },
+    {
+      "id": "NATIVE-FINAL",
+      "scope": "behavioral",
+      "command": "Native API/Google browser/readback + established connection load30",
+      "tree_revision": "4eead0cee14074d59bb444f9acc7e20245b431f1fb9a3117c530afaa58f52d53",
+      "captured_at": "2026-10-05T12:40:58.823582+00:00",
+      "exit_code": 0,
+      "outcome": "passed",
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "test_ids": [
+        "N-TEACHER-GOOGLE",
+        "N-CLASS-IC2304",
+        "N-ISOLATION-CURRENT",
+        "N-LOAD30",
+        "N-AI-CURRENT"
+      ],
+      "evidence": "CLASS_OPEN/BROWSER_CORE/ISOLATION_FINAL/LOAD30/AI_CURRENT/ASSET_READBACK actual receipts."
+    }
+  ],
+  "convergence": {
+    "status": "passed",
+    "tree_revision": "4eead0cee14074d59bb444f9acc7e20245b431f1fb9a3117c530afaa58f52d53",
+    "gaps": [],
+    "unrequested_work": [],
+    "evidence": "Backend25/UI12 source review không cònP0/P1; native core5 và8assets readback; full suite đủ nativeIDs, không chạy trùng."
+  },
+  "context_handoff": {
+    "summary": "IC2304/16 đã mở, dashboard Google riêng, workflow riêng được giữ.",
+    "decisions": [
+      "Yêu cầu mởIC2304 và tạo dashboard từĐức; không ghiDECISIONS."
+    ],
+    "completed": [
+      "N1"
+    ],
+    "next_step": "Đức dùng haiURL; cập nhật roster/ACL riêng khi lớp đổi người và rà12/10.",
+    "open_risks": [],
+    "tree_revision": "4eead0cee14074d59bb444f9acc7e20245b431f1fb9a3117c530afaa58f52d53"
+  },
+  "release": {
+    "target_environment": "production",
+    "decision": "verified",
+    "base_tree_revision": "6d4ef78be047b66c55d74bd0b2ec5173ac774140",
+    "current_tree_revision": "4eead0cee14074d59bb444f9acc7e20245b431f1fb9a3117c530afaa58f52d53",
+    "production_authorized": true,
+    "authorization_scope": "Đức yêu cầu mở IC2304 và tạo dashboard; userdeadline19:45 chấp nhận hoãn kiểm phụ.",
+    "rollback": "Bỏ route thử mới hoặc stop riêng Handout67; giữ database/bài; giữ URL demo/Docs cũ.",
+    "deployment_readback": "verified",
+    "operational_observation": "Google đăng nhập thật+cookie reload, GV16, canary HVrỗng, góp ý fixture thấy ởHV, currentAIcallback,40consumer unchanged và8asset GitblobHTTP readback.",
+    "open_risks": [],
+    "public_url": "https://tranhoangduc90.github.io/izone-ai-team-pages/writing-handouts/lesson5-thu/"
+  },
+  "source_revision": {
+    "algorithm": "sha256",
+    "files": [
+      "src/config.mjs",
+      "src/http.mjs",
+      "src/migrate.mjs",
+      "src/prompt.mjs",
+      "src/server.mjs",
+      "src/service.mjs",
+      "src/store.mjs",
+      "src/teacher.mjs",
+      "src/wake.mjs",
+      "package.json",
+      "package-lock.json",
+      "compose.yaml",
+      "test/api.test.mjs",
+      "test/prompt-pin.test.mjs",
+      "test/proxy.test.mjs",
+      "test/runtime.test.mjs",
+      "test/teacher.test.mjs"
+    ],
+    "file_hashes": {
+      "src/config.mjs": "0828c56e1e414f37af69c353503e047e979f9282d2c731d7392c17f90a965528",
+      "src/http.mjs": "bd106669f7c3abf516149f31f366ed976cd0532d70ea97087d292968afbc8441",
+      "src/migrate.mjs": "54c923307801ab88b203728e288feb755aacff267ae72c012852980ce31847a5",
+      "src/prompt.mjs": "df6e5634e6a2d3e401253043947febadbe6a6f4f3a40d363c07116ec3b737ae4",
+      "src/server.mjs": "fe384a72929eb43d43d7daea9252a1774aab2ff3cb260f63c1bde6170789db66",
+      "src/service.mjs": "6516033ffbb97cee548855267106f35e4d215a5a3a46809b7a69d6203e4713a1",
+      "src/store.mjs": "2e64c2ebcd37ce09947d75abefc573d92d341f16442a0253321f27916aea2427",
+      "src/teacher.mjs": "44d05397e5e1c130fa5a3e16fd153d5940434c9e62ee3116ddc14448c7ad1e48",
+      "src/wake.mjs": "0225568448455d18e4701c042f2cab9438e71d7d64ca4d1dbe23f803c2416820",
+      "package.json": "ab22380ba95531cec438a83f25bbbe1834712d12e175653567d0aff9f46b4df3",
+      "package-lock.json": "701b00fd59bc6b0190c02462b07bc9667aada1eebe456415f192ab20604a09ff",
+      "compose.yaml": "e29fe4b5be415f96b8f245338c6126c228112134fc24b9db82f90f8d9e9f008b",
+      "test/api.test.mjs": "fb4bbb0a4300d0d8faeba213e9acd04b7c5cd9782b2d70da0a81c827f9b9fdc4",
+      "test/prompt-pin.test.mjs": "65de00fa12aa4cf154ddacfe28ce620190d2068b98ac96f6c73d489a610be6c1",
+      "test/proxy.test.mjs": "549cf99dab797c7f10fd2fcb744ad4db4dfab95bbd8ba379a09e90c55cb6c925",
+      "test/runtime.test.mjs": "b6ab27f8b961d91679448a89806e134ad07243d6fa53ebfbb7a87f45ab099814",
+      "test/teacher.test.mjs": "21b37afc824ee23c50e868de0336093d77cdb11b4ade73e75dc294d1b3451301"
+    },
+    "excludes": [
+      "quality-gate.json",
+      "README.md",
+      "RUNBOOK.md",
+      "PLAN.md"
+    ],
+    "value": "4eead0cee14074d59bb444f9acc7e20245b431f1fb9a3117c530afaa58f52d53"
+  },
+  "backend_runtime_pin": {
+    "revision": "698c623ea584222aee1029fa8cb34ac8f25ce120",
+    "image_digest": "sha256:0be8599fcc2168eb4bef1f7498e986312433904b21be137a592cecc336d0b886",
+    "prompt_version": "lesson5-rubric-v3"
+  },
+  "verification_footprints": {
+    "backend": "BACKEND_RECEIPT25 actual source hashes and runtime698c623",
+    "frontend": "UI_RECEIPT12 inputHashes + ASSET_READBACK bafe0f7; final873cb8c changes only docs/gate."
+  }
+}

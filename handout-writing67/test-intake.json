@@ -1,0 +1,16 @@
+{
+  "product_id": "PRODUCT-HANDOUT-WRITING67",
+  "registry_root": "handout-writing67/",
+  "status": "new_product_profile_not_registered",
+  "source_base": "cd122706bf3c112ba9d4c05afa6207b8520ee34e",
+  "native_runner": "Node24 --test test/*.test.mjs",
+  "traits": ["stateful","asynchronous","concurrent","authentication","multi_user","multi_service","external_side_effects"],
+  "trait_basis": "HTTP session/save -> SQL transaction -> leased AI job -> callback/readback",
+  "module_contracts": "PLAN.md và RUNBOOK.md",
+  "selector_outcome": "unknown_new_product_requires_registration_outside_build",
+  "fallback": "Giữ toàn bộ suite native của backend mới; không kế thừa pass Writing/Progress Log/template.",
+  "maintenance_gap": "Cần đăng ký profile/graph riêng ở lượt bảo trì, không mở phân loại nặng trong task xây.",
+  "native_inventory": ["T-HP","T-BAD","T-CON","T-SEC","T-PART","T-IDENTITY","T-TIME","T-ERROR","T-HISTORY","T-VOCAB","T-ROLL","T-ISOLATION","T-CAPACITY","T-PROXY","T-WAKE","T-WAKE-CON","T-DURABLE","T-PROMPT","T-PORT"],
+  "test_value": "Bảo vệ bước/ownership/tuple/lease/phiên bản/readback ở HTTP+SQL thật; proxy quota, đĩa, notifier và prompt contract kiểm rủi ro riêng; không thêm production export hoặc hook chỉ cho test.",
+  "native_rollout_obligations": ["PostgreSQL role grants thật","Docker build/start/rollback riêng","proxy thật","n8n/gateway và mất ACK thật","front end/canary","metadata consumer trước/sau","tải lớp30 và quota thực tế"]
+}

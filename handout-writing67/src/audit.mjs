@@ -2,7 +2,7 @@ import {createHash} from 'node:crypto';
 
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const iso=ms=>new Date(ms).toISOString();
-const terminal=status=>['completed','failed'].includes(status);
+const terminal=status=>['completed','failed','superseded'].includes(status);
 // SQL tính tháng lịch trong UTC, không lấy 60 ngày hoặc phụ thuộc timezone của connection.
 const expiry="((($1::timestamptz AT TIME ZONE 'UTC') + interval '2 months') AT TIME ZONE 'UTC')";
 
@@ -17,11 +17,19 @@ export async function auditChange(tx,before,after,now){
   if(!before)await event(`${after.ref}:open`,'session_opened');
   if(before&&JSON.stringify(before.responses)!==JSON.stringify(after.responses)){
     const fields=Object.keys(after.responses).filter(k=>before.responses[k]!==after.responses[k]);
-    await event(`${after.ref}:save:${after.version}`,'responses_saved',null,{version:after.version,fields});
+    const edited=Object.entries(after.operations||{}).some(([key,operation])=>!before.operations?.[key]&&operation.action==='edit');
+    await event(`${after.ref}:save:${after.version}`,edited?'content_edited':'responses_saved',null,{version:after.version,fields,...(edited?{before:Object.fromEntries(fields.map(k=>[k,before.responses[k]])),after:Object.fromEntries(fields.map(k=>[k,after.responses[k]]))}:{})});
   }
+  for(const [section,step] of Object.entries(after.steps))if(step.approval?.source==='student_attested_teacher_permission'&&JSON.stringify(step.approval)!==JSON.stringify(before?.steps[section]?.approval))await event(`${after.ref}:attest:${section}`,'student_attested_teacher_permission',null,{section,approval:step.approval,responses:after.responses});
   if(before&&!before.idea2Open&&after.idea2Open)await event(`${after.ref}:idea2`,'idea2_opened');
   const oldComments=new Set((before?.teacherComments||[]).map(c=>c.ref));
   for(const c of after.teacherComments||[])if(!oldComments.has(c.ref))await event(`${after.ref}:teacher:${c.ref}`,'teacher_comment',null,{section:c.section,commentRef:c.ref,authorName:c.authorName});
+  const oldThreads=new Map((before?.commentThreads||[]).map(t=>[t.ref,t]));
+  for(const thread of after.commentThreads||[]){
+    const old=oldThreads.get(thread.ref),messages=new Set((old?.messages||[]).map(m=>m.ref));
+    for(const message of thread.messages)if(!messages.has(message.ref))await event(`${after.ref}:message:${message.ref}`,'comment_'+message.role,null,{threadRef:thread.ref,field:thread.field,quote:thread.anchor.quote,message:{body:message.body,role:message.role,authorName:message.authorName,createdAt:message.createdAt}});
+    if(old&&old.status!==thread.status)await event(`${after.ref}:thread:${thread.ref}:${after.commentVersion}`,'comment_status_changed',null,{threadRef:thread.ref,status:thread.status,authorName:thread.statusChangedBy});
+  }
   const oldJobs=new Map((before?.jobs||[]).map(j=>[j.jobRef,j]));
   for(const job of after.jobs){
     const old=oldJobs.get(job.jobRef);
@@ -67,6 +75,11 @@ export function createAudit(db){
         if(!current.rows.length)throw Object.assign(new Error('ATTEMPT_NOT_FOUND'),{status:404});
         if(current.rows[0].response_hash&&current.rows[0].response_hash!==digest)throw Object.assign(new Error('AI_RESPONSE_CONFLICT'),{status:409});
         if(current.rows[0].response_hash)return {responseHash:digest,replayed:true};
+        // Phản hồi đến sau khi cho qua/Edit vẫn giữ đủ hai tháng từ lúc nhận cuối.
+        if(terminal(job.status)){
+          const until=await tx.query(`SELECT ${expiry} AS expires_at`,[iso(now)]);
+          for(const table of ['grading_input','grading_attempt','activity_event'])await tx.query(`UPDATE handout67.${table} SET expires_at=GREATEST(expires_at,$2::timestamptz) WHERE job_ref=$1`,[job.jobRef,until.rows[0].expires_at]);
+        }
         await tx.query(`UPDATE handout67.grading_attempt SET response_text=$3,response_body=$4::jsonb,response_hash=$5,
           model=$6,http_status=$7,execution_ref=$8,provider_ref=$9,
           status=CASE WHEN status='processing' THEN 'response_received' ELSE status END,

@@ -1,5 +1,6 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import {parseAiResult} from './processor.mjs';
+import {publicThreads, changeThread} from './comments.mjs';
 
 export const PRODUCT = 'handout-writing67';
 export const ORDER = ['topic','b1','a1','x1','b2','a2','x2'];
@@ -15,6 +16,14 @@ const passed = (s,key) => s.steps[key].status==='passed';
 const ideaPassed = (s,n) => ['b','a','x'].every(k=>passed(s,k+n));
 const available = (s,key) => ORDER.includes(key) && (key==='topic' || passed(s,ORDER[ORDER.indexOf(key)-1])) && (!key.endsWith('2') || s.idea2Open);
 
+// Chỉ đối chiếu những trường thật sự được prompt dùng; snapshot đầy đủ vẫn giữ cho audit.
+export function dependencies(section,ideaIndex){
+  if(!section)return ['a','x','b'].map(k=>k+ideaIndex);
+  if(section==='topic')return FIELDS.topic;
+  return [...new Set([section,'idea'+ideaIndex,'topicSentence',...(section[0]==='x'?['a'+ideaIndex]:[]),...(['a','x'].includes(section[0])?['b'+ideaIndex]:[]),...(section==='b2'?['b1']:[])])];
+}
+const relevant = (job,responses) => hash(Object.fromEntries(dependencies(job.section,job.ideaIndex).map(k=>[k,responses[k]])));
+
 export function createService({store, roster, secret, clock=Date.now, leaseMs=300000, sessionMs=43200000, maxLeases=null, maxJobMs=1800000, retryDelays=[0,0,0], renderJob, promptVersion='lesson5-rubric-v3'}) {
   if (typeof secret!=='string' || secret.length<32 || leaseMs<=180000) fail('CONFIG_INVALID');
   if(maxLeases!==null&&(!Number.isSafeInteger(maxLeases)||maxLeases<1))fail('CONFIG_INVALID');
@@ -24,7 +33,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     // Lấy job cuối của từng bước/ý trước khi lọc, không hiện lỗi cũ sau lượt mới đã đạt.
     const latest=Object.fromEntries(s.jobs.map(j=>[j.kind==='grade'?j.section:'vocab'+j.ideaIndex,j]));
     const processing=Object.fromEntries(Object.entries(latest).filter(([,j])=>['queued','leased','failed'].includes(j.status)).map(([key,j])=>[key,{jobRef:j.jobRef,status:j.status,tries:j.tries,maxTries:3,createdAt:j.createdAt,deadlineAt:j.deadlineAt??j.createdAt+maxJobMs,leaseUntil:j.leaseUntil,nextAttemptAt:j.nextAttemptAt??null,error:j.error??null}]));
-    return {ref:s.ref,activity:s.activity,classRef:s.classRef,studentRef:s.studentRef,responses:s.responses,version:s.version,idea2Open:s.idea2Open,steps:s.steps,vocabulary:s.vocabulary,teacherComments:publicTeacherComments(s),processing};
+    return {ref:s.ref,activity:s.activity,classRef:s.classRef,studentRef:s.studentRef,responses:s.responses,version:s.version,idea2Open:s.idea2Open,steps:s.steps,vocabulary:s.vocabulary,teacherComments:publicTeacherComments(s),commentThreads:publicThreads(s),commentVersion:s.commentVersion||0,submittedSections:[...new Set(s.jobs.filter(j=>j.kind==='grade').map(j=>j.section))],processing};
   };
   const issue = ref => {const content=`${ref}.${clock()+sessionMs}`;return `${content}.${sign(content)}`;};
   const authorize = (ref,token) => {
@@ -43,10 +52,40 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     const snapshot = {topic:TOPIC,responses:structuredClone(s.responses),history:section?s.steps[section].history.map(h=>({feedback:h.feedback,status:h.status,snapshot:h.snapshot})):[],ideaIndex};
     const job = {productId:PRODUCT,sessionRef:s.ref,jobRef:randomUUID(),kind,section,ideaIndex,snapshotHash:hash(snapshot),snapshot,promptVersion,status:'queued',tries:0,createdAt:clock(),deadlineAt:clock()+maxJobMs,leaseUntil:0,leaseToken:null,attempts:[]};
     job.operationKey = `${PRODUCT}:${job.jobRef}:${job.promptVersion}`;
+    job.inputHash=relevant(job,s.responses);
     // Ghim nguyên prompt vào job trước ACK; retry/redeploy giữ cùng payload và operationKey.
     if(renderJob)job.prompt=renderJob({...envelope(job),snapshot});
     s.jobs.push(job);
     return job;
+  }
+  function supersede(s,j,reason){
+    if(!['queued','leased'].includes(j.status))return;
+    j.status='superseded';j.error=null;j.supersededReason=reason;j.supersededAt=clock();
+    if(j.kind==='grade'&&s.steps[j.section].status==='pending'){s.steps[j.section].status='revision';s.steps[j.section].error=null;}
+  }
+  function vocabulary(s,n,delay=0){
+    if(!ideaPassed(s,n))return;
+    const latest=s.jobs.find(j=>j.jobRef===s.vocabulary[n]?.jobRef);
+    const current=hash(Object.fromEntries(['a','x','b'].map(k=>[k+n,s.responses[k+n]])));
+    if(latest&&latest.inputHash===current&&['queued','leased','completed'].includes(latest.status))return;
+    for(const j of s.jobs)if(j.kind==='vocab'&&j.ideaIndex===n)supersede(s,j,'content_changed');
+    const v=makeJob(s,'vocab',null,n);
+    // Một khoảng ngắn gộp các lần Edit liên tiếp trước khi phát AI.
+    v.nextAttemptAt=clock()+delay;
+    s.vocabulary[n]={status:'queued',jobRef:v.jobRef};
+  }
+  function pass(s,section,source){
+    const step=s.steps[section];step.status='passed';step.error=null;
+    step.approval={source,at:new Date(clock()).toISOString()};
+    if(section[0]==='x')vocabulary(s,Number(section.at(-1)));
+  }
+  function receipt(s,input,change){
+    s.operations||={};const signature=hash(input);
+    if(s.operations[input.requestId]){if(s.operations[input.requestId].hash!==signature)fail('REQUEST_ID_CONFLICT',409);return publicSession(s);}
+    if(s.version!==input.baseVersion)fail('VERSION_CONFLICT',409);
+    change();s.operations[input.requestId]={hash:signature,at:clock(),action:input.field?'edit':'attest',field:input.field??null,section:input.section??null};
+    if(Object.keys(s.operations).length>200)delete s.operations[Object.keys(s.operations)[0]];
+    return publicSession(s);
   }
   function resultValid(job,result) {
     if (!object(result)) return false;
@@ -124,6 +163,32 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
         return {jobRef:job.jobRef,session:publicSession(s)};
       });
     },
+    async attest(ref,token,input){
+      if(!object(input)||!id(input.requestId)||!Number.isSafeInteger(input.baseVersion)||!ORDER.includes(input.section)||input.teacherPermission!==true)fail('ATTEST_INVALID');
+      return edit(ref,token,s=>receipt(s,input,()=>{
+        if(!available(s,input.section)||passed(s,input.section))fail('STEP_LOCKED',409);
+        if(!s.jobs.some(j=>j.kind==='grade'&&j.section===input.section))fail('CHECK_REQUIRED',409);
+        if(FIELDS[input.section].some(k=>!string(s.responses[k])))fail('EMPTY_RESPONSE');
+        for(const j of s.jobs)if(j.kind==='grade'&&j.section===input.section)supersede(s,j,'student_attested_teacher_permission');
+        pass(s,input.section,'student_attested_teacher_permission');
+      }));
+    },
+    async revise(ref,token,input){
+      const section=ORDER.find(k=>FIELDS[k].includes(input?.field));
+      if(!object(input)||!id(input.requestId)||!Number.isSafeInteger(input.baseVersion)||!section||!string(input.value))fail('EDIT_INVALID');
+      return edit(ref,token,s=>receipt(s,input,()=>{
+        if(!available(s,section))fail('FIELD_LOCKED',409);
+        if(s.responses[input.field]===input.value)return;
+        s.responses[input.field]=input.value;s.version++;
+        s.steps[section].editedAt=new Date(clock()).toISOString();
+        if(passed(s,section))s.steps[section].editedAfterApproval=true;
+        for(const j of s.jobs)if(dependencies(j.section,j.ideaIndex).includes(input.field))supersede(s,j,'content_changed');
+        if(/^[axb][12]$/.test(input.field))vocabulary(s,Number(input.field.at(-1)),1000);
+      }));
+    },
+    async replyComment(ref,token,input){
+      return edit(ref,token,s=>{changeThread(s,{role:'student',key:s.studentRef,name:'Học viên'},input,clock());return publicSession(s);});
+    },
     async openIdea2(ref,token) {return edit(ref,token,s=>{if(!ideaPassed(s,1))fail('IDEA1_INCOMPLETE',409);s.idea2Open=true;return publicSession(s);});},
     async retryVocabulary(ref,token,n) {return edit(ref,token,s=>{
       if(![1,2].includes(n)||!ideaPassed(s,n))fail('VOCAB_LOCKED',409);
@@ -159,6 +224,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
       const result=await store.edit(input.sessionRef,s=>{
         const j=s.jobs.find(j=>j.jobRef===input.jobRef);if(!j)fail('JOB_NOT_FOUND',404);
         if(!sameEnvelope(j,input))fail('CALLBACK_IDENTITY_MISMATCH',409);
+        if(j.status==='superseded')return {jobRef:j.jobRef,status:j.status};
         if(j.status==='completed') {if(j.resultHash!==hash(input.result))fail('CALLBACK_RESULT_CONFLICT',409);return {jobRef:j.jobRef,status:j.status,resultHash:j.resultHash};}
         // Kết quả sau hạn toàn lượt không được mở bước, dù lease cuối còn hiệu lực.
         if(['queued','leased'].includes(j.status)&&(j.deadlineAt??j.createdAt+maxJobMs)<=clock()){
@@ -175,12 +241,13 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
           return {jobRef:j.jobRef,status:j.status};
         }
         if(!resultValid(j,input.result))fail('RESULT_INVALID',422);
-        if(j.kind==='grade' && (s.steps[j.section].status!=='pending'||hash({topic:TOPIC,responses:s.responses,history:s.steps[j.section].history.map(h=>({feedback:h.feedback,status:h.status,snapshot:h.snapshot})),ideaIndex:j.ideaIndex})!==j.snapshotHash))fail('SNAPSHOT_STALE',409);
+        if(j.kind==='grade' && (s.steps[j.section].status!=='pending'||relevant(j,s.responses)!==(j.inputHash??relevant(j,j.snapshot.responses))))fail('SNAPSHOT_STALE',409);
+        if(j.kind==='vocab'&&(!ideaPassed(s,j.ideaIndex)||s.vocabulary[j.ideaIndex]?.jobRef!==j.jobRef||relevant(j,s.responses)!==(j.inputHash??relevant(j,j.snapshot.responses))))fail('VOCAB_STALE',409);
         j.status='completed';j.error=null;j.resultHash=hash(input.result);j.result=input.result;
         if(j.kind==='grade') {
           const step=s.steps[j.section];step.status=input.result.resultStatus==='passed'?'passed':'revision';step.error=null;
           step.history.push({number:step.history.length+1,status:step.status,feedback:input.result.feedback,snapshot:Object.fromEntries(FIELDS[j.section].map(k=>[k,j.snapshot.responses[k]])),jobRef:j.jobRef});
-          if(j.section[0]==='x' && step.status==='passed') {const v=makeJob(s,'vocab',null,j.ideaIndex);s.vocabulary[j.ideaIndex]={status:'queued',jobRef:v.jobRef};}
+          if(step.status==='passed')pass(s,j.section,'ai');
         } else {
           if(!ideaPassed(s,j.ideaIndex)||s.vocabulary[j.ideaIndex]?.jobRef!==j.jobRef)fail('VOCAB_STALE',409);
           s.vocabulary[j.ideaIndex]={status:'ready',jobRef:j.jobRef,sourceHash:j.snapshotHash,groups:input.result};
@@ -201,7 +268,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
       if(!object(input)||!id(input.jobRef))fail('CALLBACK_INVALID');
       const job=await store.findJob(input.jobRef);if(!job)fail('JOB_NOT_FOUND',404);
       if(!sameEnvelope(job,input))fail('CALLBACK_IDENTITY_MISMATCH',409);
-      if(job.status==='completed'||job.status==='queued'||job.status==='failed')return job;
+      if(['completed','queued','failed','superseded'].includes(job.status))return job;
       if((job.deadlineAt??job.createdAt+maxJobMs)<=clock()){
         await store.edit(job.sessionRef,s=>{expire(s);});return store.findJob(input.jobRef);
       }
@@ -218,6 +285,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
       const attempt=j.attempts?.find(a=>a.ref===input.attemptRef&&a.leaseHash===hash(input.leaseToken));
       if(!attempt)fail('CALLBACK_IDENTITY_MISMATCH',409);
       const captured=await store.audit.capture(j,attempt,input,clock());
+      if(j.status==='superseded')return {jobRef:j.jobRef,status:'superseded',...captured};
       if(!sameEnvelope(j,input)||j.status==='failed'||j.leaseUntil<=clock())return {jobRef:j.jobRef,status:'late_response_saved',...captured};
       if(j.status==='queued'&&captured.replayed)return {jobRef:j.jobRef,status:j.status,...captured};
       if(input.transportError)return api.complete({...input,error:'TECHNICAL_FAILURE',errorCode:id(input.transportError)?input.transportError:'AI_TRANSPORT_INVALID'});

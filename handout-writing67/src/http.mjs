@@ -60,11 +60,12 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
           else if(path===prefix+'/teacher/classes'&&req.method==='GET')value={classes:await teacher.classes(actor)};
           else if(path===prefix+'/teacher/students'&&req.method==='GET')value=await teacher.summary(actor,requestUrl.searchParams.get('class'));
           else{
-            const match=path.match(/^\/api\/handout67\/v1\/teacher\/sessions\/([^/]+)(\/(?:comments|activity))?$/);
+            const match=path.match(/^\/api\/handout67\/v1\/teacher\/sessions\/([^/]+)(\/(?:comments|threads|activity))?$/);
             if(!match||!uuid.test(match[1]))fail('NOT_FOUND',404);
             if(req.method==='GET'&&!match[2])value={session:await teacher.detail(actor,match[1])};
             else if(req.method==='GET'&&match[2]==='/activity')value=await teacher.activity(actor,match[1],{limit:Number(requestUrl.searchParams.get('limit')||100),before:requestUrl.searchParams.get('before'),jobRef:requestUrl.searchParams.get('job')});
             else if(req.method==='POST'&&match[2]==='/comments'){csrf();value={session:await teacher.comment(actor,match[1],await jsonBody(req))};}
+            else if(req.method==='POST'&&match[2]==='/threads'){csrf();value={session:await teacher.thread(actor,match[1],await jsonBody(req))};}
             else fail('NOT_FOUND',404);
           }
         }
@@ -84,12 +85,15 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
         }
         else fail('NOT_FOUND',404);
       } else {
-        const match=path.match(/^\/api\/handout67\/v1\/sessions\/([^/]+)(?:\/(responses|checks|idea2|vocabulary\/[12]\/retry))?$/);
+        const match=path.match(/^\/api\/handout67\/v1\/sessions\/([^/]+)(?:\/(responses|checks|attest|edit|threads|idea2|vocabulary\/[12]\/retry))?$/);
         if(!match||!uuid.test(match[1]))fail('NOT_FOUND',404);
         const ref=match[1],token=req.headers.authorization?.replace(/^Bearer /,'');
         if(req.method==='GET'&&!match[2])value={session:await service.read(ref,token)};
         else if(req.method==='PUT'&&match[2]==='responses')value={session:await service.save(ref,token,await jsonBody(req))};
         else if(req.method==='POST'&&match[2]==='checks'){value=await service.check(ref,token,await jsonBody(req));status=202;}
+        else if(req.method==='POST'&&match[2]==='attest')value={session:await service.attest(ref,token,await jsonBody(req))};
+        else if(req.method==='POST'&&match[2]==='edit')value={session:await service.revise(ref,token,await jsonBody(req))};
+        else if(req.method==='POST'&&match[2]==='threads')value={session:await service.replyComment(ref,token,await jsonBody(req))};
         else if(req.method==='POST'&&match[2]==='idea2'){await jsonBody(req);value={session:await service.openIdea2(ref,token)};}
         else if(req.method==='POST'&&match[2]?.startsWith('vocabulary/')){await jsonBody(req);value={session:await service.retryVocabulary(ref,token,Number(match[2].split('/')[1]))};}
         else fail('NOT_FOUND',404);

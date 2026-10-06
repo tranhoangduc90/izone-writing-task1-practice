@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import {parseAiResult} from './processor.mjs';
 
 export const PRODUCT = 'handout-writing67';
 export const ORDER = ['topic','b1','a1','x1','b2','a2','x2'];
@@ -14,10 +15,17 @@ const passed = (s,key) => s.steps[key].status==='passed';
 const ideaPassed = (s,n) => ['b','a','x'].every(k=>passed(s,k+n));
 const available = (s,key) => ORDER.includes(key) && (key==='topic' || passed(s,ORDER[ORDER.indexOf(key)-1])) && (!key.endsWith('2') || s.idea2Open);
 
-export function createService({store, roster, secret, clock=Date.now, leaseMs=300000, sessionMs=43200000, maxLeases=2, renderJob, promptVersion='lesson5-rubric-v3'}) {
+export function createService({store, roster, secret, clock=Date.now, leaseMs=300000, sessionMs=43200000, maxLeases=null, maxJobMs=1800000, retryDelays=[0,0,0], renderJob, promptVersion='lesson5-rubric-v3'}) {
   if (typeof secret!=='string' || secret.length<32 || leaseMs<=180000) fail('CONFIG_INVALID');
+  if(maxLeases!==null&&(!Number.isSafeInteger(maxLeases)||maxLeases<1))fail('CONFIG_INVALID');
+  if(!Number.isSafeInteger(maxJobMs)||maxJobMs<leaseMs*3||retryDelays.length!==3||retryDelays.some(v=>!Number.isSafeInteger(v)||v<0))fail('CONFIG_INVALID');
   const sign = value => createHmac('sha256',secret).update(value).digest('base64url');
-  const publicSession = s => ({ref:s.ref,activity:s.activity,classRef:s.classRef,studentRef:s.studentRef,responses:s.responses,version:s.version,idea2Open:s.idea2Open,steps:s.steps,vocabulary:s.vocabulary,teacherComments:publicTeacherComments(s)});
+  const publicSession = s => {
+    // Lấy job cuối của từng bước/ý trước khi lọc, không hiện lỗi cũ sau lượt mới đã đạt.
+    const latest=Object.fromEntries(s.jobs.map(j=>[j.kind==='grade'?j.section:'vocab'+j.ideaIndex,j]));
+    const processing=Object.fromEntries(Object.entries(latest).filter(([,j])=>['queued','leased','failed'].includes(j.status)).map(([key,j])=>[key,{jobRef:j.jobRef,status:j.status,tries:j.tries,maxTries:3,createdAt:j.createdAt,deadlineAt:j.deadlineAt??j.createdAt+maxJobMs,leaseUntil:j.leaseUntil,nextAttemptAt:j.nextAttemptAt??null,error:j.error??null}]));
+    return {ref:s.ref,activity:s.activity,classRef:s.classRef,studentRef:s.studentRef,responses:s.responses,version:s.version,idea2Open:s.idea2Open,steps:s.steps,vocabulary:s.vocabulary,teacherComments:publicTeacherComments(s),processing};
+  };
   const issue = ref => {const content=`${ref}.${clock()+sessionMs}`;return `${content}.${sign(content)}`;};
   const authorize = (ref,token) => {
     if (typeof token!=='string') fail('SESSION_UNAUTHORIZED',401);
@@ -33,7 +41,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
   };
   function makeJob(s,kind,section,ideaIndex) {
     const snapshot = {topic:TOPIC,responses:structuredClone(s.responses),history:section?s.steps[section].history.map(h=>({feedback:h.feedback,status:h.status,snapshot:h.snapshot})):[],ideaIndex};
-    const job = {productId:PRODUCT,sessionRef:s.ref,jobRef:randomUUID(),kind,section,ideaIndex,snapshotHash:hash(snapshot),snapshot,promptVersion,status:'queued',tries:0,createdAt:clock(),leaseUntil:0,leaseToken:null};
+    const job = {productId:PRODUCT,sessionRef:s.ref,jobRef:randomUUID(),kind,section,ideaIndex,snapshotHash:hash(snapshot),snapshot,promptVersion,status:'queued',tries:0,createdAt:clock(),deadlineAt:clock()+maxJobMs,leaseUntil:0,leaseToken:null,attempts:[]};
     job.operationKey = `${PRODUCT}:${job.jobRef}:${job.promptVersion}`;
     // Ghim nguyên prompt vào job trước ACK; retry/redeploy giữ cùng payload và operationKey.
     if(renderJob)job.prompt=renderJob({...envelope(job),snapshot});
@@ -47,10 +55,25 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     return ['A','X','B'].every(k=>Array.isArray(result[k]) && result[k].length===2 && result[k].every(v=>object(v) && Object.keys(v).sort().join(',')==='meaningVi,phrase' && string(v.phrase) && v.phrase.trim().split(/\s+/).length<=5 && string(v.meaningVi)));
   }
   function envelope(job) {
-    return Object.fromEntries(['productId','sessionRef','jobRef','kind','section','ideaIndex','snapshotHash','promptVersion','operationKey','leaseToken'].map(k=>[k,job[k]]));
+    return Object.fromEntries(['productId','sessionRef','jobRef','kind','section','ideaIndex','snapshotHash','promptVersion','operationKey','leaseToken','attemptRef'].map(k=>[k,job[k]]));
   }
   function sameEnvelope(job,body) {return Object.entries(envelope(job)).every(([key,value])=>body[key]===value);}
-  return {
+  function terminalFailure(s,j,error){
+    j.status='failed';j.error=error;
+    if(j.kind==='grade'){s.steps[j.section].status='technical_error';s.steps[j.section].error=error;}
+    else s.vocabulary[j.ideaIndex]={status:'failed',jobRef:j.jobRef,error};
+  }
+  function expire(s){
+    for(const j of s.jobs){
+      if(!['queued','leased'].includes(j.status))continue;
+      if(clock()>=(j.deadlineAt??j.createdAt+maxJobMs)){terminalFailure(s,j,'JOB_WAIT_EXHAUSTED');continue;}
+      if(j.status==='leased'&&j.leaseUntil<=clock()){
+        if(j.tries>=3)terminalFailure(s,j,'TECHNICAL_RETRIES_EXHAUSTED');
+        else {j.status='queued';j.error='ATTEMPT_TIMEOUT';j.nextAttemptAt=clock()+retryDelays[j.tries];}
+      }
+    }
+  }
+  const api = {
     authorizeSession(ref,token) {authorize(ref,token);},
     async roster() { return roster(); },
     async open(input) {
@@ -61,7 +84,11 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
       const s=await store.open(key,ref=>({ref,activity:input.activity,classRef:input.classRef,studentRef:input.studentRef,responses:Object.fromEntries(Object.values(FIELDS).flat().map(k=>[k,''])),version:0,idea2Open:false,steps:Object.fromEntries(ORDER.map(k=>[k,{status:'draft',history:[],error:null}])),jobs:[],vocabulary:{},saves:{}}));
       return {session:publicSession(s),token:issue(s.ref)};
     },
-    async read(ref,token) {authorize(ref,token);const s=await store.read(ref);if(!s)fail('SESSION_NOT_FOUND',404);return publicSession(s);},
+    async read(ref,token) {
+      authorize(ref,token);const s=await store.read(ref);if(!s)fail('SESSION_NOT_FOUND',404);
+      if(s.jobs.some(j=>['queued','leased'].includes(j.status)&&(clock()>=(j.deadlineAt??j.createdAt+maxJobMs)||(j.status==='leased'&&j.leaseUntil<=clock()))))return edit(ref,token,current=>{expire(current);return publicSession(current);});
+      return publicSession(s);
+    },
     async save(ref,token,input) {
       if (!object(input) || !Number.isSafeInteger(input.baseVersion) || !id(input.requestId) || !object(input.responses)) fail('SAVE_INVALID');
       return edit(ref,token,s=>{
@@ -84,6 +111,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     async check(ref,token,input) {
       if(!object(input) || !ORDER.includes(input.section) || !id(input.requestId) || !Number.isSafeInteger(input.baseVersion))fail('CHECK_INVALID');
       return edit(ref,token,s=>{
+        expire(s);
         const prior=s.jobs.find(j=>j.requestId===input.requestId);
         if(prior) {if(prior.section!==input.section || prior.requestHash!==hash(input))fail('REQUEST_ID_CONFLICT',409);return {jobRef:prior.jobRef,session:publicSession(s)};}
         if(s.version!==input.baseVersion)fail('VERSION_CONFLICT',409);
@@ -104,9 +132,12 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     });},
     async claim() {
       return store.queue(sessions=>{
+        for(const s of sessions)expire(s);
         const now=clock();
         const active=sessions.flatMap(s=>s.jobs).filter(j=>j.status==='leased'&&j.leaseUntil>now).length;
-        let capacity=Math.max(0,maxLeases-active);const claimed=[];
+        // Mặc định không có trần riêng của webapp; n8n nhận một job/execution.
+        // maxLeases chỉ dùng khi fixture cần kiểm chính sách quota cũ.
+        let capacity=maxLeases===null?Infinity:Math.max(0,maxLeases-active);const claimed=[];
         for(const s of sessions) for(const j of s.jobs) {
           if(!['queued','leased'].includes(j.status) || (j.status==='leased'&&j.leaseUntil>now))continue;
           if((renderJob && !j.prompt && j.promptVersion!==promptVersion) || j.tries>=3) {
@@ -115,8 +146,9 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
             else s.vocabulary[j.ideaIndex]={status:'failed',jobRef:j.jobRef};
             continue;
           }
-          if(!capacity || claimed.length>=1)continue;
+          if(!capacity || claimed.length>=1||(j.nextAttemptAt||0)>now)continue;
           j.status='leased';j.tries++;j.leaseUntil=now+leaseMs;j.leaseToken=randomUUID();capacity--;
+          j.attemptRef=randomUUID();j.attempts||=[];j.attempts.push({number:j.tries,ref:j.attemptRef,leaseHash:hash(j.leaseToken)});
           claimed.push({...envelope(j),snapshot:j.snapshot,leaseUntil:j.leaseUntil,...(j.prompt?{prompt:j.prompt}:{})});
         }
         return claimed.map(job=>renderJob&&!job.prompt?{...job,prompt:renderJob(job)}:job);
@@ -128,18 +160,23 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
         const j=s.jobs.find(j=>j.jobRef===input.jobRef);if(!j)fail('JOB_NOT_FOUND',404);
         if(!sameEnvelope(j,input))fail('CALLBACK_IDENTITY_MISMATCH',409);
         if(j.status==='completed') {if(j.resultHash!==hash(input.result))fail('CALLBACK_RESULT_CONFLICT',409);return {jobRef:j.jobRef,status:j.status,resultHash:j.resultHash};}
+        // Kết quả sau hạn toàn lượt không được mở bước, dù lease cuối còn hiệu lực.
+        if(['queued','leased'].includes(j.status)&&(j.deadlineAt??j.createdAt+maxJobMs)<=clock()){
+          expire(s);return {jobRef:j.jobRef,status:j.status,error:j.error};
+        }
         if(j.status!=='leased'||j.leaseUntil<=clock())fail('LEASE_EXPIRED',409);
         if(input.error==='TECHNICAL_FAILURE') {
-          j.status=j.tries<3?'queued':'failed';j.error=input.error;
+          j.status=j.tries<3?'queued':'failed';j.error=id(input.errorCode)?input.errorCode:input.error;
+          j.nextAttemptAt=j.status==='queued'?clock()+retryDelays[j.tries]:null;
           if(j.status==='failed') {
-            if(j.kind==='grade') {s.steps[j.section].status='technical_error';s.steps[j.section].error=input.error;}
+            if(j.kind==='grade') {s.steps[j.section].status='technical_error';s.steps[j.section].error=j.error;}
             else s.vocabulary[j.ideaIndex]={status:'failed',jobRef:j.jobRef};
           }
           return {jobRef:j.jobRef,status:j.status};
         }
         if(!resultValid(j,input.result))fail('RESULT_INVALID',422);
         if(j.kind==='grade' && (s.steps[j.section].status!=='pending'||hash({topic:TOPIC,responses:s.responses,history:s.steps[j.section].history.map(h=>({feedback:h.feedback,status:h.status,snapshot:h.snapshot})),ideaIndex:j.ideaIndex})!==j.snapshotHash))fail('SNAPSHOT_STALE',409);
-        j.status='completed';j.resultHash=hash(input.result);j.result=input.result;
+        j.status='completed';j.error=null;j.resultHash=hash(input.result);j.result=input.result;
         if(j.kind==='grade') {
           const step=s.steps[j.section];step.status=input.result.resultStatus==='passed'?'passed':'revision';step.error=null;
           step.history.push({number:step.history.length+1,status:step.status,feedback:input.result.feedback,snapshot:Object.fromEntries(FIELDS[j.section].map(k=>[k,j.snapshot.responses[k]])),jobRef:j.jobRef});
@@ -158,6 +195,39 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     async job(ref) {
       const j=await store.findJob(ref);if(!j)fail('JOB_NOT_FOUND',404);
       return {jobRef:j.jobRef,productId:j.productId,status:j.status,resultHash:j.resultHash??null,tries:j.tries,createdAt:j.createdAt,leaseUntil:j.leaseUntil,error:j.error??null};
+    },
+    async sweep(){return store.queue(sessions=>{for(const s of sessions)expire(s);return {checked:sessions.length};});},
+    async forProcessing(input){
+      if(!object(input)||!id(input.jobRef))fail('CALLBACK_INVALID');
+      const job=await store.findJob(input.jobRef);if(!job)fail('JOB_NOT_FOUND',404);
+      if(!sameEnvelope(job,input))fail('CALLBACK_IDENTITY_MISMATCH',409);
+      if(job.status==='completed'||job.status==='queued'||job.status==='failed')return job;
+      if((job.deadlineAt??job.createdAt+maxJobMs)<=clock()){
+        await store.edit(job.sessionRef,s=>{expire(s);});return store.findJob(input.jobRef);
+      }
+      if(job.status!=='leased'||job.leaseUntil<=clock())fail('LEASE_EXPIRED',409);
+      if(!job.prompt&&renderJob&&job.promptVersion===promptVersion)job.prompt=renderJob({...envelope(job),snapshot:job.snapshot});
+      if(typeof job.prompt!=='string'||!job.prompt)fail('PROMPT_MISSING',503);
+      return {...job,executionRef:id(input.executionRef)?input.executionRef:null};
+    },
+    async savedResponse(job){return store.audit.response(job.jobRef,job.attemptRef);},
+    async receive(input){
+      if(!object(input)||!id(input.jobRef)||!id(input.sessionRef)||typeof input.outputText!=='string')fail('AI_RESPONSE_INVALID');
+      const j=await store.findJob(input.jobRef);if(!j)fail('JOB_NOT_FOUND',404);
+      for(const key of ['productId','sessionRef','jobRef','kind','section','ideaIndex','snapshotHash','promptVersion','operationKey'])if(input[key]!==j[key])fail('CALLBACK_IDENTITY_MISMATCH',409);
+      const attempt=j.attempts?.find(a=>a.ref===input.attemptRef&&a.leaseHash===hash(input.leaseToken));
+      if(!attempt)fail('CALLBACK_IDENTITY_MISMATCH',409);
+      const captured=await store.audit.capture(j,attempt,input,clock());
+      if(!sameEnvelope(j,input)||j.status==='failed'||j.leaseUntil<=clock())return {jobRef:j.jobRef,status:'late_response_saved',...captured};
+      if(j.status==='queued'&&captured.replayed)return {jobRef:j.jobRef,status:j.status,...captured};
+      if(input.transportError)return api.complete({...input,error:'TECHNICAL_FAILURE',errorCode:id(input.transportError)?input.transportError:'AI_TRANSPORT_INVALID'});
+      let result;
+      try{result=parseAiResult(input.outputText,j.operationKey);}catch(error){
+        return api.complete({...input,error:'TECHNICAL_FAILURE',errorCode:error.message==='AI_OPERATION_MISMATCH'?'AI_OPERATION_MISMATCH':'AI_JSON_INVALID'});
+      }
+      if(!resultValid(j,result))return api.complete({...input,error:'TECHNICAL_FAILURE',errorCode:'AI_RESULT_INVALID'});
+      return api.complete({...input,result});
     }
   };
+  return api;
 }

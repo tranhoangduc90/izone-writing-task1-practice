@@ -7,6 +7,7 @@ import {createStore} from '../src/store.mjs';
 const {createService}=await import(process.env.HANDOUT67_PIN_SERVICE||new URL('../src/service.mjs',import.meta.url).href);
 async function fixture(t){
  const db=new PGlite();await db.exec(await readFile(new URL('../db/001-initial.sql',import.meta.url),'utf8'));t.after(()=>db.close());
+ await db.exec(await readFile(new URL('../db/002-activity-log.sql',import.meta.url),'utf8'));
  let now=1000000;
  const settings={store:createStore(db),secret:'fixture-secret'.padEnd(40,'s'),roster:async()=>[{classRef:'c',students:[{studentRef:'s'}]}],clock:()=>now};
  const service=createService({...settings,promptVersion:'lesson5-rubric-v3',renderJob:()=> 'Original private prompt'});

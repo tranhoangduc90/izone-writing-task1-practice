@@ -10,6 +10,7 @@ import {createApi} from '../src/http.mjs';
 // Dữ liệu giả, SQL thật trong PGlite: kiểm quyền Google/class, cookie/CSRF và góp ý đúng phiên.
 async function fixture(t){
  const db=new PGlite();await db.exec(await readFile(new URL('../db/001-initial.sql',import.meta.url),'utf8'));t.after(()=>db.close());
+ await db.exec(await readFile(new URL('../db/002-activity-log.sql',import.meta.url),'utf8'));
  const roster=async()=>[{classRef:'IC2304',className:'IC2304',students:[{studentRef:'student-a',displayName:'Học viên giả A'}]},{classRef:'other',className:'Lớp khác',students:[{studentRef:'student-b',displayName:'Học viên giả B'}]}];
  const store=createStore(db),service=createService({store,roster,secret:'s'.repeat(40)});
  let now=1000000;

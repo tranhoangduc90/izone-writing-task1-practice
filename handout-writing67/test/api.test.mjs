@@ -11,8 +11,9 @@ const sample={idea1:'Gây khó khăn về tài chính',idea2:'Gây hại môi tr
 const groups={A:[{phrase:'buy unnecessary products',meaningVi:'mua đồ không cần thiết'},{phrase:'replace working devices',meaningVi:'thay thiết bị còn dùng tốt'}],X:[{phrase:'spend essential savings',meaningVi:'chi tiền tiết kiệm thiết yếu'},{phrase:'throw old devices away',meaningVi:'vứt thiết bị cũ'}],B:[{phrase:'face financial difficulties',meaningVi:'gặp khó khăn tài chính'},{phrase:'increase electronic waste',meaningVi:'tăng rác điện tử'}]};
 async function setup(t) {
   const db=new PGlite();await db.exec(await readFile(new URL('../db/001-initial.sql',import.meta.url),'utf8'));
+  await db.exec(await readFile(new URL('../db/002-activity-log.sql',import.meta.url),'utf8'));
   let now=1000000;
-  const service=createService({store:createStore(db),roster:async()=>[{classRef:'c67',className:'Lớp thử 67',students:[{studentRef:'s-a',displayName:'Học viên thử A'},{studentRef:'s-b',displayName:'Học viên thử B'},{studentRef:'s-c',displayName:'Học viên thử C'}]}],secret:'session-fixture-'.padEnd(40,'s'),clock:()=>now});
+  const service=createService({store:createStore(db),maxLeases:2,roster:async()=>[{classRef:'c67',className:'Lớp thử 67',students:[{studentRef:'s-a',displayName:'Học viên thử A'},{studentRef:'s-b',displayName:'Học viên thử B'},{studentRef:'s-c',displayName:'Học viên thử C'}]}],secret:'session-fixture-'.padEnd(40,'s'),clock:()=>now});
   const internalSecret='internal-fixture-'.padEnd(40,'i');
   const server=createApi({service,origins:['http://127.0.0.1:8785'],internalSecret});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));

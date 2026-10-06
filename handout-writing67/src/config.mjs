@@ -22,7 +22,9 @@ export function config(env=process.env) {
   const teacherFile=env.HANDOUT67_TEACHER_FILE||null;
   const teacherSecret=teacherFile?must('HANDOUT67_TEACHER_SECRET'):null;
   if(teacherFile&&(teacherSecret.length<32||[secret,internalSecret,wakeSecret].includes(teacherSecret)))throw new Error('Cần secret giảng viên riêng.');
-  return {databaseUrl,origins,port,secret,internalSecret,rosterUrl:rosterUrl.href,classes,promptFile,wakeUrl:wakeUrl.href,wakeSecret,teacherFile,teacherSecret};
+  const gatewayUrl=env.HANDOUT67_AI_GATEWAY_URL||null,gatewayToken=env.HANDOUT67_AI_GATEWAY_TOKEN||null;
+  if(Boolean(gatewayUrl)!==Boolean(gatewayToken)||gatewayUrl&&(new URL(gatewayUrl).protocol!=='https:'||gatewayToken.length<32||/[\r\n]/.test(gatewayToken)))throw new Error('Cần URL HTTPS và khóa Cổng AI riêng cho Handout67.');
+  return {databaseUrl,origins,port,secret,internalSecret,rosterUrl:rosterUrl.href,classes,promptFile,wakeUrl:wakeUrl.href,wakeSecret,teacherFile,teacherSecret,gatewayUrl,gatewayToken};
 }
 
 export function rosterAdapter({rosterUrl,classes}, fetcher=fetch) {

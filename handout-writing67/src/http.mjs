@@ -5,15 +5,15 @@ import { PRODUCT, fail } from './service.mjs';
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const prefix='/api/handout67/v1';
 const equal=(a,b)=>typeof a==='string'&&typeof b==='string'&&Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
-async function jsonBody(req) {
+async function jsonBody(req,maxBytes=32768) {
   let length=0;const chunks=[];
-  for await(const chunk of req) {length+=chunk.length;if(length>32768)fail('BODY_TOO_LARGE',413);chunks.push(chunk);}
+  for await(const chunk of req) {length+=chunk.length;if(length>maxBytes)fail('BODY_TOO_LARGE',413);chunks.push(chunk);}
   try {return JSON.parse(Buffer.concat(chunks).toString('utf8'));} catch {fail('JSON_INVALID');}
 }
 
 // Nhận HTTP, kiểm origin/token và dữ liệu trước khi gọi nghiệp vụ; chỉ trả mã lỗi an toàn.
 // ACK Check sau transaction. Không in bài, credential hoặc token khi SQL/AI lỗi.
-export function createApi({service,teacher=null,origins,internalSecret}) {
+export function createApi({service,teacher=null,processor=null,origins,internalSecret}) {
   const limits=new Map();
   const server=createServer(async(req,res)=>{
     res.setHeader('Content-Type','application/json; charset=utf-8');
@@ -60,10 +60,11 @@ export function createApi({service,teacher=null,origins,internalSecret}) {
           else if(path===prefix+'/teacher/classes'&&req.method==='GET')value={classes:await teacher.classes(actor)};
           else if(path===prefix+'/teacher/students'&&req.method==='GET')value=await teacher.summary(actor,requestUrl.searchParams.get('class'));
           else{
-            const match=path.match(/^\/api\/handout67\/v1\/teacher\/sessions\/([^/]+)(\/comments)?$/);
+            const match=path.match(/^\/api\/handout67\/v1\/teacher\/sessions\/([^/]+)(\/(?:comments|activity))?$/);
             if(!match||!uuid.test(match[1]))fail('NOT_FOUND',404);
             if(req.method==='GET'&&!match[2])value={session:await teacher.detail(actor,match[1])};
-            else if(req.method==='POST'&&match[2]){csrf();value={session:await teacher.comment(actor,match[1],await jsonBody(req))};}
+            else if(req.method==='GET'&&match[2]==='/activity')value=await teacher.activity(actor,match[1],{limit:Number(requestUrl.searchParams.get('limit')||100),before:requestUrl.searchParams.get('before'),jobRef:requestUrl.searchParams.get('job')});
+            else if(req.method==='POST'&&match[2]==='/comments'){csrf();value={session:await teacher.comment(actor,match[1],await jsonBody(req))};}
             else fail('NOT_FOUND',404);
           }
         }
@@ -72,10 +73,15 @@ export function createApi({service,teacher=null,origins,internalSecret}) {
       else if(path===prefix+'/sessions'&&req.method==='POST'){value=await service.open(await jsonBody(req));status=201;}
       else if(path===prefix+'/internal/jobs/claim'&&req.method==='POST'){await jsonBody(req);value={jobs:await service.claim()};}
       else if(internal){
-        const match=path.match(/^\/api\/handout67\/v1\/internal\/jobs\/([^/]+)(\/complete)?$/);
+        const match=path.match(/^\/api\/handout67\/v1\/internal\/jobs\/([^/]+)(\/(?:complete|response|process))?$/);
         if(!match || !uuid.test(match[1]))fail('NOT_FOUND',404);
         if(req.method==='GET'&&!match[2])value=await service.job(match[1]);
-        else if(req.method==='POST'&&match[2]){const body=await jsonBody(req);if(body.jobRef!==match[1])fail('CALLBACK_IDENTITY_MISMATCH',409);value=await service.complete(body);}
+        else if(req.method==='POST'&&match[2]){
+          const body=await jsonBody(req,match[2]==='/response'?524288:32768);
+          if(body.jobRef!==match[1])fail('CALLBACK_IDENTITY_MISMATCH',409);
+          if(match[2]==='/process'){if(!processor)fail('NOT_FOUND',404);value=await processor.process(body);}
+          else value=await (match[2]==='/response'?service.receive(body):service.complete(body));
+        }
         else fail('NOT_FOUND',404);
       } else {
         const match=path.match(/^\/api\/handout67\/v1\/sessions\/([^/]+)(?:\/(responses|checks|idea2|vocabulary\/[12]\/retry))?$/);

@@ -1,14 +1,17 @@
 import { randomUUID } from 'node:crypto';
+import {auditChange,createAudit} from './audit.mjs';
 
 // Nhận adapter PostgreSQL có transaction; lưu/đọc lại đúng phiên, khóa trước thay đổi.
 // Không biết hoặc truy cập bảng của sản phẩm khác. Lỗi SQL trả về caller, không giả thành công.
-export function createStore(db) {
+export function createStore(db,{clock=Date.now}={}) {
   return {
+    audit:createAudit(db),
     async open(identity, initial) {
       return db.transaction(async tx => {
         const ref = randomUUID();
-        await tx.query('INSERT INTO handout67.session (ref, identity_key, payload) VALUES ($1,$2,$3::jsonb) ON CONFLICT (identity_key) DO NOTHING', [ref,identity,JSON.stringify(initial(ref))]);
+        const inserted=await tx.query('INSERT INTO handout67.session (ref, identity_key, payload) VALUES ($1,$2,$3::jsonb) ON CONFLICT (identity_key) DO NOTHING RETURNING ref', [ref,identity,JSON.stringify(initial(ref))]);
         const result = await tx.query('SELECT payload FROM handout67.session WHERE identity_key=$1', [identity]);
+        if(inserted.rows.length)await auditChange(tx,null,result.rows[0].payload,clock());
         return result.rows[0].payload;
       });
     },
@@ -21,8 +24,11 @@ export function createStore(db) {
         const result = await tx.query('SELECT payload FROM handout67.session WHERE ref=$1 FOR UPDATE', [ref]);
         if (!result.rows[0]) return undefined;
         const session = result.rows[0].payload;
+        const before=structuredClone(session);
         const answer = await change(session);
+        if(JSON.stringify(before)===JSON.stringify(session))return answer;
         await tx.query('UPDATE handout67.session SET payload=$2::jsonb, updated_at=now() WHERE ref=$1', [ref,JSON.stringify(session)]);
+        await auditChange(tx,before,session,clock());
         return answer;
       });
     },
@@ -41,6 +47,7 @@ export function createStore(db) {
         for (const session of sessions) {
           if(JSON.stringify(session)===originals.get(session.ref))continue;
           await tx.query('UPDATE handout67.session SET payload=$2::jsonb, updated_at=now() WHERE ref=$1', [session.ref,JSON.stringify(session)]);
+          await auditChange(tx,JSON.parse(originals.get(session.ref)),session,clock());
         }
         return answer;
       });

@@ -8,6 +8,7 @@ import { config,rosterAdapter } from './config.mjs';
 import { createStore,postgresAdapter } from './store.mjs';
 import { createService } from './service.mjs';
 import { createApi } from './http.mjs';
+import {createProcessor,gatewayAdapter} from './processor.mjs';
 
 // Chỉ mở tiến trình Handout 67. Không import app/server/notifier Writing hoặc biến env chung.
 const settings=config();
@@ -15,8 +16,12 @@ const pool=new pg.Pool({connectionString:settings.databaseUrl,max:5,connectionTi
 const target=await pool.query('SELECT current_database() AS db, current_user AS role');
 if(target.rows[0].db!=='handout_writing67'||target.rows[0].role!=='handout67_runtime')throw new Error('Database thực tế sai đích.');
 await pool.query('SELECT ref FROM handout67.session LIMIT 1');
-const service=createService({store:createStore(postgresAdapter(pool)),roster:rosterAdapter(settings),secret:settings.secret,renderJob:await promptRenderer(settings.promptFile)});
-const wake=createWake({url:settings.wakeUrl,secret:settings.wakeSecret,hasWork:async()=>{const result=await pool.query("SELECT EXISTS (SELECT 1 FROM handout67.session s, jsonb_array_elements(s.payload->'jobs') j WHERE j->>'status'='queued' OR (j->>'status'='leased' AND (j->>'leaseUntil')::bigint <= $1)) AS pending",[Date.now()]);return result.rows[0].pending;},onError:()=>console.error('Handout Writing 67: chưa đánh thức được đường chấm; job vẫn được giữ.')});
+const store=createStore(postgresAdapter(pool));
+await pool.query('SELECT job_ref FROM handout67.grading_attempt LIMIT 1');
+const service=createService({store,roster:rosterAdapter(settings),secret:settings.secret,renderJob:await promptRenderer(settings.promptFile),retryDelays:[0,5000,15000]});
+// Không có pump gọi AI nền; n8n phải chờ endpoint xử lý mỗi attempt để giữ trần chung.
+const processor=createProcessor({service,callAI:gatewayAdapter(settings),onError:code=>console.error('Handout67: '+code)});
+const wake=createWake({url:settings.wakeUrl,secret:settings.wakeSecret,hasWork:async()=>{const result=await pool.query("SELECT (j->>'jobRef') || ':' || COALESCE(j->>'tries','0') AS key FROM handout67.session s, jsonb_array_elements(s.payload->'jobs') j WHERE j->>'status'='queued' AND COALESCE((j->>'nextAttemptAt')::bigint,0)<=$1",[Date.now()]);return result.rows.map(r=>r.key);},onError:()=>console.error('Handout Writing 67: chưa đánh thức được đường chấm; job vẫn được giữ.')});
 // Danh sách quyền lớp do Handout67 sở hữu; không đọc bảng tài khoản của hệ khác.
 const oauth=new OAuth2Client();
 oauth.transporter.defaults={...oauth.transporter.defaults,timeout:5000};
@@ -26,10 +31,20 @@ const registry=()=>{
   return value;
 };
 if(settings.teacherFile)registry();
-const teacher=settings.teacherFile?createTeacher({db:pool,store:createStore(postgresAdapter(pool)),roster:rosterAdapter(settings),registry,secret:settings.teacherSecret,verifyGoogleToken:async(token,audience)=>(await oauth.verifyIdToken({idToken:token,audience})).getPayload()}):null;
-const server=createApi({service,teacher,...settings});
+const teacher=settings.teacherFile?createTeacher({db:pool,store,roster:rosterAdapter(settings),registry,secret:settings.teacherSecret,verifyGoogleToken:async(token,audience)=>(await oauth.verifyIdToken({idToken:token,audience})).getPayload()}):null;
+const server=createApi({service,teacher,processor,...settings});
+let sweeping=false,cleaning=false;
+async function sweep(){if(sweeping)return;sweeping=true;try{await service.sweep();}catch{console.error('Handout67: chưa kiểm được thời hạn lượt chấm.');}finally{sweeping=false;}}
+async function cleanup(){
+  if(cleaning)return;cleaning=true;
+  try{for(let i=0;i<20;i++){const removed=await store.audit.cleanup(Date.now(),100);if(!removed)break;}}
+  catch{console.error('Handout67: chưa dọn được nhật ký hết hạn; dữ liệu vẫn giữ.');}
+  finally{cleaning=false;}
+}
+const sweepTimer=setInterval(sweep,15000),cleanupTimer=setInterval(cleanup,3600000);
+sweepTimer.unref();cleanupTimer.unref();void sweep();void cleanup();
 void wake.tick();
 server.listen(settings.port,'0.0.0.0',()=>console.log('Handout Writing 67 đã sẵn sàng nhận HTTP.'));
 let closing=false;
-async function stop(){if(closing)return;closing=true;wake.close();server.close(async()=>{await pool.end();process.exit(0);});setTimeout(()=>process.exit(1),10000).unref();}
+async function stop(){if(closing)return;closing=true;wake.close();processor.close();clearInterval(sweepTimer);clearInterval(cleanupTimer);server.close(async()=>{await pool.end();process.exit(0);});setTimeout(()=>process.exit(1),210000).unref();}
 process.on('SIGTERM',stop);process.on('SIGINT',stop);

@@ -56,6 +56,8 @@ export function createTeacher({db,store,roster,registry,secret,verifyGoogleToken
       })};
     },
     async detail(actor,ref){return publicSession(await sessionFor(actor,ref));},
+    // Quyền lớp/roster lấy lại từ backend; không lấy học viên/lớp hoặc quyền từ query client.
+    async activity(actor,ref,query={}){await sessionFor(actor,ref);return store.audit.read(ref,query);},
     async comment(actor,ref,input){
       if(input?.expectedActor!==actor.email)fail('TEACHER_IDENTITY_CHANGED',401);
       if(!input || !Number.isSafeInteger(input.expectedVersion)||!ORDER.includes(input.section)||typeof input.feedback!=='string'||!input.feedback.trim()||input.feedback.length>4000||typeof input.requestId!=='string'||!/^[a-zA-Z0-9_-]{1,128}$/.test(input.requestId))fail('TEACHER_COMMENT_INVALID');

@@ -6,7 +6,7 @@
 
 Đề xuất thư mục triển khai `/opt/izone-handout-writing67`, service/mạng Compose `izone-handout-writing67`, cổng loopback 3187, API `/api/handout67/v1`, database `handout_writing67`, schema `handout67`, role runtime `handout67_runtime`. Các đích này cần kiểm xung đột và tài nguyên trên VPS trước tạo, chưa là inventory đã readback.
 
-Một image digest riêng; private `.env`, rubric mount chỉ đọc và credential n8n riêng. Không dùng `.env` hoặc Dockerfile của hệ khác. PostgreSQL server, VPS, n8n và Cổng AI có thể chung; giới hạn Handout 67 là 0,5 CPU/256 MB, 5 kết nối, 2 lease toàn sản phẩm, một job/execution, AI 180 giây, lease 300 giây, tối đa 3 lỗi kỹ thuật. Giới hạn này chưa thay cho số đo tải máy chủ/quota thật.
+Một image digest riêng; private `.env`, rubric mount chỉ đọc và credential n8n riêng. Không dùng `.env` hoặc Dockerfile của hệ khác. PostgreSQL server, VPS, n8n và Cổng AI có thể chung. Baseline 05/10 có trần hai lease; yêu cầu hiện hành 06/10 đã bỏ trần này. Các giới hạn còn giữ: 0,5 CPU/256 MB, 5 kết nối, một job/execution, AI 180 giây, lease 300 giây, tối đa ba lỗi kỹ thuật. Giới hạn này chưa thay cho số đo tải máy chủ/quota thật.
 
 ## 1. Chuẩn bị chỉ đọc
 
@@ -20,7 +20,23 @@ Quản trị tạo role runtime `LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINH
 
 Không sửa quyền PUBLIC của database sản phẩm cũ. PostgreSQL có thể đã cấp quyền PUBLIC ở nơi khác: phải dùng runtime mới thử truy cập các bảng nghiệp vụ của Writing/Mapping/Term/Progress Log và nhận permission denied. Chỉ có tên role/database đúng chưa chứng minh cô lập. Nếu PUBLIC grants làm đọc được hệ khác, không activate; cần phương án hạ tầng/quyền riêng được duyệt thay vì âm thầm sửa quyền hệ cũ.
 
-Lệnh migration có đầu vào `HANDOUT67_MIGRATION_DATABASE_URL`, nhận tài khoản quản trị và database đích, tạo schema/bảng mới; nếu database không đúng thì dừng. Lệnh server không tự migrate. Build chỉ từ thư mục `handout-writing67`, ghi digest sau build và dùng digest đó trong Compose; kiểm `db/001-initial.sql` có trong image, user node, secret/prompt không nằm trong image. Node base đã chọn 24.15.0-alpine3.23; build và vulnerability scan thực tế còn phải kiểm.
+Lệnh migration có đầu vào `HANDOUT67_MIGRATION_URL`, nhận tài khoản quản trị và database đích, tạo schema/bảng mới; nếu database không đúng thì dừng. Lệnh server không tự migrate. Build chỉ từ thư mục `handout-writing67`, ghi digest sau build và dùng digest đó trong Compose; kiểm migration có trong image, user node, secret/prompt không nằm trong image. Node base đã chọn 24.15.0-alpine3.23; build và vulnerability scan thực tế còn phải kiểm.
+
+## Bản sửa sự cố chấm bài — 06/10/2026, đang kiểm trước phát hành
+
+Phần này mô tả candidate hiện hành; các checkpoint phía dưới là bằng chứng lịch sử, gồm trần hai lease và hai bảng từ vựng đã được thay theo yêu cầu mới. Production chưa đổi ở thời điểm ghi phần này; biên nhận phát hành và quan sát vận hành nằm trong hồ sơ riêng.
+
+Webapp mặc định không giới hạn số job đang xử lý. Mỗi execution n8n nhận đúng một job và chờ `/internal/jobs/:id/process` của backend riêng. Giới hạn chung n8n đang là 30 execution; các giới hạn Cổng AI là giới hạn khác và được giữ nguyên. Không có tiến trình nền gọi AI ngoài n8n.
+
+Mỗi lượt gọi AI chờ tối đa 180 giây, HTTP từ n8n chờ 240 giây, quyền xử lý job hết hạn sau 300 giây. Retry tối đa ba lượt, cách 5 và 15 giây; toàn yêu cầu hết hạn sau 30 phút. Backend kiểm thời hạn khi đọc bài, nhận kết quả và trước gọi AI, đồng thời quét mỗi 15 giây. Hết retry hiện lỗi kỹ thuật, giữ nội dung và cho học viên nhấn Check lại. Kết quả muộn được lưu để điều tra nhưng không mở bước sai.
+
+Đầu vào cần thêm `HANDOUT67_AI_GATEWAY_URL` và `HANDOUT67_AI_GATEWAY_TOKEN`; khóa gửi qua header `x-ai-gateway-key` đã đối chiếu Cổng AI và credential hiện hành. Không đặt giá trị secret trong source, log hoặc ví dụ. Model yêu cầu giữ `gemini-3.1-pro-preview`, mức suy luận high; log ghi model thực nếu có metadata, thiếu thì để chưa biết.
+
+Chạy `db/002-activity-log.sql` bằng owner riêng đã được duyệt. Runtime chỉ cần SELECT/INSERT/UPDATE ba bảng nhật ký và EXECUTE hàm `cleanup_activity_log(timestamptz,integer)`, ngoài quyền hai bảng bài làm đang có. Không cấp DELETE trực tiếp, quyền sửa cấu trúc hoặc quyền dữ liệu sản phẩm khác. Migration không xóa bài/lịch sử cũ và server không tự chạy migration.
+
+Nhật ký giữ sự kiện, bản nội dung gửi chấm, prompt ghim dành cho người vận hành và phản hồi AI thô. Bản gửi chấm/phản hồi giữ hai tháng lịch từ khi yêu cầu kết thúc; sự kiện độc lập giữ hai tháng từ lúc ghi. Tiến trình riêng dọn mỗi giờ, tối đa 20 lô × 100 đơn vị, chỉ dữ liệu đã hết hạn; không xóa phiên, bài hay Comment. API giảng viên lọc lớp/phiên và không trả prompt. Các lượt trước khi bật tính năng có thể chưa đủ nhật ký.
+
+Proxy route riêng hiện được đọc lại là 20 giây, phải nâng đủ cho HTTP chấm 240 giây trước cutover. Chỉ chỉnh include Handout67, kiểm Nginx và đối chiếu consumer trước/sau; không đổi route hay cấu hình sản phẩm khác. Quay lui image/workflow riêng, giữ bảng nhật ký tương thích và dữ liệu bài; không restore đè database.
 
 Chạy riêng `docker compose -p izone-handout-writing67 config` rồi `up -d handout67` trong đích riêng, sau kiểm config và quyền. Không `down` stack chung. Runtime startup kiểm actual current_database/current_user và bảng trước mở HTTP. Health chỉ kiểm tiến trình sống: cần kiểm session/save/readback riêng để chứng minh đường database.
 

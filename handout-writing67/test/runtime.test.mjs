@@ -25,6 +25,14 @@ test('T-WAKE-CON · hai tick cùng lúc chỉ gửi một tín hiệu',async t=>
   const a=wake.tick();await new Promise(resolve=>setImmediate(resolve));const b=wake.tick();release();await Promise.all([a,b]);assert.equal(calls,1);
 });
 
+test('T-WAKE-BURST · đánh thức mỗi job chờ, không dồn cả lớp vào một execution',async t=>{
+  let work=['a:0','b:0','c:0'],calls=0;
+  const wake=createWake({hasWork:async()=>work,url:'https://fixture.invalid/wake',secret:'fixture',intervalMs:100000,fetcher:async()=>{calls++;return {ok:true};}});t.after(()=>wake.close());
+  await wake.tick();assert.equal(calls,3);await wake.tick();assert.equal(calls,3);
+  work=['a:1','d:0'];await wake.tick();assert.equal(calls,5);
+  work=[];await wake.tick();assert.equal(calls,5);
+});
+
 test('T-DURABLE · đóng/mở kho thật trên đĩa không mất phiên/bài',async()=>{
   const base=resolve(process.env.HANDOUT67_TEST_ROOT||tmpdir());
   const folder=await mkdtemp(join(base,'handout67-fixture-'));
@@ -33,6 +41,7 @@ test('T-DURABLE · đóng/mở kho thật trên đĩa không mất phiên/bài',
   let db;
   try {
     db=new PGlite(folder);await db.exec(await readFile(new URL('../db/001-initial.sql',import.meta.url),'utf8'));
+    await db.exec(await readFile(new URL('../db/002-activity-log.sql',import.meta.url),'utf8'));
     const service=createService({store:createStore(db),secret,roster});
     const who=await service.open({activity:'lesson5',classRef:'c',studentRef:'s'});
     const before=await service.save(who.session.ref,who.token,{baseVersion:0,requestId:'fixture-save',responses:{idea1:'Bài phải còn sau restart'}});

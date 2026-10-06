@@ -9,6 +9,10 @@ const pool=new pg.Pool({connectionString:url.href,max:1});
 try {
   const row=await pool.query('SELECT current_database() AS db');
   if(row.rows[0].db!=='handout_writing67')throw new Error('Sai database thực tế.');
-  await pool.query(await readFile(new URL('../db/001-initial.sql',import.meta.url),'utf8'));
-  console.log('Đã tạo schema/bảng handout67; cần readback quyền runtime theo runbook.');
+  await pool.query('BEGIN');
+  try{
+    for(const name of ['001-initial.sql','002-activity-log.sql'])await pool.query(await readFile(new URL('../db/'+name,import.meta.url),'utf8'));
+    await pool.query('COMMIT');
+  }catch(error){await pool.query('ROLLBACK');throw error;}
+  console.log('Đã tạo bảng bài làm/nhật ký handout67; cần readback quyền runtime và hàm dọn hạn theo runbook.');
 } finally {await pool.end();}

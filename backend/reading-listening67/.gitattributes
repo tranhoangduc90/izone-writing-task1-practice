@@ -1,0 +1,2 @@
+# Giữ script VPS dùng LF khi checkout trên Windows.
+*.sh text eol=lf

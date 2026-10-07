@@ -1,0 +1,30 @@
+# Chỉ dịch vụ Reading/Listening; cấu hình và database không lấy từ Writing.
+services:
+  reading-listening67-api:
+    image: reading-listening67:20261007
+    build:
+      context: ..
+      dockerfile: reading-listening67/Dockerfile
+    container_name: reading-listening67-api
+    restart: unless-stopped
+    init: true
+    env_file: .env.reading-listening67
+    environment:
+      NODE_ENV: production
+      PORT: "8791"
+      READING_LISTENING67_ENABLED: "true"
+    ports: ["127.0.0.1:8794:8791"]
+    networks: [mapping-api-net, n8n-net]
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    cpus: 0.25
+    mem_limit: 128m
+    pids_limit: 96
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: "2"}
+networks:
+  mapping-api-net: {external: true}
+  n8n-net: {external: true}

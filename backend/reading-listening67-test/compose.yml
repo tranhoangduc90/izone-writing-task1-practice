@@ -1,0 +1,31 @@
+# Gói thử chưa triển khai; .env riêng nằm ngoài Git, không dùng secret Writing.
+services:
+  reading-listening67-test:
+    image: reading-listening67-test:20261007
+    build:
+      context: ..
+      dockerfile: reading-listening67-test/Dockerfile
+    container_name: reading-listening67-test
+    restart: "no"
+    init: true
+    env_file: .env.reading-listening67-test
+    environment:
+      NODE_ENV: production
+      PORT: "8791"
+      READING_LISTENING67_ENABLED: "true"
+      READING_LISTENING67_TEST_DISPATCH: "false"
+    ports: ["127.0.0.1:8793:8791"]
+    networks: [mapping-api-net, n8n-net]
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    cpus: 0.25
+    mem_limit: 128m
+    pids_limit: 96
+    logging:
+      driver: json-file
+      options: {max-size: 5m, max-file: "2"}
+networks:
+  mapping-api-net: {external: true}
+  n8n-net: {external: true}

@@ -37,8 +37,12 @@ const MAPPING_CLASS_SQL = `WITH mapped_courses AS (
     course.classroom_course_name_snapshot,course.classroom_section_snapshot,
     course.status AS mapping_status,
     course.updated_at,
-    coalesce(array_agg(DISTINCT lower(access.class_status_snapshot))
-      FILTER (WHERE access.class_status_snapshot IS NOT NULL),ARRAY[]::text[]) AS class_statuses,
+    CASE WHEN verified.after_state->>'erpStatusVerified'='true'
+      AND verified.after_state->>'classStatus'='completed'
+      THEN ARRAY[verified.after_state->>'classStatus']::text[]
+      ELSE coalesce(array_agg(DISTINCT lower(access.class_status_snapshot))
+        FILTER (WHERE access.class_status_snapshot IS NOT NULL),ARRAY[]::text[])
+      END AS class_statuses,
     coalesce(array_agg(DISTINCT account.display_name ORDER BY account.display_name)
       FILTER (WHERE account.status='active' AND nullif(trim(account.display_name),'') IS NOT NULL),
       ARRAY[]::text[]) AS teacher_names,
@@ -47,10 +51,19 @@ const MAPPING_CLASS_SQL = `WITH mapped_courses AS (
   LEFT JOIN mapping.reviewer_class_access AS access
     ON access.erp_course_class_id=course.erp_course_class_id
   LEFT JOIN mapping.reviewer_account AS account ON account.email=access.reviewer_email
+  -- Sự thật ERP đã được người vận hành kiểm trực tiếp giữ riêng ở Writing.
+  -- Không sửa snapshot phân công giảng viên dùng chung hoặc bật lại lớp đã hoàn thành.
+  LEFT JOIN LATERAL (
+    SELECT event.after_state FROM writing_flow.operator_event AS event
+    WHERE event.event_type='class_mapping_changed'
+      AND event.after_state->>'erpStatusVerified'='true'
+      AND event.after_state->>'erpCourseClassId'=course.erp_course_class_id::text
+    ORDER BY event.created_at DESC,event.event_id DESC LIMIT 1
+  ) AS verified ON true
   GROUP BY course.erp_course_class_id,course.erp_class_name_snapshot,
     course.classroom_course_id,course.classroom_course_name_snapshot,
     course.classroom_section_snapshot,
-    course.status,course.updated_at
+    course.status,course.updated_at,verified.after_state
 ), direct_courses AS (
   SELECT NULL::bigint AS erp_course_class_id,
     direct.class_name_snapshot AS erp_class_name_snapshot,

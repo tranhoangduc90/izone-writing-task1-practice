@@ -7,6 +7,18 @@ import { keyFromHex, open, seal, sha256 } from './writing-flow-crypto.js';
 const STAGES = ['intake', 'precheck', 'main', 'critic', 'arbiter', 'render', 'deliver'];
 const GOOGLE_DOC_ID = /^\/document\/d\/([A-Za-z0-9_-]{20,})(?:\/|$)/u;
 
+// Nhận vào: đồng hồ PostgreSQL; chọn kỳ 05:00, 12:00 hoặc 17:00 kế tiếp ở Việt Nam.
+// Lỗi timeout/quota nghỉ hết kỳ, giữ cảnh báo và tối đa ba lượt trong mỗi kỳ.
+const NEXT_CLASS_SCAN_SQL = `CASE
+  WHEN (now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::time < time '05:00'
+    THEN ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date + time '05:00') AT TIME ZONE 'Asia/Ho_Chi_Minh'
+  WHEN (now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::time < time '12:00'
+    THEN ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date + time '12:00') AT TIME ZONE 'Asia/Ho_Chi_Minh'
+  WHEN (now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::time < time '17:00'
+    THEN ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date + time '17:00') AT TIME ZONE 'Asia/Ho_Chi_Minh'
+  ELSE (((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date + 1) + time '05:00') AT TIME ZONE 'Asia/Ho_Chi_Minh' END`;
+const RECOVERABLE_CLASS_ERRORS_SQL = "('CLASS_SCAN_TIMEOUT','GOOGLE_CLASSROOM_RATE_LIMIT')";
+
 function documentIdFromUrl(value) {
   const url = String(value || '').trim();
   if (!url.startsWith('https://')) return '';
@@ -105,11 +117,10 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
 
     async claimDueClasses({ limit = 20 } = {}) {
       return withTransaction(pool, async client => {
-        // Một lượt quét đã hết lease ba lần phải dừng ở danh sách cần xử lý.
-        // Không để lịch sau tiếp tục gọi Google cho cùng lớp vô hạn.
+        // Hết ba lượt thì giữ cảnh báo, nghỉ đến kỳ sau thay vì bỏ lớp 100 năm.
         await client.query(`UPDATE writing_flow.class_registry
-          SET scan_status='needs_review',last_error_code=coalesce(last_error_code,'CLASS_SCAN_TIMEOUT'),
-              next_scan_at=now()+interval '100 years',updated_at=now()
+          SET scan_status='needs_review',last_error_code='CLASS_SCAN_TIMEOUT',
+              next_scan_at=${NEXT_CLASS_SCAN_SQL},updated_at=now()
           WHERE enabled AND scan_status='scanning' AND next_scan_at<=now()
             AND scan_attempt_count>=3`);
         // Google mặc định cho 20 query/giây trên mỗi người dùng. Mỗi lớp gọi tối đa
@@ -120,13 +131,16 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
           FROM writing_flow.class_registry
         ) SELECT class_code FROM writing_flow.class_registry
           WHERE enabled AND mapping_status='approved' AND eligibility_reason='active'
-            AND scan_status IN ('pending','scanning','succeeded','failed') AND next_scan_at<=now()
+            AND (scan_status IN ('pending','scanning','succeeded','failed')
+              OR (scan_status='needs_review' AND last_error_code IN ${RECOVERABLE_CLASS_ERRORS_SQL}))
+            AND next_scan_at<=now()
           ORDER BY next_scan_at,class_code FOR UPDATE SKIP LOCKED
           LIMIT least($1,(SELECT slots FROM capacity))`, [limit]);
         if (!due.rowCount) return [];
         const codes = due.rows.map(row => row.class_code);
         const result = await client.query(`UPDATE writing_flow.class_registry
-          SET scan_status='scanning',scan_attempt_count=least(scan_attempt_count+1,3),
+          SET scan_status='scanning',scan_attempt_count=CASE WHEN scan_status='needs_review'
+                THEN 1 ELSE least(scan_attempt_count+1,3) END,
               next_scan_at=now()+interval '20 minutes',updated_at=now()
           WHERE class_code=ANY($1::text[])
           RETURNING class_code,classroom_course_id,classroom_name,cohort,teacher_names,
@@ -141,30 +155,27 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
               WHEN $2='succeeded' THEN 'succeeded'
               WHEN scan_attempt_count>=3 THEN 'needs_review'
               ELSE 'failed' END,
-            last_scan_at=now(),last_error_code=$3,next_scan_at=now()+
+            last_scan_at=CASE WHEN $2='succeeded' THEN now() ELSE last_scan_at END,
+            last_error_code=$3,next_scan_at=
               CASE
-                WHEN $2='succeeded' THEN CASE
-                  WHEN (now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::time < time '12:00'
-                    THEN ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date + time '12:00')
-                      AT TIME ZONE 'Asia/Ho_Chi_Minh' - now()
-                  WHEN (now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::time < time '17:00'
-                    THEN ((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date + time '17:00')
-                      AT TIME ZONE 'Asia/Ho_Chi_Minh' - now()
-                  ELSE (((now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date + 1) + time '05:00')
-                      AT TIME ZONE 'Asia/Ho_Chi_Minh' - now() END
-                WHEN scan_attempt_count>=3 THEN interval '100 years'
+                WHEN $2='succeeded' THEN ${NEXT_CLASS_SCAN_SQL}
+                WHEN scan_attempt_count>=3 AND $3 IN ${RECOVERABLE_CLASS_ERRORS_SQL}
+                  THEN ${NEXT_CLASS_SCAN_SQL}
+                WHEN scan_attempt_count>=3 THEN now()+interval '100 years'
                 -- Chờ 1, 2 hoặc 4 phút rồi cộng 0-30 giây ngẫu nhiên.
                 -- Độ lệch nhỏ này tránh nhiều lớp lỗi cùng lúc cùng gọi lại Google.
-                ELSE make_interval(secs => (
+                ELSE now()+make_interval(secs => (
                   60 * power(2, greatest(scan_attempt_count-1,0))
                   + floor(random() * 31)
                 )::integer)
               END,
             scan_attempt_count=CASE WHEN $2='succeeded' THEN 0 ELSE scan_attempt_count END,
-            updated_at=now() WHERE class_code=$1
+            updated_at=now() WHERE class_code=$1 AND enabled
+              AND scan_status='scanning' AND next_scan_at>now()
         RETURNING class_code,scan_status,scan_attempt_count,last_scan_at,next_scan_at,last_error_code`,
       [classCode, outcome, errorCode]);
-      if (!result.rowCount) throw new ApiError(404, 'CLASS_NOT_FOUND', 'Không tìm thấy lớp cần quét.');
+      if (!result.rowCount) throw new ApiError(409, 'CLASS_SCAN_NOT_RUNNING',
+        'Lượt quét đã hết hạn hoặc lớp đã dừng; xác nhận cũ không được thay đổi sổ lớp.');
       return result.rows[0];
     },
 
@@ -183,6 +194,34 @@ export function createWritingFlowOperations({ pool, encryptionKey = null }) {
           VALUES ($1,'class_scan_requested',$2,$3,$4,'{"scanStatus":"pending"}'::jsonb)`,
         [classCode, actorRef, requestId, reason]);
         return { classCode, status: 'pending', requestId };
+      });
+    },
+
+    // Nhận vào: trạng thái ERP vừa kiểm trực tiếp, đúng ID lớp và mã yêu cầu.
+    // Ghi sự thật có nhật ký riêng ở Writing; sync tiếp theo dùng trạng thái này.
+    // Không sửa mapping dùng chung. ERP đổi lại thì cần một lần xác minh mới.
+    async recordVerifiedErpClassStatus({ classCode, erpCourseClassId, classStatus,
+      observedAt, requestId, actorRef }) {
+      if (!['on_going','completed'].includes(classStatus)
+        || !/\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/u.test(observedAt || '')
+        || !Number.isFinite(Date.parse(observedAt)) || Date.parse(observedAt)>Date.now()+300000) {
+        throw new ApiError(400,'ERP_CLASS_STATUS_INVALID','Trạng thái hoặc thời gian ERP không hợp lệ.');
+      }
+      return withTransaction(pool, async client => {
+        const duplicate = await existingEvent(client, requestId);
+        if (duplicate) return duplicate.after_state;
+        const found = await client.query(`SELECT class_code,erp_course_class_id,class_status
+          FROM writing_flow.class_registry WHERE class_code=$1
+          AND erp_course_class_id=$2 FOR UPDATE`,[classCode,erpCourseClassId]);
+        if (!found.rowCount) throw new ApiError(409,'ERP_CLASS_ID_MISMATCH','Định danh lớp ERP không khớp.');
+        const state = { erpStatusVerified: true,erpCourseClassId: String(erpCourseClassId),
+          classStatus,observedAt };
+        await client.query(`INSERT INTO writing_flow.operator_event
+          (class_code,event_type,actor_ref,request_id,reason,before_state,after_state)
+          VALUES ($1,'class_mapping_changed',$2,$3,
+            'Đối chiếu trực tiếp trạng thái lớp ERP khi phục hồi bộ quét',$4::jsonb,$5::jsonb)`,
+        [classCode,actorRef,requestId,JSON.stringify(found.rows[0]),JSON.stringify(state)]);
+        return state;
       });
     },
 

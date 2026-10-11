@@ -2,10 +2,11 @@ import {createHmac,randomUUID,timingSafeEqual} from 'node:crypto';
 import {fail,ORDER,FIELDS,publicTeacherComments} from './service.mjs';
 import {publicThreads,changeThread} from './comments.mjs';
 import {dashboardProjection} from './dashboard.mjs';
+import {LEGACY_LESSON5} from './lessons.mjs';
 
 // Nhận danh tính Google đã xác minh và quyền lớp riêng; chỉ đọc/ghi bảng Handout67.
 // Token giảng viên có secret riêng. Không trả job/prompt/lease/capability cho dashboard.
-export function createTeacher({db,store,roster,registry,secret,verifyGoogleToken,clock=Date.now}) {
+export function createTeacher({db,store,roster,registry,secret,verifyGoogleToken,clock=Date.now,lessons={lesson5:LEGACY_LESSON5}}) {
   if(typeof secret!=='string'||secret.length<32)fail('TEACHER_CONFIG_INVALID');
   const sign=value=>createHmac('sha256',secret).update(value).digest('base64url');
   function account(email,sub){
@@ -14,7 +15,10 @@ export function createTeacher({db,store,roster,registry,secret,verifyGoogleToken
     return {...found[0],subject:sub};
   }
   const publicActor=a=>({displayName:a.displayName,email:a.email,classes:a.classes});
-  async function context(actor,classRef){
+  const lessonFor=activity=>{if(!Object.hasOwn(lessons,activity))fail('LESSON_NOT_FOUND',404);return lessons[activity];};
+  async function context(actor,classRef,activity='lesson5'){
+    const lesson=lessonFor(activity);
+    if(lesson.classes&&!lesson.classes.includes(classRef))fail('TEACHER_FORBIDDEN',403);
     if(!actor.classes.includes(classRef))fail('TEACHER_FORBIDDEN',403);
     const row=(await roster()).find(c=>c.classRef===classRef);
     if(!row)fail('CLASS_NOT_OPEN',404);
@@ -22,11 +26,11 @@ export function createTeacher({db,store,roster,registry,secret,verifyGoogleToken
   }
   async function sessionFor(actor,ref){
     const s=await store.read(ref);if(!s)fail('SESSION_NOT_FOUND',404);
-    const row=await context(actor,s.classRef);
-    if(s.activity!=='lesson5'||!row.students.some(x=>x.studentRef===s.studentRef))fail('TEACHER_FORBIDDEN',403);
+    const row=await context(actor,s.classRef,s.activity);
+    if(!row.students.some(x=>x.studentRef===s.studentRef))fail('TEACHER_FORBIDDEN',403);
     return s;
   }
-  const publicSession=s=>({ref:s.ref,classRef:s.classRef,studentRef:s.studentRef,version:s.version,responses:s.responses,steps:s.steps,vocabulary:s.vocabulary,idea2Open:s.idea2Open,teacherComments:publicTeacherComments(s),commentThreads:publicThreads(s),commentVersion:s.commentVersion||0,dashboard:dashboardProjection(s,clock()),processing:dashboardProjection(s,clock()).processing});
+  const publicSession=s=>({ref:s.ref,activity:s.activity,classRef:s.classRef,studentRef:s.studentRef,version:s.version,responses:s.responses,steps:s.steps,vocabulary:s.vocabulary,idea2Open:s.idea2Open,teacherComments:publicTeacherComments(s),commentThreads:publicThreads(s),commentVersion:s.commentVersion||0,dashboard:dashboardProjection(s,clock()),processing:dashboardProjection(s,clock()).processing});
   return {
     clientId:()=>registry().clientId,
     async login(credential){
@@ -47,12 +51,12 @@ export function createTeacher({db,store,roster,registry,secret,verifyGoogleToken
       return account(p.email,p.sub);
     },
     actor:publicActor,
-    async classes(actor){return (await roster()).filter(c=>actor.classes.includes(c.classRef)).map(c=>({classRef:c.classRef,className:c.className,studentCount:c.students.length}));},
-    async summary(actor,classRef){
-      const row=await context(actor,classRef);
-      const result=await db.query("SELECT payload,updated_at FROM handout67.session WHERE payload->>'classRef'=$1 AND payload->>'activity'='lesson5'",[classRef]);
+    async classes(actor,activity='lesson5'){const lesson=lessonFor(activity);return (await roster()).filter(c=>actor.classes.includes(c.classRef)&&(!lesson.classes||lesson.classes.includes(c.classRef))).map(c=>({classRef:c.classRef,className:c.className,studentCount:c.students.length}));},
+    async summary(actor,classRef,activity='lesson5'){
+      const row=await context(actor,classRef,activity);
+      const result=await db.query("SELECT payload,updated_at FROM handout67.session WHERE payload->>'classRef'=$1 AND payload->>'activity'=$2",[classRef,activity]);
       const sessions=new Map(result.rows.map(r=>[r.payload.studentRef,r]));
-      return {classRef,className:row.className,students:row.students.map(student=>{
+      return {activity,classRef,className:row.className,students:row.students.map(student=>{
         const r=sessions.get(student.studentRef),s=r?.payload;
         return {...student,sessionRef:s?.ref||null,updatedAt:r?.updated_at||null,passed:s?ORDER.filter(k=>s.steps[k].status==='passed').length:0,steps:s?Object.fromEntries(ORDER.map(k=>[k,s.steps[k].status])):{},comments:s?(s.teacherComments||[]).length+(s.commentThreads||[]).length:0,dashboard:s?dashboardProjection(s,clock()):null};
       })};

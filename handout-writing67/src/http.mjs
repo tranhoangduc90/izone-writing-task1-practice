@@ -57,8 +57,8 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
         }else{
           const actor=teacher.authorize(raw);
           if(path===prefix+'/teacher/session'&&req.method==='GET')value={reviewer:teacher.actor(actor)};
-          else if(path===prefix+'/teacher/classes'&&req.method==='GET')value={classes:await teacher.classes(actor)};
-          else if(path===prefix+'/teacher/students'&&req.method==='GET')value=await teacher.summary(actor,requestUrl.searchParams.get('class'));
+          else if(path===prefix+'/teacher/classes'&&req.method==='GET')value={classes:await teacher.classes(actor,requestUrl.searchParams.get('activity')||'lesson5')};
+          else if(path===prefix+'/teacher/students'&&req.method==='GET')value=await teacher.summary(actor,requestUrl.searchParams.get('class'),requestUrl.searchParams.get('activity')||'lesson5');
           else{
             const match=path.match(/^\/api\/handout67\/v1\/teacher\/sessions\/([^/]+)(\/(?:comments|threads|activity))?$/);
             if(!match||!uuid.test(match[1]))fail('NOT_FOUND',404);
@@ -70,7 +70,8 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
           }
         }
       }else if(path===prefix+'/health'&&req.method==='GET')value={productId:PRODUCT,version:'0.1.0',status:'alive'};
-      else if(path===prefix+'/roster'&&req.method==='GET')value={classes:await service.roster()};
+      else if(path.startsWith(prefix+'/lessons/')&&req.method==='GET')value={lesson:service.lesson(path.slice((prefix+'/lessons/').length))};
+      else if(path===prefix+'/roster'&&req.method==='GET')value={classes:await service.roster(requestUrl.searchParams.get('activity')||'lesson5')};
       else if(path===prefix+'/sessions'&&req.method==='POST'){value=await service.open(await jsonBody(req));status=201;}
       else if(path===prefix+'/internal/jobs/claim'&&req.method==='POST'){await jsonBody(req);value={jobs:await service.claim()};}
       else if(internal){

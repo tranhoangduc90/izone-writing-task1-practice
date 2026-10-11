@@ -18,7 +18,8 @@ if(target.rows[0].db!=='handout_writing67'||target.rows[0].role!=='handout67_run
 await pool.query('SELECT ref FROM handout67.session LIMIT 1');
 const store=createStore(postgresAdapter(pool));
 await pool.query('SELECT job_ref FROM handout67.grading_attempt LIMIT 1');
-const service=createService({store,roster:rosterAdapter(settings),secret:settings.secret,renderJob:await promptRenderer(settings.promptFile),retryDelays:[0,5000,15000]});
+const renderJob=await promptRenderer(settings.promptFile,{classes:settings.classes}),lessons=renderJob.lessons;
+const service=createService({store,roster:rosterAdapter(settings),secret:settings.secret,renderJob,lessons,retryDelays:[0,5000,15000]});
 // Không có pump gọi AI nền; n8n phải chờ endpoint xử lý mỗi attempt để giữ trần chung.
 const processor=createProcessor({service,callAI:gatewayAdapter(settings),onError:code=>console.error('Handout67: '+code)});
 const wake=createWake({url:settings.wakeUrl,secret:settings.wakeSecret,hasWork:async()=>{const result=await pool.query("SELECT (j->>'jobRef') || ':' || COALESCE(j->>'tries','0') AS key FROM handout67.session s, jsonb_array_elements(s.payload->'jobs') j WHERE j->>'status'='queued' AND COALESCE((j->>'nextAttemptAt')::bigint,0)<=$1",[Date.now()]);return result.rows.map(r=>r.key);},onError:()=>console.error('Handout Writing 67: chưa đánh thức được đường chấm; job vẫn được giữ.')});
@@ -31,7 +32,7 @@ const registry=()=>{
   return value;
 };
 if(settings.teacherFile)registry();
-const teacher=settings.teacherFile?createTeacher({db:pool,store,roster:rosterAdapter(settings),registry,secret:settings.teacherSecret,verifyGoogleToken:async(token,audience)=>(await oauth.verifyIdToken({idToken:token,audience})).getPayload()}):null;
+const teacher=settings.teacherFile?createTeacher({db:pool,store,roster:rosterAdapter(settings),registry,lessons,secret:settings.teacherSecret,verifyGoogleToken:async(token,audience)=>(await oauth.verifyIdToken({idToken:token,audience})).getPayload()}):null;
 const server=createApi({service,teacher,processor,...settings});
 let sweeping=false,cleaning=false;
 async function sweep(){if(sweeping)return;sweeping=true;try{await service.sweep();}catch{console.error('Handout67: chưa kiểm được thời hạn lượt chấm.');}finally{sweeping=false;}}

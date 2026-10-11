@@ -6,7 +6,7 @@ import { join,resolve,sep } from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
 import { createWake } from '../src/wake.mjs';
 import { createStore } from '../src/store.mjs';
-import { createService } from '../src/service.mjs';
+import { createService,TOPIC } from '../src/service.mjs';
 import { promptRenderer } from '../src/prompt.mjs';
 import { config } from '../src/config.mjs';
 
@@ -62,7 +62,7 @@ test('T-PROMPT · rubric riêng ngoài public image; payload đúng A2 và histo
     const file=join(folder,'fixture.json');
     await writeFile(file,JSON.stringify({version:'lesson5-rubric-v3',rubrics:Object.fromEntries(['topic','b1','b2','a','x','vocab'].map(k=>[k,'Rubric fixture '+k]))}));
     const render=await promptRenderer(file);
-    const text=render({kind:'grade',section:'a2',ideaIndex:2,snapshot:{topic:'Đề fixture',responses:{a1:'Câu khác của ý 1',a2:'Câu đúng ý 2',b2:'B đã duyệt ý 2',idea2:'Idea 2',topicSentence:'TS'},history:[{feedback:'Comment đúng A2'}]}});
+    const text=render({kind:'grade',section:'a2',ideaIndex:2,promptVersion:'lesson5-rubric-v3',snapshot:{topic:TOPIC,responses:{a1:'Câu khác của ý 1',a2:'Câu đúng ý 2',b2:'B đã duyệt ý 2',idea2:'Idea 2',topicSentence:'TS'},history:[{feedback:'Comment đúng A2'}]}});
     assert.ok(text.includes('Câu đúng ý 2'));assert.ok(text.includes('Comment đúng A2'));assert.ok(!text.includes('Câu khác của ý 1'));
     await writeFile(file,'{}');await assert.rejects(()=>promptRenderer(file),/PROMPT_REGISTRY_INVALID/);
   } finally {if(!resolve(folder).startsWith(base+sep))throw new Error('Sai đường fixture');await rm(folder,{recursive:true,force:true});}

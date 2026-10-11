@@ -1,11 +1,12 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import {parseAiResult} from './processor.mjs';
 import {publicThreads, changeThread} from './comments.mjs';
+import {LEGACY_LESSON5,publicLesson} from './lessons.mjs';
 
 export const PRODUCT = 'handout-writing67';
 export const ORDER = ['topic','b1','a1','x1','b2','a2','x2'];
 export const FIELDS = {topic:['idea1','idea2','topicSentence'],b1:['b1'],a1:['a1'],x1:['x1'],b2:['b2'],a2:['a2'],x2:['x2']};
-export const TOPIC = 'Many people buy products that they do not really need and replace old products with new ones unnecessarily. Why do people buy things they do not need? Do you think this is a good thing?';
+export const TOPIC = LEGACY_LESSON5.topic;
 export const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export function fail(code, status=400) { throw Object.assign(new Error(code), {status}); }
 const string = value => typeof value==='string' && value.trim().length>0 && value.length<=4000;
@@ -24,11 +25,13 @@ export function dependencies(section,ideaIndex){
 }
 const relevant = (job,responses) => hash(Object.fromEntries(dependencies(job.section,job.ideaIndex).map(k=>[k,responses[k]])));
 
-export function createService({store, roster, secret, clock=Date.now, leaseMs=300000, sessionMs=43200000, maxLeases=null, maxJobMs=1800000, retryDelays=[0,0,0], renderJob, promptVersion='lesson5-rubric-v3'}) {
+export function createService({store, roster, secret, clock=Date.now, leaseMs=300000, sessionMs=43200000, maxLeases=null, maxJobMs=1800000, retryDelays=[0,0,0], renderJob, promptVersion='lesson5-rubric-v3',lessons={lesson5:{...LEGACY_LESSON5,promptVersion}}}) {
   if (typeof secret!=='string' || secret.length<32 || leaseMs<=180000) fail('CONFIG_INVALID');
   if(maxLeases!==null&&(!Number.isSafeInteger(maxLeases)||maxLeases<1))fail('CONFIG_INVALID');
   if(!Number.isSafeInteger(maxJobMs)||maxJobMs<leaseMs*3||retryDelays.length!==3||retryDelays.some(v=>!Number.isSafeInteger(v)||v<0))fail('CONFIG_INVALID');
   const sign = value => createHmac('sha256',secret).update(value).digest('base64url');
+  const lessonFor=activity=>{if(!Object.hasOwn(lessons,activity))fail('LESSON_NOT_FOUND',404);return lessons[activity];};
+  const versionAvailable=j=>j.promptVersion===lessonFor(j.snapshot?.activity||'lesson5').promptVersion;
   const publicSession = s => {
     // Lấy job cuối của từng bước/ý trước khi lọc, không hiện lỗi cũ sau lượt mới đã đạt.
     const latest=Object.fromEntries(s.jobs.map(j=>[j.kind==='grade'?j.section:'vocab'+j.ideaIndex,j]));
@@ -49,7 +52,8 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     return result;
   };
   function makeJob(s,kind,section,ideaIndex) {
-    const snapshot = {topic:TOPIC,responses:structuredClone(s.responses),history:section?s.steps[section].history.map(h=>({feedback:h.feedback,status:h.status,snapshot:h.snapshot})):[],ideaIndex};
+    const lesson=lessonFor(s.activity),promptVersion=lesson.promptVersion;
+    const snapshot = {activity:s.activity,topic:lesson.topic,responses:structuredClone(s.responses),history:section?s.steps[section].history.map(h=>({feedback:h.feedback,status:h.status,snapshot:h.snapshot})):[],ideaIndex};
     const job = {productId:PRODUCT,sessionRef:s.ref,jobRef:randomUUID(),kind,section,ideaIndex,snapshotHash:hash(snapshot),snapshot,promptVersion,status:'queued',tries:0,createdAt:clock(),deadlineAt:clock()+maxJobMs,leaseUntil:0,leaseToken:null,attempts:[]};
     job.operationKey = `${PRODUCT}:${job.jobRef}:${job.promptVersion}`;
     job.inputHash=relevant(job,s.responses);
@@ -114,10 +118,11 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
   }
   const api = {
     authorizeSession(ref,token) {authorize(ref,token);},
-    async roster() { return roster(); },
+    lesson(activity='lesson5'){return publicLesson(lessonFor(activity));},
+    async roster(activity='lesson5') {const lesson=lessonFor(activity);return (await roster()).filter(c=>!lesson.classes||lesson.classes.includes(c.classRef));},
     async open(input) {
-      if (!object(input) || input.activity!=='lesson5' || !id(input.classRef) || !id(input.studentRef)) fail('IDENTITY_INVALID');
-      const rows=await roster();
+      if (!object(input) || !id(input.activity) || !id(input.classRef) || !id(input.studentRef)) fail('IDENTITY_INVALID');
+      const rows=await api.roster(input.activity);
       if (!rows.some(c=>c.classRef===input.classRef && c.students.some(s=>s.studentRef===input.studentRef))) fail('STUDENT_OUT_OF_SCOPE',403);
       const key=JSON.stringify([input.activity,input.classRef,input.studentRef]);
       const s=await store.open(key,ref=>({ref,activity:input.activity,classRef:input.classRef,studentRef:input.studentRef,responses:Object.fromEntries(Object.values(FIELDS).flat().map(k=>[k,''])),version:0,idea2Open:false,steps:Object.fromEntries(ORDER.map(k=>[k,{status:'draft',history:[],error:null}])),jobs:[],vocabulary:{},saves:{}}));
@@ -205,7 +210,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
         let capacity=maxLeases===null?Infinity:Math.max(0,maxLeases-active);const claimed=[];
         for(const s of sessions) for(const j of s.jobs) {
           if(!['queued','leased'].includes(j.status) || (j.status==='leased'&&j.leaseUntil>now))continue;
-          if((renderJob && !j.prompt && j.promptVersion!==promptVersion) || j.tries>=3) {
+          if((renderJob && !j.prompt && !versionAvailable(j)) || j.tries>=3) {
             j.status='failed';j.error='TECHNICAL_RETRIES_EXHAUSTED';
             if(j.kind==='grade') {s.steps[j.section].status='technical_error';s.steps[j.section].error=j.error;}
             else s.vocabulary[j.ideaIndex]={status:'failed',jobRef:j.jobRef};
@@ -273,7 +278,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
         await store.edit(job.sessionRef,s=>{expire(s);});return store.findJob(input.jobRef);
       }
       if(job.status!=='leased'||job.leaseUntil<=clock())fail('LEASE_EXPIRED',409);
-      if(!job.prompt&&renderJob&&job.promptVersion===promptVersion)job.prompt=renderJob({...envelope(job),snapshot:job.snapshot});
+      if(!job.prompt&&renderJob&&versionAvailable(job))job.prompt=renderJob({...envelope(job),snapshot:job.snapshot});
       if(typeof job.prompt!=='string'||!job.prompt)fail('PROMPT_MISSING',503);
       return {...job,executionRef:id(input.executionRef)?input.executionRef:null};
     },

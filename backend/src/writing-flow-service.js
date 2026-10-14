@@ -31,7 +31,16 @@ const teacherAssignmentsCte = `teacher_assignments AS (
    WHERE class_code IS NOT NULL AND teacher_name IS NOT NULL
    GROUP BY class_code
 )`;
-const MAPPING_CLASS_SQL = `WITH mapped_courses AS (
+const MAPPING_CLASS_SQL = `WITH verified_erp AS MATERIALIZED (
+  -- Gom sự kiện ERP mới nhất một lần, không quét nhật ký cho từng lớp.
+  SELECT DISTINCT ON (event.after_state->>'erpCourseClassId')
+    event.after_state->>'erpCourseClassId' AS erp_course_class_id,event.after_state
+  FROM writing_flow.operator_event AS event
+  WHERE event.event_type='class_mapping_changed'
+    AND event.after_state->>'erpStatusVerified'='true'
+    AND event.after_state->>'erpCourseClassId' IS NOT NULL
+  ORDER BY event.after_state->>'erpCourseClassId',event.created_at DESC,event.event_id DESC
+), mapped_courses AS (
   SELECT course.erp_course_class_id,
     course.erp_class_name_snapshot,course.classroom_course_id,
     course.classroom_course_name_snapshot,course.classroom_section_snapshot,
@@ -53,13 +62,8 @@ const MAPPING_CLASS_SQL = `WITH mapped_courses AS (
   LEFT JOIN mapping.reviewer_account AS account ON account.email=access.reviewer_email
   -- Sự thật ERP đã được người vận hành kiểm trực tiếp giữ riêng ở Writing.
   -- Không sửa snapshot phân công giảng viên dùng chung hoặc bật lại lớp đã hoàn thành.
-  LEFT JOIN LATERAL (
-    SELECT event.after_state FROM writing_flow.operator_event AS event
-    WHERE event.event_type='class_mapping_changed'
-      AND event.after_state->>'erpStatusVerified'='true'
-      AND event.after_state->>'erpCourseClassId'=course.erp_course_class_id::text
-    ORDER BY event.created_at DESC,event.event_id DESC LIMIT 1
-  ) AS verified ON true
+  LEFT JOIN verified_erp AS verified
+    ON verified.erp_course_class_id=course.erp_course_class_id::text
   GROUP BY course.erp_course_class_id,course.erp_class_name_snapshot,
     course.classroom_course_id,course.classroom_course_name_snapshot,
     course.classroom_section_snapshot,

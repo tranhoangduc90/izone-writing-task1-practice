@@ -25,7 +25,16 @@ function normalizeLmsUrl(value) {
 }
 
 export function createWritingPracticeService({ pool, provisionalService = null }) {
+  const pendingRosters = new Map();
   async function getRoster(slug) {
+    // Chỉ gộp các lượt cùng bài đang chờ; kết quả/lỗi không được giữ sang yêu cầu sau.
+    if (pendingRosters.has(slug)) return pendingRosters.get(slug);
+    const pending = readRoster(slug);
+    pendingRosters.set(slug, pending);
+    try { return await pending; }
+    finally { pendingRosters.delete(slug); }
+  }
+  async function readRoster(slug) {
     const activity = await pool.query(`SELECT id, slug, title FROM writing_practice.activity WHERE slug = $1 AND status = 'active'`, [slug]);
     if (!activity.rowCount) throw new ApiError(404, 'ACTIVITY_NOT_FOUND', 'Hoạt động chưa được mở.');
     const rows = await pool.query(`SELECT class.public_id AS class_ref, class.class_name_snapshot, roster.student_public_id AS student_ref,

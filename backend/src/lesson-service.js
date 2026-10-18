@@ -30,9 +30,11 @@ export function createLessonPracticeService({ pool, provisionalService = null, n
         'overview',session.overview,'body1',session.body1,'body2',session.body2,'draft1',session.draft1,'draft2',session.draft2)
         ||COALESCE(session.response_data,'{}'::jsonb)) AS responses,
       session.draft_version AS "draftVersion", session.updated_at AS "updatedAt",
-      activity.slug AS "activitySlug", activity.title
+      activity.slug AS "activitySlug", activity.title,
+      session.student_public_id AS "studentRef", scope.public_id AS "classRef"
       FROM writing_practice.activity_session session
       JOIN writing_practice.activity activity ON activity.id=session.activity_id
+      JOIN writing_practice.activity_class_scope scope ON scope.id=session.activity_class_id
       WHERE session.public_id=$1`, [sessionRef]);
     if (!session.rowCount) throw new ApiError(404, 'SESSION_NOT_FOUND', 'Không tìm thấy phiên làm bài.');
     const row = session.rows[0];

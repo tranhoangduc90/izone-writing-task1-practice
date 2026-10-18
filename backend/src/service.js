@@ -54,8 +54,12 @@ export function createWritingPracticeService({ pool, provisionalService = null }
   }
   async function sessionDetails(sessionRef, client = pool) {
     const session = await client.query(`SELECT s.id, s.public_id AS "sessionRef", s.overview, s.body1, s.body2, s.draft1, s.draft2,
-      s.draft2_unlocked AS "draft2Unlocked", s.draft_version AS "draftVersion", s.updated_at AS "updatedAt"
-      FROM writing_practice.activity_session s WHERE s.public_id = $1`, [sessionRef]);
+      s.draft2_unlocked AS "draft2Unlocked", s.draft_version AS "draftVersion", s.updated_at AS "updatedAt",
+      s.student_public_id AS "studentRef", scope.public_id AS "classRef", activity.slug AS "activitySlug"
+      FROM writing_practice.activity_session s
+      JOIN writing_practice.activity_class_scope scope ON scope.id=s.activity_class_id
+      JOIN writing_practice.activity activity ON activity.id=s.activity_id
+      WHERE s.public_id = $1`, [sessionRef]);
     if (!session.rowCount) throw new ApiError(404, 'SESSION_NOT_FOUND', 'Không tìm thấy phiên làm bài.');
     // Một pg Client chỉ chạy an toàn một truy vấn tại một thời điểm. Đọc tuần tự để tránh
     // lỗi ngẫu nhiên khi sessionDetails chạy bên trong transaction mở/lưu/check.

@@ -3,6 +3,7 @@ import {fail,ORDER,FIELDS,publicTeacherComments} from './service.mjs';
 import {publicThreads,changeThread} from './comments.mjs';
 import {dashboardProjection} from './dashboard.mjs';
 import {LEGACY_LESSON5} from './lessons.mjs';
+import {teacherRole,hasTeacherClass} from './teacher-registry.mjs';
 
 // Nhận danh tính Google đã xác minh và quyền lớp riêng; chỉ đọc/ghi bảng Handout67.
 // Token giảng viên có secret riêng. Không trả job/prompt/lease/capability cho dashboard.
@@ -12,14 +13,14 @@ export function createTeacher({db,store,roster,registry,secret,verifyGoogleToken
   function account(email,sub){
     const found=registry().teachers.filter(t=>t.email===email && typeof t.subject==='string' && t.subject.length>0 && t.subject===sub);
     if(found.length!==1)fail('TEACHER_FORBIDDEN',403);
-    return {...found[0],subject:sub};
+    return {...found[0],subject:sub,role:teacherRole(found[0])};
   }
-  const publicActor=a=>({displayName:a.displayName,email:a.email,classes:a.classes});
+  const publicActor=a=>({displayName:a.displayName,email:a.email,classes:a.classes,role:teacherRole(a),canAccessAllClasses:teacherRole(a)==='admin'});
   const lessonFor=activity=>{if(!Object.hasOwn(lessons,activity))fail('LESSON_NOT_FOUND',404);return lessons[activity];};
   async function context(actor,classRef,activity='lesson5'){
     const lesson=lessonFor(activity);
     if(lesson.classes&&!lesson.classes.includes(classRef))fail('TEACHER_FORBIDDEN',403);
-    if(!actor.classes.includes(classRef))fail('TEACHER_FORBIDDEN',403);
+    if(!hasTeacherClass(actor,classRef))fail('TEACHER_FORBIDDEN',403);
     const row=(await roster()).find(c=>c.classRef===classRef);
     if(!row)fail('CLASS_NOT_OPEN',404);
     return row;
@@ -51,7 +52,7 @@ export function createTeacher({db,store,roster,registry,secret,verifyGoogleToken
       return account(p.email,p.sub);
     },
     actor:publicActor,
-    async classes(actor,activity='lesson5'){const lesson=lessonFor(activity);return (await roster()).filter(c=>actor.classes.includes(c.classRef)&&(!lesson.classes||lesson.classes.includes(c.classRef))).map(c=>({classRef:c.classRef,className:c.className,studentCount:c.students.length}));},
+    async classes(actor,activity='lesson5'){const lesson=lessonFor(activity);return (await roster()).filter(c=>hasTeacherClass(actor,c.classRef)&&(!lesson.classes||lesson.classes.includes(c.classRef))).map(c=>({classRef:c.classRef,className:c.className,studentCount:c.students.length}));},
     async summary(actor,classRef,activity='lesson5'){
       const row=await context(actor,classRef,activity);
       const result=await db.query("SELECT payload,updated_at FROM handout67.session WHERE payload->>'classRef'=$1 AND payload->>'activity'=$2",[classRef,activity]);
@@ -68,7 +69,7 @@ export function createTeacher({db,store,roster,registry,secret,verifyGoogleToken
       if(input?.expectedActor!==actor.email)fail('TEACHER_IDENTITY_CHANGED',401);
       await sessionFor(actor,ref);
       return store.edit(ref,s=>{
-        if(!actor.classes.includes(s.classRef))fail('TEACHER_FORBIDDEN',403);
+        if(!hasTeacherClass(actor,s.classRef))fail('TEACHER_FORBIDDEN',403);
         changeThread(s,{role:'teacher',key:actor.email,name:actor.displayName},input,clock());
         return publicSession(s);
       });
@@ -79,7 +80,7 @@ export function createTeacher({db,store,roster,registry,secret,verifyGoogleToken
       await sessionFor(actor,ref);
       return store.edit(ref,s=>{
         // Đọc lại định danh trong transaction; không lấy studentRef/classRef từ body ghi nhận xét.
-        if(!actor.classes.includes(s.classRef))fail('TEACHER_FORBIDDEN',403);
+        if(!hasTeacherClass(actor,s.classRef))fail('TEACHER_FORBIDDEN',403);
         s.teacherComments ||= [];
         const previous=s.teacherComments.find(c=>c.requestId===input.requestId&&c.authorEmail===actor.email);
         if(previous){if(previous.section!==input.section||previous.feedback!==input.feedback.trim()||previous.expectedVersion!==input.expectedVersion)fail('REQUEST_ID_CONFLICT',409);return publicSession(s);}

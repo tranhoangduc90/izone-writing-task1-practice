@@ -2,6 +2,7 @@ import pg from 'pg';
 import fs from 'node:fs';
 import {OAuth2Client} from 'google-auth-library';
 import {createTeacher} from './teacher.mjs';
+import {validateTeacherRegistry} from './teacher-registry.mjs';
 import { createWake } from './wake.mjs';
 import { promptRenderer } from './prompt.mjs';
 import { config,rosterAdapter } from './config.mjs';
@@ -28,8 +29,7 @@ const oauth=new OAuth2Client();
 oauth.transporter.defaults={...oauth.transporter.defaults,timeout:5000};
 const registry=()=>{
   const value=JSON.parse(fs.readFileSync(settings.teacherFile,'utf8'));
-  if(!value.clientId?.endsWith('.apps.googleusercontent.com')||!Array.isArray(value.teachers)||value.teachers.some(t=>typeof t.email!=='string'||typeof t.displayName!=='string'||typeof t.subject!=='string'||!t.subject.trim()||!Array.isArray(t.classes)||t.classes.some(c=>!settings.classes.includes(c))))throw new Error('TEACHER_REGISTRY_INVALID');
-  return value;
+  return validateTeacherRegistry(value,settings.classes);
 };
 if(settings.teacherFile)registry();
 const teacher=settings.teacherFile?createTeacher({db:pool,store,roster:rosterAdapter(settings),registry,lessons,secret:settings.teacherSecret,verifyGoogleToken:async(token,audience)=>(await oauth.verifyIdToken({idToken:token,audience})).getPayload()}):null;

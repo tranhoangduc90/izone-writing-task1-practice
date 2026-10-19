@@ -1,5 +1,13 @@
 # Triển khai và quay lui Handout Writing 67
 
+## Quyền quản trị Handout — 19/10/2026
+
+Trong tệp quyền riêng trên máy chủ, `role: "admin"` cho phép tài khoản Google đã xác minh xem mọi lớp Handout đang mở, kể cả lớp được mở thêm sau này. Không cần bổ sung danh sách lớp cho quản trị. Mảng `classes` được giữ để tương thích nhưng không giới hạn vai trò này. Quyền không tự mở một lớp hoặc bài chưa được cấu hình cho Handout.
+
+Tài khoản không có `role` mặc định là `teacher`, tiếp tục chỉ truy cập các lớp được cấp trong `classes`. Vai trò không lấy từ trình duyệt. Email và mã định danh Google phải cùng khớp; thay đổi quyền có hiệu lực ở yêu cầu tiếp theo, kể cả phiên đăng nhập đang tồn tại. Quản trị vẫn phải qua kiểm tra bài, lớp và học viên; không được dùng quyền này để vượt phạm vi sản phẩm hoặc sửa định danh bài làm.
+
+Kiểm hồi quy: `test/teacher-admin.test.mjs` kiểm lớp hiện tại/lớp mới, đọc bài và nhận xét, giữ nội dung nháp, giới hạn giảng viên thường, đổi/thu hồi quyền trong phiên cũ và từ chối vai trò gửi từ trình duyệt. Khi phát hành, chỉ ghép ba module quyền vào đúng image live đã ghim; không dựng lại toàn bộ từ Git nếu live đang có sửa đổi khác chưa đồng bộ. Giữ image/container cũ và sao lưu riêng tệp quyền; không khôi phục database khi quay lui.
+
 05/10/2026. Gói đề xuất nền đã được Đức duyệt và dựng bản thử riêng; checkpoint cuối file là trạng thái hiện hành. Các mục trước checkpoint giữ thiết kế/baseline trước triển khai. Không dùng lệnh dựng lại stack Mapping, Progress Log, Term, Speaking hoặc Writing cũ.
 
 ## Đích và phạm vi

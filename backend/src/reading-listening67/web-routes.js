@@ -5,17 +5,27 @@
  */
 import express from 'express';
 import {z} from 'zod';
+import {timingSafeEqual} from 'node:crypto';
 import {WebGradingError} from './web-grader.js';
 const saveInput=z.object({baseRevision:z.number().int().nonnegative(),mutationId:z.uuid(),body:z.object({answers:z.record(z.string(),z.string().max(12000)),annotations:z.array(z.record(z.string(),z.unknown())).max(300),notes:z.string().max(16000),flags:z.array(z.number().int().min(1).max(4)).max(4)}).strict()}).strict();
 const submitInput=z.object({revision:z.number().int().positive(),requestId:z.uuid()}).strict();
 const id=z.uuid();
-export function createReading67WebRouter({store,content,grader,authenticate,identity,config={}}){
+export function createReading67WebRouter({store,content,grader,authenticate,identity,config={},homework,registerCta,adminKey}){
   const router=express.Router();router.use(express.json({limit:'250kb',strict:true}));
   const route=fn=>(q,r,next)=>Promise.resolve(fn(q,r)).catch(next);
   const parse=(schema,value)=>{const result=schema.safeParse(value);if(!result.success)throw new WebGradingError('WEB_INVALID_INPUT',400);return result.data;};
   const ref=z.object({classId:z.string().regex(/^-?[1-9]\d{0,18}$/),studentRef:z.uuid()}).strict();
   const makeScope=person=>({ownerId:person.ownerId,courseId:person.courseId,code:content.code,version:content.version});
   const scope=q=>makeScope(q.webIdentity);
+  if(registerCta){
+    const text=z.string().trim().min(1).max(200);
+    const ctaEvent=z.object({doc_id:z.string().regex(/^[A-Za-z0-9_-]{20,200}$/),classroom_course_id:text,coursework_id:text,submission_id:text,student_id:text,class_name:text});
+    router.post('/admin/register-cta',route(async(q,r)=>{
+      const expected=Buffer.from(adminKey||''),actual=Buffer.from(String(q.headers.authorization||'').replace(/^Bearer /,''));
+      if(expected.length<32||expected.length!==actual.length||!timingSafeEqual(actual,expected))throw new WebGradingError('WEB_UNAUTHORIZED',401);
+      r.json({ok:true,...await registerCta(parse(ctaEvent,q.body))});
+    }));
+  }
   if(identity){
     router.get('/config',(_q,r)=>r.json({ok:true,version:3,title:content.title,code:content.code,...config}));
     router.get('/classes',route(async(_q,r)=>r.json({ok:true,classes:await identity.classes()})));
@@ -35,6 +45,7 @@ export function createReading67WebRouter({store,content,grader,authenticate,iden
   router.use(async(q,r,next)=>{try{q.webIdentity=await authenticate(q);if(!q.webIdentity)throw new WebGradingError('WEB_UNAUTHORIZED',401);next();}catch(error){next(error);}});
   router.get('/lesson',route(async(q,r)=>r.json({ok:true,content,identity:q.webIdentity,grader:{hash:grader.pins.sha256,version:grader.pins.workflowVersion},mode:'local_test_real_grading'})));
   router.get('/draft',route(async(q,r)=>r.json({ok:true,...await store.draft(scope(q))})));
+  router.get('/homework',route(async(q,r)=>r.json({ok:true,...(homework?await homework.status(scope(q)):{status:'not_applicable'})})));
   router.put('/draft',route(async(q,r)=>r.json({ok:true,...await store.save(scope(q),parse(saveInput,q.body))})));
   router.post('/submit',route(async(q,r)=>r.status(202).json({ok:true,...await store.submit(scope(q),parse(submitInput,q.body))})));
   router.get('/attempts',route(async(q,r)=>r.json({ok:true,attempts:await store.history(scope(q)),archives:await store.archives(scope(q)),firstCompleted:await store.firstCompleted(scope(q))})));

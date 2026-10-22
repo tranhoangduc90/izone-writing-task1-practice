@@ -10,7 +10,7 @@ const values=s=>[s.ownerId,s.courseId,s.code,s.version];
 const where='owner_id=$1 AND course_id=$2 AND assignment_code=$3 AND content_version=$4';
 const canonical=value=>JSON.stringify(value,(_k,v)=>v&&typeof v==='object'&&!Array.isArray(v)?Object.fromEntries(Object.entries(v).sort(([a],[b])=>a.localeCompare(b))):v);
 
-export function createReading67WebStore({db,grader}) {
+export function createReading67WebStore({db,grader,homework}) {
   const gateFor=body=>grader.inspectWeb(body.answers||{});
   function draftView(row){const body=row?.body||emptyBody();return {body,runNo:row?.run_no||1,revision:row?.revision||0,savedAt:row?.saved_at||null,completeness:gateFor(body).completeness};}
   async function draft(scope){const r=await db.query(`SELECT * FROM reading_listening67.web_draft WHERE ${where}`,values(scope));return draftView(r.rows[0]);}
@@ -29,6 +29,7 @@ export function createReading67WebStore({db,grader}) {
       const saved=(await tx.query(`UPDATE reading_listening67.web_draft SET body=$5::jsonb,revision=revision+1,saved_at=now() WHERE ${where} RETURNING *`,[...args,JSON.stringify(body)])).rows[0];
       const response=draftView(saved);
       await tx.query('INSERT INTO reading_listening67.web_mutation(owner_id,course_id,assignment_code,content_version,mutation_id,request_hash,response) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)',[...args,mutationId,requestHash,JSON.stringify(response)]);
+      if(homework)await homework.start(tx,scope);
       return response;
     });
   }
@@ -52,6 +53,7 @@ export function createReading67WebStore({db,grader}) {
         await tx.query("INSERT INTO reading_listening67.web_job(id,attempt_id,status) VALUES($1,$2,'queued')",[randomUUID(),attemptId]);
       }
       await tx.query('INSERT INTO reading_listening67.web_request(owner_id,course_id,assignment_code,content_version,request_id,request_hash,attempt_id) VALUES($1,$2,$3,$4,$5,$6,$7)',[...args,requestId,requestHash,attemptId]);
+      if(homework)await homework.submitted(tx,scope,attemptId);
       return attemptView(tx,scope,attemptId,!!cached);
     });
   }
@@ -74,7 +76,8 @@ export function createReading67WebStore({db,grader}) {
     if(!row||row.revision!==baseRevision)throw new WebGradingError('DRAFT_REVISION_CONFLICT',409);
     await tx.query('INSERT INTO reading_listening67.web_draft_archive(id,owner_id,course_id,assignment_code,content_version,run_no,revision,body,saved_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)',[randomUUID(),...args,row.run_no,row.revision,JSON.stringify(row.body),row.saved_at]);
     const next=(await tx.query(`UPDATE reading_listening67.web_draft SET body=$5::jsonb,revision=revision+1,run_no=run_no+1,saved_at=now() WHERE ${where} RETURNING *`,[...args,JSON.stringify(emptyBody())])).rows[0];
-    const response=draftView(next);await tx.query('INSERT INTO reading_listening67.web_mutation(owner_id,course_id,assignment_code,content_version,mutation_id,request_hash,response) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)',[...args,mutationId,requestHash,JSON.stringify(response)]);return response;
+    const response=draftView(next);await tx.query('INSERT INTO reading_listening67.web_mutation(owner_id,course_id,assignment_code,content_version,mutation_id,request_hash,response) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)',[...args,mutationId,requestHash,JSON.stringify(response)]);
+    if(homework)await homework.start(tx,scope);return response;
   });}
   async function archives(scope){return (await db.query(`SELECT id,run_no AS "runNo",revision,body,saved_at AS "savedAt",archived_at AS "archivedAt" FROM reading_listening67.web_draft_archive WHERE ${where} ORDER BY archived_at DESC LIMIT 40`,values(scope))).rows;}
   async function firstCompleted(scope){return (await db.query(`SELECT a.id AS "attemptId",a.run_no AS "runNo",j.finished_at AS "finishedAt" FROM reading_listening67.web_attempt a JOIN reading_listening67.web_job j ON j.attempt_id=a.id WHERE a.owner_id=$1 AND a.course_id=$2 AND a.assignment_code=$3 AND a.content_version=$4 AND j.status='done' ORDER BY j.finished_at,a.id LIMIT 1`,values(scope))).rows[0]||null;}
@@ -86,18 +89,23 @@ export function createReading67WebStore({db,grader}) {
     const a=(await tx.query('SELECT * FROM reading_listening67.web_attempt WHERE id=$1',[job.attempt_id])).rows[0];
     return {jobId:job.id,attemptId:a.id,leaseToken:token,answers:a.snapshot.answers,inputHash:a.input_hash,graderHash:a.grader_hash,ownerId:a.owner_id};
   });}
-  async function assertOwner(tx,job){const row=(await tx.query("SELECT j.* FROM reading_listening67.web_job j JOIN reading_listening67.web_attempt a ON a.id=j.attempt_id WHERE j.id=$1 AND j.attempt_id=$2 AND j.lease_token=$3 AND a.owner_id=$4 AND j.status='processing' AND j.lease_until>now() FOR UPDATE OF j",[job.jobId,job.attemptId,job.leaseToken,job.ownerId])).rows[0];if(!row)throw new WebGradingError('JOB_LEASE_NOT_OWNED',409);return row;}
+  async function assertOwner(tx,job){const row=(await tx.query("SELECT j.*,a.course_id,a.assignment_code,a.content_version FROM reading_listening67.web_job j JOIN reading_listening67.web_attempt a ON a.id=j.attempt_id WHERE j.id=$1 AND j.attempt_id=$2 AND j.lease_token=$3 AND a.owner_id=$4 AND j.status='processing' AND j.lease_until>now() FOR UPDATE OF j",[job.jobId,job.attemptId,job.leaseToken,job.ownerId])).rows[0];if(!row)throw new WebGradingError('JOB_LEASE_NOT_OWNED',409);return row;}
   async function recordProvider(job,response){return db.transaction(async tx=>{await assertOwner(tx,job);await tx.query('UPDATE reading_listening67.web_job SET provider_response=$2::jsonb WHERE id=$1',[job.jobId,JSON.stringify(response)]);});}
   async function finish(job,result){return db.transaction(async tx=>{
-    await assertOwner(tx,job);
+    const owned=await assertOwner(tx,job);
     const ids=result.grading?.target_results?.map(t=>t.target_id)||[];
     if(result.context?.operationId!==job.jobId||result.context?.sourceDigest!==job.inputHash||result.pins?.sha256!==job.graderHash||ids.length!==20||new Set(ids).size!==20||grader.profile.expected_target_ids.some(id=>!ids.includes(id)))throw new WebGradingError('RESULT_IDENTITY_MISMATCH',409);
     const {providerResponse:_private,...data}=result;
     await tx.query('INSERT INTO reading_listening67.web_result(attempt_id,data) VALUES($1,$2::jsonb)',[job.attemptId,JSON.stringify(data)]);
     await tx.query("UPDATE reading_listening67.web_job SET status='done',finished_at=now(),lease_until=NULL WHERE id=$1",[job.jobId]);
+    if(homework)await homework.outcome(tx,{ownerId:job.ownerId,courseId:owned.course_id,code:owned.assignment_code,version:owned.content_version},job.jobId);
   });}
-  async function fail(job,error){return db.transaction(async tx=>{await assertOwner(tx,job);const code=String(error.code||'GRADING_VALIDATION_FAILED').slice(0,100);const status=code==='AI_OUTCOME_UNKNOWN'?'needs_review':'failed';await tx.query('UPDATE reading_listening67.web_job SET status=$2,error_code=$3,finished_at=now(),lease_until=NULL WHERE id=$1',[job.jobId,status,code]);});}
-  async function recoverExpired(){return db.query("UPDATE reading_listening67.web_job SET status='needs_review',error_code='WORKER_LEASE_EXPIRED',finished_at=now() WHERE status='processing' AND lease_until<=now()");}
+  async function fail(job,error){return db.transaction(async tx=>{const owned=await assertOwner(tx,job);const code=String(error.code||'GRADING_VALIDATION_FAILED').slice(0,100);const status=code==='AI_OUTCOME_UNKNOWN'?'needs_review':'failed';await tx.query('UPDATE reading_listening67.web_job SET status=$2,error_code=$3,finished_at=now(),lease_until=NULL WHERE id=$1',[job.jobId,status,code]);if(homework)await homework.outcome(tx,{ownerId:job.ownerId,courseId:owned.course_id,code:owned.assignment_code,version:owned.content_version},job.jobId);});}
+  async function recoverExpired(){return db.transaction(async tx=>{
+    const recovered=await tx.query("UPDATE reading_listening67.web_job SET status='needs_review',error_code='WORKER_LEASE_EXPIRED',finished_at=now() WHERE status='processing' AND lease_until<=now() RETURNING id,attempt_id");
+    if(homework)for(const job of recovered.rows){const a=(await tx.query('SELECT * FROM reading_listening67.web_attempt WHERE id=$1',[job.attempt_id])).rows[0];await homework.outcome(tx,{ownerId:a.owner_id,courseId:a.course_id,code:a.assignment_code,version:a.content_version},job.id);}
+    return recovered;
+  });}
   return {draft,save,submit,attempt,history,archives,reset,firstCompleted,claim,recordProvider,finish,fail,recoverExpired};
 }
 

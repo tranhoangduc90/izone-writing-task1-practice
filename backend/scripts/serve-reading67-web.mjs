@@ -1,6 +1,6 @@
 /**
- * Máy chủ chặng 3 chỉ bind localhost. Đọc quyền Reading qua API V1 hoặc fixture
- * tách riêng; bài/phiên/kết quả chỉ ghi SQL local. Không bật writer Docs/VPS.
+ * Máy chủ thử riêng: đọc quyền Reading V1 hoặc fixture. Hàng Google Docs chỉ
+ * bật khi cấu hình private chỉ rõ đích; không tự mở lớp hoặc nộp Classroom.
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -16,6 +16,7 @@ import {loadReading67WebGrader} from '../src/reading-listening67/web-grader.js';
 import {createReading67WebStore,createReading67WebWorker} from '../src/reading-listening67/web-store.js';
 import {createReading67WebRouter} from '../src/reading-listening67/web-routes.js';
 import {createReading67Postgres} from '../src/reading-listening67/web-postgres.js';
+import {createReading67HomeworkRuntime} from '../src/reading-listening67/web-homework-runtime.js';
 const run=promisify(execFile),config=JSON.parse(await fs.readFile(process.argv[2],'utf8'));
 if(!['local_test','https_test'].includes(config.mode)||!path.isAbsolute(config.dataDir))throw Error('TEST_CONFIG_REQUIRED');
 const publicPath=config.publicPath||'';
@@ -46,12 +47,13 @@ const verifyGoogle=fixtureAuthority?async value=>{if(value!=='demo-teacher-allow
 await fs.mkdir(config.dataDir,{recursive:true});
 const db=config.database?.kind==='postgres'?createReading67Postgres({connectionString:(await fs.readFile(config.database.connectionFile,'utf8')).trim()}):new (await import('@electric-sql/pglite')).PGlite(path.join(config.dataDir,'postgres'));
 if(config.mode==='https_test'&&config.database?.kind!=='postgres')throw Error('HTTPS_TEST_REQUIRES_OWN_POSTGRES');
-if(config.database?.kind!=='postgres')for(const name of ['web','identity'])await db.exec(await fs.readFile(new URL(`../../docs/migrations/2026-10-22-reading67-${name}.sql`,import.meta.url),'utf8'));
+if(config.database?.kind!=='postgres')for(const name of ['web','identity',...(config.homework?.enabled?['homework']:[])])await db.exec(await fs.readFile(new URL(`../../docs/migrations/2026-10-22-reading67-${name}.sql`,import.meta.url),'utf8'));
 else{const role=(await db.query('SELECT current_database() AS db,current_user AS role,rolsuper FROM pg_roles WHERE rolname=current_user')).rows[0];if(role.db!=='reading67_preview_stage3'||role.role!=='reading67_preview_app'||role.rolsuper)throw Error('TEST_DATABASE_ROLE_REQUIRED');await db.query('SELECT 1 FROM reading_listening67.web_student_session LIMIT 1');}
 const content=JSON.parse(await fs.readFile(config.contentPath,'utf8'));
 const grader=await loadReading67WebGrader({snapshotPath:config.graderPath,expectedSha256:config.graderSha256});
-const store=createReading67WebStore({db,grader});await store.recoverExpired();
 const identity=createReading67WebIdentity({db,context,allowedClassIds:config.allowedClassIds||initial.classes.map(c=>c.erp_course_class_id),verifyGoogle,cookiePath:publicPath+'/api/reading-skills67'});
+const homeworkRuntime=config.homework?.enabled?await createReading67HomeworkRuntime({config:config.homework,db,content,identity}):null;
+const store=createReading67WebStore({db,grader,homework:homeworkRuntime?.homework});await store.recoverExpired();
 // Demo phát lại output AI thật đã lưu; qua cùng validator, không giả một kết quả mới.
 if(demo&&config.seed){
  const scope={ownerId:config.seed.studentRef,courseId:config.seed.classId,code:content.code,version:content.version};
@@ -74,15 +76,15 @@ app.use((q,r,next)=>{
  if(q.method==='OPTIONS')return r.sendStatus(204);next();
 });
 app.use('/api',rateLimit({windowMs:60000,limit:1200,standardHeaders:'draft-8',legacyHeaders:false}));
-app.use('/api/reading-skills67',createReading67WebRouter({store,content,grader,identity,authenticate:identity.authenticate,config:{demo,demoGoogle:fixtureAuthority,googleClientId,authority:fixtureAuthority?'fixture':config.demoStudentFixture?'Student fixtures; teacher live Reading V1':'Reading context V1',...(demo?{demoStudent:{classId:config.seed.classId,studentRef:config.seed.studentRef}}:{})}}));
+app.use('/api/reading-skills67',createReading67WebRouter({store,content,grader,identity,authenticate:identity.authenticate,homework:homeworkRuntime?.homework,registerCta:homeworkRuntime?.registerCta,adminKey:homeworkRuntime?.adminKey,config:{homeworkEnabled:!!homeworkRuntime,homeworkMode:homeworkRuntime?.mode,demo,demoGoogle:fixtureAuthority,googleClientId,authority:fixtureAuthority?'fixture':config.demoStudentFixture?'Student fixtures; teacher live Reading V1':'Reading context V1',...(demo?{demoStudent:{classId:config.seed.classId,studentRef:config.seed.studentRef}}:{})}}));
 const pages=path.resolve(config.pagesPath);
 app.get('/reading-skills67/',(_q,r)=>r.sendFile(path.join(pages,'reading-skills67/index.html')));
 app.use('/reading-skills67',express.static(path.join(pages,'reading-skills67'),{dotfiles:'deny',index:false}));
 for(const name of ['student-identity.js','student-identity-client.js','student-identity-migration.js','course-student-identity.js'])app.get('/shared/'+name,(_q,r)=>r.sendFile(path.join(pages,'shared',name)));
 for(const name of ['styles.css','annotations.js','explanation-dialog.css','term-style/computer-based.css'])app.get('/reading-practice/'+name,(_q,r)=>r.sendFile(path.join(pages,'reading-practice',name)));
 app.use('/reading-practice/fonts',express.static(path.join(pages,'reading-practice/fonts'),{dotfiles:'deny',index:false}));
-app.get('/health',async(_q,r)=>{try{await db.query('SELECT 1');r.json({ok:true,demo,authority:demo?'fixture':'live_context_read_only',productionChanged:false});}catch{r.sendStatus(503);}});
+app.get('/health',async(_q,r)=>{try{await db.query('SELECT 1');r.json({ok:true,demo,authority:fixtureAuthority?'fixture':config.demoStudentFixture?'student_fixture_teacher_live':'live_context_read_only',homework:homeworkRuntime?.mode||'disabled',productionChanged:false});}catch{r.sendStatus(503);}});
 app.get('/favicon.ico',(_q,r)=>r.sendStatus(204));app.get('/',(_q,r)=>r.redirect(publicPath+'/reading-skills67/?server=1'));
 const mounted=express();mounted.use(publicPath||'/',app);
-const server=mounted.listen(port,config.mode==='https_test'?'0.0.0.0':'127.0.0.1',()=>{worker.start();console.log(JSON.stringify({ready:true,port,demo}));});
-let closing=false;async function close(){if(closing)return;closing=true;server.close();await worker.close();await db.close();process.exit(0);}process.on('SIGINT',close);process.on('SIGTERM',close);
+const server=mounted.listen(port,config.mode==='https_test'?'0.0.0.0':'127.0.0.1',()=>{worker.start();homeworkRuntime?.start();console.log(JSON.stringify({ready:true,port,demo,homework:homeworkRuntime?.mode||'disabled'}));});
+let closing=false;async function close(){if(closing)return;closing=true;server.close();await worker.close();await homeworkRuntime?.close();await db.close();process.exit(0);}process.on('SIGINT',close);process.on('SIGTERM',close);

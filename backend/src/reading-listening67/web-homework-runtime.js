@@ -14,7 +14,7 @@ import {createReading67Homework} from './web-homework.js';
 import {createReading67CtaRegistrar} from './web-homework-cta.js';
 const run=promisify(execFile);
 const fail=code=>{throw new WebGradingError(code,403);};
-export async function createReading67HomeworkRuntime({config,db,content,identity}){
+export async function createReading67HomeworkRuntime({config,db,content,identity,ownerSource}){
  const metadata={code:content.code,version:content.version,homeworkLesson:config.homeworkLesson};
  let auth;
  if(config.googleAuth.kind==='command'){
@@ -45,7 +45,7 @@ export async function createReading67HomeworkRuntime({config,db,content,identity
    const matching=targets.filter(t=>t.courseId===input.courseId&&t.googleUserId===input.googleUserId);
    if(matching.length!==1)fail('OWNER_MISMATCH');return matching[0];
   }};
- }else if(config.owner.kind==='http')owner=createReading67HomeworkOwner({url:config.owner.url,key:(await fs.readFile(config.owner.keyFile,'utf8')).trim(),auth,docs,metadata});
+ }else if(config.owner.kind==='http')owner=createReading67HomeworkOwner({url:config.owner.url,key:(await fs.readFile(config.owner.keyFile,'utf8')).trim(),auth,docs,metadata,ownerSource});
  else throw Error('DOC_OWNER_CONFIG_REQUIRED');
  const homework=createReading67Homework({db,metadata,pageBase:config.pageBase,owner,docs});
  const adminKey=(await fs.readFile(config.adminKeyFile,'utf8')).trim();if(adminKey.length<32)throw Error('CTA_ADMIN_KEY_REQUIRED');

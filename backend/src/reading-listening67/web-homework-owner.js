@@ -11,10 +11,11 @@ const allTabs=tabs=>(tabs||[]).flatMap(t=>[t,...allTabs(t.childTabs)]);
 const tabText=content=>(content||[]).map(e=>(e.paragraph?.elements||[]).map(p=>p.textRun?.content||'').join('')+(e.table?.tableRows||[]).map(r=>(r.tableCells||[]).map(c=>tabText(c.content)).join('')).join('')).join('');
 const sourceSchema=z.object({apiVersion:z.literal(1),classId:z.string(),studentRef:z.uuid(),courseId:z.string().min(1),googleUserId:z.string().min(1),capturedAt:z.iso.datetime(),sourceRevision:z.string().regex(/^[a-f0-9]{64}$/)}).strict();
 
-export function createReading67HomeworkOwner({url,key,headerName='x-reading-owner-key',auth,docs,metadata,fetcher=fetch,clock=Date.now}){
+export function createReading67HomeworkOwner({url,key,headerName='x-reading-owner-key',auth,docs,metadata,ownerSource,fetcher=fetch,clock=Date.now}){
  if(!Number.isInteger(metadata.homeworkLesson)||metadata.homeworkLesson<1||metadata.homeworkLesson>99)throw Error('HOMEWORK_LESSON_REQUIRED');
  const titleMatch=new RegExp('\\b(?:lesson|buổi)\\s*0?'+metadata.homeworkLesson+'\\b','i');
  async function mapping(input,reverse=false){
+  if(ownerSource)return reverse?ownerSource.resolveClassroom(input):ownerSource.member(input.classId,input.studentRef);
   const query=new URLSearchParams(reverse?{courseId:input.courseId,googleUserId:input.googleUserId}:{classId:input.classId,studentRef:input.studentRef});
   let response;
   try{response=await fetcher(url.replace(/\/$/,'')+(reverse?'/v1/owner-by-classroom?':'/v1/owner?')+query,{headers:{[headerName]:key},signal:AbortSignal.timeout(5000)});}catch{fail('OWNER_SOURCE_UNAVAILABLE',503);}

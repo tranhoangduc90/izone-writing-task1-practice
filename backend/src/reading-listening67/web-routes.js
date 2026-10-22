@@ -17,6 +17,7 @@ export function createReading67WebRouter({store,content,grader,authenticate,iden
   const ref=z.object({classId:z.string().regex(/^-?[1-9]\d{0,18}$/),studentRef:z.uuid()}).strict();
   const makeScope=person=>({ownerId:person.ownerId,courseId:person.courseId,code:content.code,version:content.version});
   const scope=q=>makeScope(q.webIdentity);
+  const requireOpen=()=>{if(config.studentsOpen===false)throw new WebGradingError('CLASS_NOT_OPEN',423);};
   if(registerCta){
     const text=z.string().trim().min(1).max(200);
     const ctaEvent=z.object({doc_id:z.string().regex(/^[A-Za-z0-9_-]{20,200}$/),classroom_course_id:text,coursework_id:text,submission_id:text,student_id:text,class_name:text});
@@ -32,7 +33,7 @@ export function createReading67WebRouter({store,content,grader,authenticate,iden
     router.get('/classes/:classId/students',route(async(q,r)=>r.json({ok:true,students:await identity.roster(q.params.classId)})));
     const identityInput=z.object({studentRef:z.uuid().optional(),identity:z.object({authority:z.literal('erp-contact'),id:z.string().regex(/^[1-9]\d{0,18}$/)}).strict().optional(),classCode:z.string().regex(/^[A-Z0-9._-]{2,32}$/).optional()}).strict().refine(v=>!!v.studentRef!==!!v.identity);
     router.post('/identity/resolve',route(async(q,r)=>r.json(await identity.resolve(parse(identityInput,q.body)))));
-    router.post('/student/login',route(async(q,r)=>r.json(await identity.loginStudent(parse(ref,q.body)))));
+    router.post('/student/login',route(async(q,r)=>{requireOpen();r.json(await identity.loginStudent(parse(ref,q.body)));}));
     router.post('/student/logout',route(async(q,r)=>{await identity.logoutStudent(q);r.json({ok:true});}));
     router.post('/teacher/login',route(async(q,r)=>r.json(await identity.loginTeacher(q,r,parse(z.object({credential:z.string().min(10).max(10000),remember:z.boolean().default(true)}).strict(),q.body)))));
     router.post('/teacher/logout',route(async(q,r)=>{if(q.headers['x-izone-csrf']!=='1')throw new WebGradingError('CSRF_REJECTED',403);await identity.logoutTeacher(q,r);r.json({ok:true});}));
@@ -42,7 +43,7 @@ export function createReading67WebRouter({store,content,grader,authenticate,iden
     router.get('/teacher/work/:classId/:studentRef',route(async(q,r)=>{const p=await teacherScope(q,r);const member=(await identity.roster(p.classId)).find(s=>s.studentRef===p.studentRef);r.json({ok:true,content,identity:{ownerId:p.studentRef,courseId:p.classId,name:member?.name||'Học viên không còn trong danh sách đang học',className:p.classId},draft:await store.draft(p.scope),attempts:await store.history(p.scope),archives:await store.archives(p.scope),firstCompleted:await store.firstCompleted(p.scope),readonly:true});}));
     router.get('/teacher/work/:classId/:studentRef/attempts/:id',route(async(q,r)=>{const p=await teacherScope(q,r);r.json({ok:true,...await store.attempt(p.scope,parse(id,q.params.id))});}));
   }
-  router.use(async(q,r,next)=>{try{q.webIdentity=await authenticate(q);if(!q.webIdentity)throw new WebGradingError('WEB_UNAUTHORIZED',401);next();}catch(error){next(error);}});
+  router.use(async(q,r,next)=>{try{requireOpen();q.webIdentity=await authenticate(q);if(!q.webIdentity)throw new WebGradingError('WEB_UNAUTHORIZED',401);next();}catch(error){next(error);}});
   router.get('/lesson',route(async(q,r)=>r.json({ok:true,content,identity:q.webIdentity,grader:{hash:grader.pins.sha256,version:grader.pins.workflowVersion},mode:'local_test_real_grading'})));
   router.get('/draft',route(async(q,r)=>r.json({ok:true,...await store.draft(scope(q))})));
   router.get('/homework',route(async(q,r)=>r.json({ok:true,...(homework?await homework.status(scope(q)):{status:'not_applicable'})})));

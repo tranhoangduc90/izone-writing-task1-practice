@@ -11,17 +11,18 @@ const denied=(code='ACCESS_DENIED',status=403)=>{throw new WebGradingError(code,
 const bearer=q=>/^Bearer ([\w-]{43})$/.exec(q.headers.authorization||'')?.[1];
 const cookie=q=>/(?:^|;\s*)reading67_teacher=([\w-]{43})(?:;|$)/.exec(q.headers.cookie||'')?.[1];
 
-export function createReading67WebIdentity({db,context,allowedClassIds,verifyGoogle,clock=Date.now,cookiePath='/api/reading-skills67'}){
+export function createReading67WebIdentity({db,context,allowedClassIds,verifyGoogle,ownerSource,clock=Date.now,cookiePath='/api/reading-skills67'}){
  const allowed=new Set(allowedClassIds.map(String));
  const courseAllowed=id=>{if(!allowed.has(String(id)))denied();};
  async function classes(){return (await context.classes()).filter(c=>allowed.has(c.id));}
- async function roster(classId){courseAllowed(classId);return (await context.roster(classId)).map(s=>({studentRef:s.studentRef,name:s.name}));}
+ async function roster(classId){courseAllowed(classId);return (await (ownerSource?ownerSource.roster(classId):context.roster(classId))).map(s=>({studentRef:s.studentRef,name:s.name}));}
  async function member(classId,studentRef){
   courseAllowed(classId);
   const snapshot=await context.snapshot();
   const row=snapshot.students.find(s=>s.public_id===studentRef&&s.erp_course_class_id===String(classId)&&s.status==='approved');
   const active=row&&snapshot.memberships.some(m=>m.erp_course_class_id===String(classId)&&m.erp_student_contact_id===row.erp_student_contact_id&&m.source_state==='active');
   if(!active)denied('STUDENT_ACCESS_DENIED');
+  if(ownerSource)await ownerSource.member(String(classId),studentRef);
   const c=snapshot.classes.find(c=>c.erp_course_class_id===String(classId));
   return {ownerId:row.public_id,courseId:String(classId),erpId:row.erp_student_contact_id,name:row.erp_student_name_snapshot,className:c.erp_class_name_snapshot};
  }
@@ -31,6 +32,11 @@ export function createReading67WebIdentity({db,context,allowedClassIds,verifyGoo
   if(input.studentRef)rows=rows.filter(r=>r.public_id===input.studentRef);
   else rows=rows.filter(r=>r.erp_student_contact_id===input.identity.id);
   if(input.classCode)rows=rows.filter(r=>s.classes.find(c=>c.erp_course_class_id===r.erp_course_class_id)?.erp_class_name_snapshot.toUpperCase()===input.classCode);
+  if(ownerSource){
+   const eligible=[];
+   for(const row of rows){try{await ownerSource.member(row.erp_course_class_id,row.public_id);eligible.push(row);}catch(error){if(error.code!=='STUDENT_ACCESS_DENIED')throw error;}}
+   rows=eligible;
+  }
   const ids=new Set(rows.map(r=>r.erp_student_contact_id));
   if(ids.size!==1)return {ok:true,status:ids.size?'ambiguous':'missing',identity:null,aliases:[]};
   return {ok:true,status:'unique',identity:{authority:'erp-contact',id:[...ids][0]},aliases:rows.map(r=>({classId:r.erp_course_class_id,classCode:s.classes.find(c=>c.erp_course_class_id===r.erp_course_class_id).erp_class_name_snapshot,studentRef:r.public_id,studentName:r.erp_student_name_snapshot}))};

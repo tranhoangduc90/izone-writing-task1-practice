@@ -1,0 +1,71 @@
+{
+  "revision": "c6c295904f0d5e2f",
+  "baseImages": {
+    "izone-teacher-session": "sha256:a1d840a92a53ff0ead25531f3688b84f82a2ae891b7f1d618c7b16f73356aa05",
+    "izone-handout-writing67-handout67-1": "sha256:4e39ef741c9fb5e97ae8e34ef36c47949b8669a0be38857b7d3341c6e811c82a",
+    "substitute-backend-2a6fd2f8c6d7": "sha256:1136626fd7c71ab68bf60cd2f676ba7b87259e210121f109c8d5de10f2e09a9a",
+    "izone-k56-ic2264-api": "sha256:e5298ab1f2bd3215e8f05a2407940d8c48b5627fe3e9d080257dd5a24f8541ce",
+    "izone-k56-demo-k56-demo-api-1": "sha256:9d48a60f68808a5f7e5b3002d90b9bd9024c794101b09453208eb836e371a3b8",
+    "term-mini-k67-api": "sha256:9b092163be481418c2c37c35cd38becb7760e601e6a1bab3afc12e4e54820450",
+    "mapping-review-api": "sha256:58b2164729cdddc2883931b8f1508e1d435c31abe7829e37d3c8a4392150a2c7"
+  },
+  "moduleHashes": {
+    "izone-teacher-session": {
+      "native-session.js": "c904f3f00a7098a05cfbb75764d9733069cdcf40826dd5196c797c128ef2dc2f",
+      "service.js": "0ae319057ade5e7093938c1755cf5dcfd2d009d79991b9cb769c5df4ca48e64b"
+    },
+    "izone-handout-writing67-handout67-1": {
+      "audit.mjs": "335b9f302d8c188021b1afe0b59f2078ca1134ec9cfcb8a8aa5154802af968d5",
+      "comments.mjs": "12d96748f907bab8c5c5d431429c79d8856967fda526e1632dd5e6e3af82e589",
+      "config.mjs": "48385f418cb9b15455ca86d0cee794aa52fe2c31a17e642723136dd954e72d6c",
+      "dashboard.mjs": "0ce4163c315028d4914fb215824db193fc5896eb9ab9bcfb8e322b46b7f262bb",
+      "http.mjs": "4ad3e4bf796c01c1d0485f9689525bce03103cc082770cfd5b1a84b4bf5b0ffb",
+      "lessons.mjs": "7056f6fc906788715986cd5cbc248d9bb8809cf91556285b001700c087c6f36b",
+      "migrate.mjs": "db91fd2f1fd023c63f1e314173b41331964621c008a1dd0de779a48dbc91a999",
+      "processor.mjs": "fefa456664e6db3dae748aac81e23063d00b9159d9bbd765f24fe98635193ab1",
+      "prompt.mjs": "7dfcc957cc3ec89883de81ec24354b65bfdeb7095d593df3386987be37710ff0",
+      "server.mjs": "58318e2797035a1276781f9558f55dd080673dd14c2c61008c3deec0df0b257c",
+      "service.mjs": "f230fac4710f964585525fe87653d2b3119298b6607286c2c6c5e37a31844b1f",
+      "store.mjs": "fb3ee68eb763bf5d7e5712a4d667a33b47d4aecdd694d0506ed88f7960d353bd",
+      "teacher-registry.mjs": "0831268f60e09e98e576bd7c062c96c1d7b4667feec0d3f4d2167d9676eb6521",
+      "teacher.mjs": "4fff6f58ac3ac7a02f3eadf2c0f95229526f13c6769e26b53da7ebb791d0900b",
+      "wake.mjs": "3f17227f669be921bf8dbce0b67639b119b382bf969b3b5b7d2034c8dae810bc",
+      "workflow.mjs": "9bf21f8f8bacf9bcf16ea6d7d0c8e365b9369a7f91f2fc910b018743187d0ac1"
+    },
+    "substitute-backend-2a6fd2f8c6d7": {
+      "answer-explanations.mjs": "8be5c57451795e929bbbe2e32e36fbc546f15835acee6ecd9f773057f8493dc3",
+      "api-candidate.mjs": "96be32ce1129d7379241c1e44848b6f5a8cc184e0c655d4d6941467fe5661e73",
+      "class-access.mjs": "0fc74ed763d23642ce689cefd137794cb2e996ff0f91ba67af026f727274cb40",
+      "class-catalog.mjs": "bdc57ef482fab29f2d9187827f52f5ea87cc310a789ebb276d8877a26b98dbf3",
+      "class-workflow-candidate.mjs": "8aca85a857f716d85516b2121bc238516f1b741d8588a9711f149a079a53d5fd",
+      "clone-criteria.mjs": "977a3dc79290e26adf39b54dadb5349c40dacc64c482c07167cea94f92da561c",
+      "contract.mjs": "22fe0bdf16f395dac58684c16b30f13753c04c453226ece39caabf7497ead6cc",
+      "exam-api-candidate.mjs": "fd65004bd4319cc565d28098b9303fb52733cde6d8e0660d37564967b79dbab3",
+      "exam-session.mjs": "5edb4bbec9c1019c25e7b025aca744b3a3f3e24737abb931b10a4abee0f7cf6f",
+      "history-candidate.mjs": "1cc4925e1774efa98a1ac142cd90071e43a0c6ab2a1909df55dac78b74ad8989",
+      "http.mjs": "81dfea894f6c88d114baa0d7a3fcb87e83a38042b25723a0964c290017e78a9d",
+      "outbox.mjs": "3a8bae480e1d826fd64498b5de4604a473de26489d753c1c32212404c062b744",
+      "portal-bridge.mjs": "dcdfda6272fa1b873a3295fa74486d422f999f45a1bd861f13bfe19d7e8deaa0",
+      "portal-candidate.mjs": "a636eb48711e03bdef9bc8007607324506b49b08a51155c798415ea6bc64e7b4",
+      "portal-policy.mjs": "e0ca1aa4358a1455e71929afaf29557cbcc42b73c2ecef193d189b85b7170f48",
+      "receiver-candidate.mjs": "2a4ff3e8ab51e96d6916c850c017de3963e79cd0d4695ecf9ec768101663e5e0",
+      "release-latch.mjs": "455852441b01b94224b109f4f9c09fcf56fa489173d4e77898eebecde54f58ec",
+      "reviewer-access.mjs": "71741c7f5f21c5a6c7827bf0c4e8eae48d1c61db471045a72c366d00e34d2c14",
+      "runtime-config.mjs": "66e206c12a53f29a04a2a0231281d4c8e7c1bc8a4bbbef9ebaac40fa238740d3",
+      "server.mjs": "4fee5ef7de9541ec8d1f341f431c56f87db2574b37802c45e1371436e0854627",
+      "service.mjs": "091636d1f1f40a1e68f96360e0bec3940e707893e1f2a0e135ded08c5f10fc07",
+      "stage-grader.mjs": "6cc52df4650169becc3520fb8b1aba33939b70365af50d50dcc3cfd12ad61d29",
+      "status-candidate.mjs": "7e826ef79eddf8dbcf22c26641a3a4c87fc702a9f18296612357ce83d8168b78",
+      "store.mjs": "df8b3e0996c637c0301deedd8bee76fb4841aa0d72536db9ebe9d71d1bd62c6c",
+      "task1-stages.mjs": "4d06f2fb1ef3d6bb5398584a465ab850db7acc031bd5901e5d6de0744e9631e8",
+      "teacher-filters.mjs": "a88a40e99fb90cf343345c238af0f5d29a2708e61be593cc10da54011f210ee9",
+      "teacher-progress.mjs": "0fa4720613b9313636bc7550e4a7e866ff56029d4822a1f0e481b7ba6060c6ac",
+      "transport-bridge.mjs": "aa7ab6b54b229a0451c703168af90331e2525c7c1b0d32b555c32a6bd62e61c8",
+      "two-task-candidate.mjs": "7f3bd9290ad12cdd71c07d42c17f7fe0410b8ffe5d06739482cac255890161dd",
+      "two-task-workflows.mjs": "f327231ae38c31b0c3a38bf70195e3e31df1e14f1ca4216881be261e2e14f9d1",
+      "workflow-boundary.mjs": "07465d030f3b8009a2b1656c75066eaa83a60f61e62fc563eda1947d52796d1b",
+      "writing-bridge.mjs": "aecd25076917348f5e6cb60799f1df1a90dd451503489c27bfc93dd4ef3fa4a3",
+      "writing-tasks.mjs": "f304b51d0b341c5b78958a75e15f193f80ad26bff59e7c492cac156e9612bf06"
+    }
+  }
+}

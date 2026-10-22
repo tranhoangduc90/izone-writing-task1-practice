@@ -4,6 +4,7 @@ CREATE SCHEMA IF NOT EXISTS reading_listening67;
 CREATE TABLE IF NOT EXISTS reading_listening67.web_draft (
   owner_id text NOT NULL, course_id text NOT NULL, assignment_code text NOT NULL,
   content_version text NOT NULL, revision integer NOT NULL DEFAULT 0 CHECK(revision >= 0),
+  run_no integer NOT NULL DEFAULT 1,
   body jsonb NOT NULL DEFAULT '{"answers":{},"annotations":[],"notes":"","flags":[]}',
   saved_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY(owner_id,course_id,assignment_code,content_version)
@@ -17,11 +18,13 @@ CREATE TABLE IF NOT EXISTS reading_listening67.web_mutation (
 CREATE TABLE IF NOT EXISTS reading_listening67.web_attempt (
   id uuid PRIMARY KEY, owner_id text NOT NULL, course_id text NOT NULL,
   assignment_code text NOT NULL, content_version text NOT NULL,
-  draft_revision integer NOT NULL, snapshot jsonb NOT NULL,
+  draft_revision integer NOT NULL, snapshot jsonb NOT NULL, run_no integer NOT NULL DEFAULT 1,
   input_hash text NOT NULL, grader_hash text NOT NULL, completeness jsonb NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS web_attempt_owner ON reading_listening67.web_attempt(owner_id,course_id,assignment_code,content_version,created_at DESC);
+ALTER TABLE reading_listening67.web_draft ADD COLUMN IF NOT EXISTS run_no integer NOT NULL DEFAULT 1;
+ALTER TABLE reading_listening67.web_attempt ADD COLUMN IF NOT EXISTS run_no integer NOT NULL DEFAULT 1;
 CREATE TABLE IF NOT EXISTS reading_listening67.web_job (
   id uuid PRIMARY KEY, attempt_id uuid NOT NULL UNIQUE REFERENCES reading_listening67.web_attempt(id),
   status text NOT NULL CHECK(status IN ('queued','processing','done','failed','needs_review')),
@@ -38,4 +41,10 @@ CREATE TABLE IF NOT EXISTS reading_listening67.web_request (
 CREATE TABLE IF NOT EXISTS reading_listening67.web_result (
   attempt_id uuid PRIMARY KEY REFERENCES reading_listening67.web_attempt(id),
   data jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS reading_listening67.web_draft_archive (
+ id uuid PRIMARY KEY, owner_id text NOT NULL, course_id text NOT NULL,
+ assignment_code text NOT NULL, content_version text NOT NULL,
+ run_no integer NOT NULL, revision integer NOT NULL, body jsonb NOT NULL,
+ saved_at timestamptz, archived_at timestamptz NOT NULL DEFAULT now()
 );

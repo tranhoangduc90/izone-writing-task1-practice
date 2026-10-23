@@ -1,5 +1,7 @@
 # IZONE Writing Practice
 
+Sản phẩm có giảng viên đăng nhập phải dùng [phiên chung IZONE](https://github.com/tranhoangduc90/izone-ai-team-pages/blob/main/docs/TEACHER_SHARED_LOGIN.md). Bộ nối giữ quyền từng lớp/bài; hồ sơ triển khai và quay lui ở [gói phiên 23/10](backend/ops/teacher-sso/release-20261023/README.md).
+
 Web app luyện **Overview**, **Outline hai thân bài** và **Draft 1 → Draft 2** không phụ thuộc Google Docs.
 
 Repo cũng có bản nháp **Writing trên lớp 67 – Lesson 13**, gộp hai handout Body 1 và Body 2 thành một trang với sáu phần được chấm độc lập.

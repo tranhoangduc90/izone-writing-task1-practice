@@ -1,5 +1,7 @@
 # Homework của Reading Materials — bản thử riêng
 
+> Hồ sơ lịch sử chặng thử. Đọc [nguồn tiếp tục 23/10](READING67_MATERIALS_HANDOFF_2026-10-23.md); không dùng trạng thái chưa mở trong bản thử để đóng lại lớp hoặc khôi phục cấu hình cũ.
+
 Mã bài: `67-reading-materials-beyond-concrete-matching-information-nen-cap-1`.
 
 Học viên làm và xem phản hồi trên Pages. Homework chỉ nhận CTA, một dòng trạng thái và link giảng viên mở đúng bản nộp. Không sao chép bài làm/phản hồi vào Docs, không nộp Classroom.

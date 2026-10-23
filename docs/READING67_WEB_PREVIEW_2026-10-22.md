@@ -1,5 +1,7 @@
 # Reading 67 — lưu và chấm bài web, bản thử chặng 2
 
+> Hồ sơ lịch sử chặng 2. Đọc [nguồn tiếp tục 23/10](READING67_MATERIALS_HANDOFF_2026-10-23.md) trước khi sửa; giới hạn local bên dưới không mô tả toàn bộ trạng thái sau các chặng kế tiếp.
+
 Học viên nhập trên web, nháp được lưu lên máy chủ với số phiên bản. Nhấn Chấm bài
 tạo một bản gửi riêng; phản hồi luôn thuộc bản đó. Việc sửa nháp trong lúc chấm
 không làm thay đổi kết quả cũ. Chặng này chỉ chạy trên máy local, chưa phát hành.

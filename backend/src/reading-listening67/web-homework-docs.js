@@ -6,7 +6,7 @@
 import {WebGradingError} from './web-grader.js';
 
 export const HOMEWORK_CTA='NHẤN VÀO ĐÂY ĐỂ LUYỆN TẬP READING';
-export const HOMEWORK_STATUS='TÌNH TRẠNG NỘP BÀI THỰC CHIẾN';
+export const HOMEWORK_STATUS='TÌNH TRẠNG NỘP BÀI READING';
 export const HOMEWORK_PREFIX='Reading thực chiến (tự động): ';
 const LINK='nhấn vào đây';
 const fail=code=>{throw new WebGradingError(code,409);};
@@ -54,9 +54,10 @@ export function locateReading67Homework(document,binding){
  if(!cta||cta.text.trim()!==HOMEWORK_CTA)fail('DOC_CTA_PAIR_INVALID');
  const offset=cta.text.indexOf(HOMEWORK_CTA),start=indexAt(cta.runs,offset);
  charsBetween(cta.runs,start,start+HOMEWORK_CTA.length);
- let candidates=found.statuses;
+ let candidates=[];
  for(const parent of [...code.parents].reverse()){
-  const scoped=found.statuses.filter(s=>s.parents.includes(parent));
+  // Ô trạng thái phải thuộc chính bảng bao mã, không lấy từ bảng bài bên cạnh.
+  const scoped=found.statuses.filter(s=>s.parents.at(-1)===parent);
   if(scoped.length){candidates=scoped;break;}
  }
  if(candidates.length!==1)fail('DOC_STATUS_AMBIGUOUS');

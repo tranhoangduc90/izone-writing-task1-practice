@@ -72,3 +72,54 @@ test('Mã không có ranh giới bảng và nhiều ô trạng thái: không ch�
  const doc=document();doc.tabs[0].childTabs[0].documentTab.body.content=[paragraph(1,CTA),paragraph(100,CODE),table(OTHER,1000),table('67-other',2000)];
  assert.throws(()=>plan(doc,binding,completed),e=>e.code==='DOC_STATUS_AMBIGUOUS');
 });
+
+// Mẫu thật dùng nhãn Reading riêng; kỳ vọng giữ literal độc lập với hằng production.
+// Các bảng lồng/ô gộp giống Homework: không cấp sẵn kết quả chọn ô trong fixture.
+function homeworkSection(code,start,heading,statusText=''){
+ const empty=startIndex=>({content:[paragraph(startIndex,'')]});
+ const status={content:[paragraph(start+400,statusText)],tableCellStyle:{columnSpan:2}};
+ return {status,element:{table:{tableRows:[
+  {tableCells:[{content:[{table:{tableRows:[{tableCells:[{content:[paragraph(start,CTA),paragraph(start+100,code)]}]}]}}]},empty(start+150)]},
+  {tableCells:[{content:[paragraph(start+300,heading)],tableCellStyle:{columnSpan:2}},empty(start+350)]},
+  {tableCells:[status,empty(start+450)]}
+ ]}}};
+}
+function combinedHomework({readingHeading='TÌNH TRẠNG NỘP BÀI READING',wrap=false,other=false}={}){
+ const reading=homeworkSection(CODE,2000,readingHeading);
+ const listening=homeworkSection('67-practice-listening_fixture',4000,'TÌNH TRẠNG NỘP BÀI THỰC CHIẾN','Listening thực chiến (tự động): Đã bắt đầu làm bài lần đầu tiên.');
+ const sections=[reading.element,listening.element];
+ if(other)sections.push(homeworkSection(OTHER,6000,'TÌNH TRẠNG NỘP BÀI READING','Giữ bài Reading khác').element);
+ const content=wrap?[{table:{tableRows:[{tableCells:[{content:sections}]}]}}]:sections;
+ return {reading,listening,doc:{documentId:'fixture_doc',revisionId:'revision_fixture',tabs:[{tabProperties:{tabId:'child'},documentTab:{body:{content}}}]}};
+}
+test('Homework Reading–Listening: ghi dưới nhãn READING, giữ nguyên ô Listening và ô gộp',()=>{
+ const f=combinedHomework(),before=structuredClone(f.listening.element);
+ assert.equal(locate(f.doc,binding).cell,f.reading.status);
+ const result=plan(f.doc,binding,completed);
+ assert.equal(result.requests[0].insertText.location.index,2400);
+ assert.equal(result.requests[0].insertText.text,PREFIX+completed.payload.text);
+ assert.ok(result.requests.every(r=>!r.deleteContentRange));
+ assert.deepEqual(f.listening.element,before);
+});
+test('Thiếu nhãn Reading trong bảng bài: không dùng ô duy nhất ở bài khác, kể cả chung bảng bọc',()=>{
+ for(const wrap of [false,true]){
+  const f=combinedHomework({readingHeading:'Nhãn trạng thái bị thiếu',wrap,other:true});
+  assert.throws(()=>plan(f.doc,binding,completed),e=>e.code==='DOC_STATUS_AMBIGUOUS');
+ }
+});
+test('CTA–mã ngoài bảng bài: không lấy ô trạng thái duy nhất ở bảng bên cạnh',()=>{
+ const doc={documentId:'fixture_doc',revisionId:'revision_fixture',tabs:[{tabProperties:{tabId:'child'},documentTab:{body:{content:[paragraph(1,CTA),paragraph(100,CODE),homeworkSection(OTHER,2000,'TÌNH TRẠNG NỘP BÀI READING').element]}}}]};
+ assert.throws(()=>plan(doc,binding,completed),e=>e.code==='DOC_STATUS_AMBIGUOUS');
+});
+test('Reading đúng nhãn nhưng có hai vùng trạng thái trong cùng bảng: dừng vì mơ hồ',()=>{
+ const f=combinedHomework(),rows=f.reading.element.table.tableRows;
+ rows.push({tableCells:[{content:[paragraph(2600,'TÌNH TRẠNG NỘP BÀI READING')]}]},{tableCells:[{content:[paragraph(2700,'')]}]});
+ assert.throws(()=>plan(f.doc,binding,completed),e=>e.code==='DOC_STATUS_AMBIGUOUS');
+});
+test('Dòng cũ còn ở Listening, Reading trống: báo xung đột thay vì tự nhân dòng hoặc xóa Listening',()=>{
+ const f=combinedHomework(),old=completed.payload.text;
+ f.listening.status.content.push(paragraph(4500,PREFIX+old));
+ const before=structuredClone(f.doc);
+ assert.throws(()=>plan(f.doc,{...binding,last_doc_text:old},completed),e=>e.code==='DOC_MANUAL_CONFLICT');
+ assert.deepEqual(f.doc,before);
+});

@@ -9,7 +9,7 @@ const code='67-reading-materials-beyond-concrete-matching-information-nen-cap-1'
 const scope={ownerId:A,courseId:'1124',code,version};
 const target={classId:'1124',studentRef:A,code,version,courseId:'course-A',courseWorkId:'work78',submissionId:'submission-A',documentId:'copy-A',tabId:'child'};
 const p=(start,text)=>({paragraph:{elements:[{startIndex:start,textRun:{content:text+'\n'}}]}});
-function doc(id){return {documentId:id,revisionId:'revision-fixture',tabs:[{tabProperties:{tabId:'parent'},childTabs:[{tabProperties:{tabId:'child'},documentTab:{body:{content:[p(1,HOMEWORK_CTA),p(100,code),{table:{tableRows:[{tableCells:[{content:[p(300,HOMEWORK_STATUS)]}]},{tableCells:[{content:[p(500,'Chữ tay giữ nguyên')]}]}]}}]}}}]}]};}
+function doc(id){return {documentId:id,revisionId:'revision-fixture',tabs:[{tabProperties:{tabId:'parent'},childTabs:[{tabProperties:{tabId:'child'},documentTab:{body:{content:[{table:{tableRows:[{tableCells:[{content:[p(1,HOMEWORK_CTA),p(100,code)]}]},{tableCells:[{content:[p(300,HOMEWORK_STATUS)]}]},{tableCells:[{content:[p(500,'Chữ tay giữ nguyên')]}]}]}}]}}}]}]};}
 function fixture(){
  let now=Date.parse('2026-10-22T06:00:00Z');
  const source={apiVersion:1,classId:'1124',studentRef:A,courseId:'course-A',googleUserId:'google-A'};

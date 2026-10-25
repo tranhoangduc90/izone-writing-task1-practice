@@ -1,5 +1,6 @@
 import {createHmac,randomUUID,timingSafeEqual} from 'node:crypto';
-import {fail,ORDER,FIELDS,publicTeacherComments} from './service.mjs';
+import {fail,publicTeacherComments,withBodies} from './service.mjs';
+import {workflowFor,GUIDED} from './workflow.mjs';
 import {publicThreads,changeThread} from './comments.mjs';
 import {dashboardProjection} from './dashboard.mjs';
 import {LEGACY_LESSON5} from './lessons.mjs';
@@ -31,7 +32,7 @@ export function createTeacher({db,store,roster,registry,secret,verifyGoogleToken
     if(!row.students.some(x=>x.studentRef===s.studentRef))fail('TEACHER_FORBIDDEN',403);
     return s;
   }
-  const publicSession=s=>({ref:s.ref,activity:s.activity,classRef:s.classRef,studentRef:s.studentRef,version:s.version,responses:s.responses,steps:s.steps,vocabulary:s.vocabulary,idea2Open:s.idea2Open,teacherComments:publicTeacherComments(s),commentThreads:publicThreads(s),commentVersion:s.commentVersion||0,dashboard:dashboardProjection(s,clock()),processing:dashboardProjection(s,clock()).processing});
+  const publicSession=s=>withBodies({ref:s.ref,activity:s.activity,...(s.handoutMode?{handoutMode:s.handoutMode,bodyProgress:s.bodyProgress,...(s.preparationMode?{preparationMode:s.preparationMode}:{})}:{}),workflowMode:s.workflowMode||GUIDED,workflowVersion:s.workflowVersion||1,body:s.body||2,classRef:s.classRef,studentRef:s.studentRef,version:s.version,responses:s.responses,steps:s.steps,vocabulary:s.vocabulary,idea2Open:s.idea2Open,teacherComments:publicTeacherComments(s),commentThreads:publicThreads(s),commentVersion:s.commentVersion||0,dashboard:dashboardProjection(s,clock()),processing:dashboardProjection(s,clock()).processing});
   return {
     clientId:()=>registry().clientId,
     async login(credential){
@@ -52,6 +53,8 @@ export function createTeacher({db,store,roster,registry,secret,verifyGoogleToken
       return account(p.email,p.sub);
     },
     actor:publicActor,
+    // Quyền vẫn đọc registry Handout hiện hành sau khi phiên chung xác minh danh tính.
+    fromVerifiedIdentity(p){if(!p?.sub||p.emailVerified!==true||typeof p.email!=='string')fail('TEACHER_UNAUTHORIZED',401);return account(p.email.toLowerCase(),p.sub);},
     async classes(actor,activity='lesson5'){const lesson=lessonFor(activity);return (await roster()).filter(c=>hasTeacherClass(actor,c.classRef)&&(!lesson.classes||lesson.classes.includes(c.classRef))).map(c=>({classRef:c.classRef,className:c.className,studentCount:c.students.length}));},
     async summary(actor,classRef,activity='lesson5'){
       const row=await context(actor,classRef,activity);
@@ -59,7 +62,7 @@ export function createTeacher({db,store,roster,registry,secret,verifyGoogleToken
       const sessions=new Map(result.rows.map(r=>[r.payload.studentRef,r]));
       return {activity,classRef,className:row.className,students:row.students.map(student=>{
         const r=sessions.get(student.studentRef),s=r?.payload;
-        return {...student,sessionRef:s?.ref||null,updatedAt:r?.updated_at||null,passed:s?ORDER.filter(k=>s.steps[k].status==='passed').length:0,steps:s?Object.fromEntries(ORDER.map(k=>[k,s.steps[k].status])):{},comments:s?(s.teacherComments||[]).length+(s.commentThreads||[]).length:0,dashboard:s?dashboardProjection(s,clock()):null};
+        return {...student,sessionRef:s?.ref||null,updatedAt:r?.updated_at||null,passed:s?workflowFor(s).order.filter(k=>s.steps[k].status==='passed').length:0,steps:s?Object.fromEntries(workflowFor(s).order.map(k=>[k,s.steps[k].status])):{},comments:s?(s.teacherComments||[]).length+(s.commentThreads||[]).length:0,dashboard:s?dashboardProjection(s,clock()):null};
       })};
     },
     async detail(actor,ref){return publicSession(await sessionFor(actor,ref));},
@@ -76,16 +79,17 @@ export function createTeacher({db,store,roster,registry,secret,verifyGoogleToken
     },
     async comment(actor,ref,input){
       if(input?.expectedActor!==actor.email)fail('TEACHER_IDENTITY_CHANGED',401);
-      if(!input || !Number.isSafeInteger(input.expectedVersion)||!ORDER.includes(input.section)||typeof input.feedback!=='string'||!input.feedback.trim()||input.feedback.length>4000||typeof input.requestId!=='string'||!/^[a-zA-Z0-9_-]{1,128}$/.test(input.requestId))fail('TEACHER_COMMENT_INVALID');
+      if(!input || !Number.isSafeInteger(input.expectedVersion)||typeof input.section!=='string'||typeof input.feedback!=='string'||!input.feedback.trim()||input.feedback.length>4000||typeof input.requestId!=='string'||!/^[a-zA-Z0-9_-]{1,128}$/.test(input.requestId))fail('TEACHER_COMMENT_INVALID');
       await sessionFor(actor,ref);
       return store.edit(ref,s=>{
         // Đọc lại định danh trong transaction; không lấy studentRef/classRef từ body ghi nhận xét.
         if(!hasTeacherClass(actor,s.classRef))fail('TEACHER_FORBIDDEN',403);
+        if(!workflowFor(s).order.includes(input.section))fail('TEACHER_COMMENT_INVALID');
         s.teacherComments ||= [];
         const previous=s.teacherComments.find(c=>c.requestId===input.requestId&&c.authorEmail===actor.email);
         if(previous){if(previous.section!==input.section||previous.feedback!==input.feedback.trim()||previous.expectedVersion!==input.expectedVersion)fail('REQUEST_ID_CONFLICT',409);return publicSession(s);}
         if(s.version!==input.expectedVersion)fail('VERSION_CONFLICT',409);
-        s.teacherComments.push({ref:randomUUID(),requestId:input.requestId,expectedVersion:input.expectedVersion,section:input.section,feedback:input.feedback.trim(),authorEmail:actor.email,authorName:actor.displayName,createdAt:new Date(clock()).toISOString(),snapshot:Object.fromEntries(FIELDS[input.section].map(f=>[f,s.responses[f]]))});
+        s.teacherComments.push({ref:randomUUID(),requestId:input.requestId,expectedVersion:input.expectedVersion,section:input.section,feedback:input.feedback.trim(),authorEmail:actor.email,authorName:actor.displayName,createdAt:new Date(clock()).toISOString(),snapshot:Object.fromEntries(workflowFor(s).fields[input.section].map(f=>[f,s.responses[f]]))});
         return publicSession(s);
       });
     }

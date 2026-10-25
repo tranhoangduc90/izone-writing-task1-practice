@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
+import {isIP} from 'node:net';
 import { PRODUCT, fail } from './service.mjs';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -13,7 +14,19 @@ async function jsonBody(req,maxBytes=32768) {
 
 // Nhận HTTP, kiểm origin/token và dữ liệu trước khi gọi nghiệp vụ; chỉ trả mã lỗi an toàn.
 // ACK Check sau transaction. Không in bài, credential hoặc token khi SQL/AI lỗi.
-export function createApi({service,teacher=null,processor=null,origins,internalSecret}) {
+export function createApi({service,teacher=null,processor=null,origins,internalSecret,trustedProxyAddresses=[],verifySharedTeacher=null,ssoBootstrapKey=null}) {
+  const normalize=ip=>ip?.startsWith('::ffff:')?ip.slice(7):ip;
+  const trusted=new Set(trustedProxyAddresses.map(normalize));
+  function networkAddress(req){
+    const peer=normalize(req.socket.remoteAddress);
+    // Chỉ proxy khai rõ được cung cấp IP. Nginx nối IP thật cuối chuỗi; bỏ tiền tố do client tự gửi.
+    const forwarded=req.headers['x-forwarded-for'];
+    if(trusted.has(peer)&&typeof forwarded==='string'){
+      const last=forwarded.split(',').at(-1).trim();
+      if(isIP(last))return normalize(last);
+    }
+    return peer;
+  }
   const limits=new Map();
   const server=createServer(async(req,res)=>{
     res.setHeader('Content-Type','application/json; charset=utf-8');
@@ -30,7 +43,7 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
       if(internal && !equal(req.headers.authorization,`Bearer ${internalSecret}`))fail('INTERNAL_UNAUTHORIZED',401);
       if(!internal && path!==prefix+'/health'){
         const now=Date.now();
-        let key='bootstrap:'+req.socket.remoteAddress;
+        let key='bootstrap:'+networkAddress(req);
         const sessionPath=path.match(/^\/api\/handout67\/v1\/sessions\/([^/]+)(?:\/|$)/);
         if(sessionPath && uuid.test(sessionPath[1])) {
           service.authorizeSession(sessionPath[1],req.headers.authorization?.replace(/^Bearer /,''));
@@ -49,13 +62,15 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
         const csrf=()=>{if(!origin||!origins.includes(origin)||req.headers['x-handout67-csrf']!=='1')fail('CSRF_REJECTED',403);};
         const raw=String(req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith(cookieName+'='))?.slice(cookieName.length+1);
         if(path===prefix+'/teacher/config'&&req.method==='GET')value={clientId:teacher.clientId()};
+        else if(path===prefix+'/teacher/legacy-session'&&req.method==='GET'){if(!ssoBootstrapKey||!equal(req.headers['x-izone-sso-bootstrap'],ssoBootstrapKey))fail('TEACHER_UNAUTHORIZED',401);value={reviewer:teacher.actor(teacher.authorize(raw))};}
         else if(path===prefix+'/teacher/session'&&req.method==='POST'){
+          if(verifySharedTeacher)fail('SSO_LOGIN_REQUIRED',401);
           csrf();const login=await teacher.login((await jsonBody(req)).credential);
           res.setHeader('Set-Cookie',cookie(login.token));value={reviewer:login.reviewer};
         }else if(path===prefix+'/teacher/session'&&req.method==='DELETE'){
           csrf();res.setHeader('Set-Cookie',cookie(''));value={loggedOut:true};
         }else{
-          const actor=teacher.authorize(raw);
+          const actor=verifySharedTeacher?teacher.fromVerifiedIdentity(await verifySharedTeacher(req)):teacher.authorize(raw);
           if(path===prefix+'/teacher/session'&&req.method==='GET')value={reviewer:teacher.actor(actor)};
           else if(path===prefix+'/teacher/classes'&&req.method==='GET')value={classes:await teacher.classes(actor,requestUrl.searchParams.get('activity')||'lesson5')};
           else if(path===prefix+'/teacher/students'&&req.method==='GET')value=await teacher.summary(actor,requestUrl.searchParams.get('class'),requestUrl.searchParams.get('activity')||'lesson5');
@@ -86,7 +101,7 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
         }
         else fail('NOT_FOUND',404);
       } else {
-        const match=path.match(/^\/api\/handout67\/v1\/sessions\/([^/]+)(?:\/(responses|checks|attest|edit|threads|idea2|vocabulary\/[12]\/retry))?$/);
+        const match=path.match(/^\/api\/handout67\/v1\/sessions\/([^/]+)(?:\/(responses|checks|attest|edit|threads|idea2|vocabulary\/(?:[012]|all)\/retry))?$/);
         if(!match||!uuid.test(match[1]))fail('NOT_FOUND',404);
         const ref=match[1],token=req.headers.authorization?.replace(/^Bearer /,'');
         if(req.method==='GET'&&!match[2])value={session:await service.read(ref,token)};
@@ -95,8 +110,8 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
         else if(req.method==='POST'&&match[2]==='attest')value={session:await service.attest(ref,token,await jsonBody(req))};
         else if(req.method==='POST'&&match[2]==='edit')value={session:await service.revise(ref,token,await jsonBody(req))};
         else if(req.method==='POST'&&match[2]==='threads')value={session:await service.replyComment(ref,token,await jsonBody(req))};
-        else if(req.method==='POST'&&match[2]==='idea2'){await jsonBody(req);value={session:await service.openIdea2(ref,token)};}
-        else if(req.method==='POST'&&match[2]?.startsWith('vocabulary/')){await jsonBody(req);value={session:await service.retryVocabulary(ref,token,Number(match[2].split('/')[1]))};}
+        else if(req.method==='POST'&&match[2]==='idea2'){value={session:await service.openIdea2(ref,token,await jsonBody(req))};}
+        else if(req.method==='POST'&&match[2]?.startsWith('vocabulary/')){const input=await jsonBody(req),n=match[2].split('/')[1];value={session:await service.retryVocabulary(ref,token,n==='all'?0:Number(n),input)};}
         else fail('NOT_FOUND',404);
       }
       res.writeHead(status);res.end(JSON.stringify({ok:true,...value}));

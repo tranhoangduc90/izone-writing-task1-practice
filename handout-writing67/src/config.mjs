@@ -1,3 +1,5 @@
+import {isIP} from 'node:net';
+
 // Nhận biến chỉ có tiền tố HANDOUT67; kiểm đúng database/role trước khi mở cổng.
 // Không đọc DATABASE_URL hay cấu hình Writing chung; thiếu cấu hình thì dừng, không fallback.
 export function config(env=process.env) {
@@ -8,6 +10,8 @@ export function config(env=process.env) {
   const origins=must('HANDOUT67_ALLOWED_ORIGINS').split(',').map(v=>v.trim());
   if(origins.some(v=>!/^https:\/\/[^/]+$/.test(v) && !/^http:\/\/127\.0\.0\.1:\d+$/.test(v)))throw new Error('Origin phải cụ thể, không wildcard.');
   const port=Number(env.HANDOUT67_PORT||'3187');
+  const trustedProxyAddresses=(env.HANDOUT67_TRUSTED_PROXY_ADDRESSES||'').split(',').map(v=>v.trim()).filter(Boolean);
+  if(trustedProxyAddresses.length>20||trustedProxyAddresses.some(v=>!isIP(v)))throw new Error('Proxy tin cậy phải là danh sách địa chỉ IP cụ thể.');
   if(port!==3187)throw new Error('Port không hợp lệ.');
   const secret=must('HANDOUT67_SESSION_SECRET'),internalSecret=must('HANDOUT67_INTERNAL_SECRET');
   if(secret.length<32||internalSecret.length<32||secret===internalSecret)throw new Error('Cần hai secret riêng, tối thiểu 32 ký tự.');
@@ -24,11 +28,12 @@ export function config(env=process.env) {
   if(teacherFile&&(teacherSecret.length<32||[secret,internalSecret,wakeSecret].includes(teacherSecret)))throw new Error('Cần secret giảng viên riêng.');
   const gatewayUrl=env.HANDOUT67_AI_GATEWAY_URL||null,gatewayToken=env.HANDOUT67_AI_GATEWAY_TOKEN||null;
   if(Boolean(gatewayUrl)!==Boolean(gatewayToken)||gatewayUrl&&(new URL(gatewayUrl).protocol!=='https:'||gatewayToken.length<32||/[\r\n]/.test(gatewayToken)))throw new Error('Cần URL HTTPS và khóa Cổng AI riêng cho Handout67.');
-  return {databaseUrl,origins,port,secret,internalSecret,rosterUrl:rosterUrl.href,classes,promptFile,wakeUrl:wakeUrl.href,wakeSecret,teacherFile,teacherSecret,gatewayUrl,gatewayToken};
+  return {databaseUrl,origins,port,secret,internalSecret,rosterUrl:rosterUrl.href,classes,promptFile,wakeUrl:wakeUrl.href,wakeSecret,teacherFile,teacherSecret,gatewayUrl,gatewayToken,trustedProxyAddresses};
 }
 
 export function rosterAdapter({rosterUrl,classes}, fetcher=fetch) {
-  return async ()=>{
+  let pending;
+  async function load(){
     const response=await fetcher(rosterUrl,{signal:AbortSignal.timeout(5000),redirect:'error'});
     if(!response.ok)throw Object.assign(new Error('ROSTER_UNAVAILABLE'),{status:503});
     const value=await response.json();
@@ -37,5 +42,11 @@ export function rosterAdapter({rosterUrl,classes}, fetcher=fetch) {
     const rows=value.classes.filter(c=>classes.includes(c.classRef) && Array.isArray(c.students)).map(c=>({classRef:c.classRef,className:c.className,students:c.students.filter(s=>!s.requiresAccessCode&&!s.provisional).map(s=>({studentRef:s.studentRef,displayName:s.displayName||s.alias}))}));
     if(rows.some(c=>typeof c.classRef!=='string'||typeof c.className!=='string'||c.students.some(s=>typeof s.studentRef!=='string'||typeof s.displayName!=='string')))throw Object.assign(new Error('ROSTER_CONTRACT_INVALID'),{status:503});
     return rows;
+  }
+  return async ()=>{
+    // Chỉ gộp lượt đang chờ; không giữ quyền sau khi đọc xong hoặc khi nguồn lỗi.
+    if(pending)return pending;
+    pending=load();
+    try{return await pending;}finally{pending=undefined;}
   };
 }

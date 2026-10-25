@@ -1,6 +1,6 @@
 # Handout Task 1 Speaking Writing chuyên sâu — backend riêng
 
-Bản local/candidate ngày 25/10/2026. Chưa merge, chưa push, chưa dựng container/VPS, chưa chuyển dữ liệu hoặc URL học viên thật.
+Đã chạy production riêng trên VPS1 từ 25/10/2026 và chuyển đủ sáu bài Task 1 chuyên sâu, giữ nguyên URL, bài làm, PIN và lịch sử. Đọc [biên nhận production](PRODUCTION-20261025.md), [prompt và đánh giá trước–sau](PROMPT-EVALUATION-20261025.md), rồi [runbook](RUNBOOK.md). Thư mục này được đưa vào main để bảo toàn source; merge Git không tự triển khai lại API/worker.
 
 ## Phần đã xây
 
@@ -22,12 +22,12 @@ Node 24, `npm ci`, `npm run check`, `node --test test/product.test.mjs`. SQL th�
 
 Các ca gồm: Draft Socratic RED ở lõi cũ và GREEN ở bản riêng, lưu/Check trùng, xung đột nháp, PIN, phiên/quyền lớp giảng viên, comment hai chiều, hai worker, lease hết hạn, callback sai hoặc lặp, lỗi từng phần và hoàn tất đảo thứ tự. Kiểm role SQL bị từ chối khi sửa prompt/quyền, đọc schema khác hoặc xóa bài.
 
-## Cấu hình và phạm vi còn phải kiểm trước mở lớp
+## Cấu hình, production và giới hạn kiểm
 
-Xem [RUNBOOK](RUNBOOK.md). Chuẩn giảng viên dùng `createSharedTeacherVerifier` đã ghim, nguồn mới `task1`; broker xác minh phiên chung 90/365 ngày và API kiểm lại grant/subject/lớp ở mỗi lần gọi. Chưa đăng ký nguồn này trên broker thật; chưa có bằng chứng Google thật cho Task 1 riêng.
+Chuẩn giảng viên dùng `createSharedTeacherVerifier` đã ghim, nguồn `task1`; broker hiện hành xác minh phiên chung 90/365 ngày, API kiểm quyền/subject/lớp trực tiếp qua cầu nối chỉ đọc. Google thật, tải lại/tab mới, dashboard và lịch sử cũ đã được kiểm sau chuyển. Không tạo broker hoặc hệ đăng nhập riêng.
 
-Compose khai báo database riêng `sw_task1`, role runtime `task1_api`, cổng API đề xuất `127.0.0.1:18928`, mỗi API/worker tối đa 4 kết nối DB, CPU 0,5 và RAM 256 MiB; DB 384 MiB. Đây là trần cấu hình đề xuất, chưa phải bằng chứng tải lớp đông hoặc cách ly VPS. Docker chưa khả dụng trên máy kiểm, nên chưa xác minh image/Compose hoạt động. Image PostgreSQL bắt buộc ghim digest trước khi dựng; không có mặc định trỏ sang hệ đang chạy.
+Compose là mẫu dựng mới; production hiện hành ở `/opt/izone-sw-task1`, DB riêng `sw_task1`/role runtime `task1_api`, API localhost `18930`, API image `.4` và worker image `.3`. Các digest, quota, network và phụ thuộc ở biên nhận production. Không chạy lại Compose mẫu để thay runtime đang nhận bài. Cấu hình hạn mức container không thay bằng chứng tải lớp đông hoặc cách ly toàn VPS.
 
-Chưa chuyển frontend, thư viện, quyền/lớp hay 91 phiên/571 lượt lịch sử. Các phần này phải dùng bản xuất đầy đủ, giữ UUID, bài, comment, PIN và trạng thái cũ; bản audit không đủ thay backup chuyển dữ liệu. Không tự đưa cả Task 2 vào DB Task 1 hoặc coi Draft cũ có link là đã đạt học thuật theo rubric mới.
+Đã chuyển frontend theo whitelist sáu slug và giữ đủ 18 bảng, gồm 92 phiên/574 lượt Check tại cutover. Nguồn cũ khóa ghi đúng sáu bài; importer từ chối DB đã live. Không đưa Task 2 vào DB Task 1 hoặc coi Draft cũ có link là đã đạt học thuật theo rubric mới. Phạm vi lớp cũ giữ nguyên; lớp QA riêng đã đóng. Chưa chạy mô phỏng tải cả lớp hoặc kiểm điện thoại vật lý trong đợt này.
 
 Giới hạn của AI: prompt giảm bắt oan và việc viết hộ trên bộ hồi quy đã chọn, không bảo đảm mọi lần sinh. Bộ chặn nhận câu trả lời thiếu/đứt, yêu cầu viết thay và vượt độ dài là lỗi kỹ thuật. Nếu phản hồi có hai khối và quá dài, chỉ giữ nguyên khối đầu còn đầy đủ; khi thiếu bước sửa thì thêm chỉ dẫn chung “Em tự sửa phần vừa được hỏi và giữ các phần đúng”. Không viết lại câu bài làm. Báo cáo so sánh giữ cả phản hồi gốc và phản hồi sau lớp giới hạn này.

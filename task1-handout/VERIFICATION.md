@@ -1,6 +1,8 @@
-# Kiểm chứng bản local ngày 25/10/2026
+# Kiểm chứng Task 1 ngày 25/10/2026
 
-Trạng thái: **local/candidate đạt phạm vi đã kiểm; chưa phát hành**.
+Trạng thái hiện hành: **đã phát hành và chuyển sáu bài thật**. Đọc [biên nhận production](PRODUCTION-20261025.md) cho 22/22 ca backend, 200/200 ca frontend, Google thật, lưu/Check/mở lại bài, trao đổi hai chiều, CSV và đối chiếu 18 bảng. [Đánh giá prompt](PROMPT-EVALUATION-20261025.md) phân biệt kết quả học thuật với kết quả tích hợp.
+
+Các mục dưới là bằng chứng giai đoạn local trước phát hành, được giữ nguyên để truy vết; câu “chưa kiểm” ở cuối mô tả thời điểm đó, không thay trạng thái production hiện hành.
 
 - `npm run check`: cú pháp nguồn và sáu hash vendor khớp revision ghim. Hash vendor chuẩn hóa UTF-8/LF để nhất quán Windows/Linux.
 - `node --test test/product.test.mjs`: **16/16 đạt**, không skip. PostgreSQL/PGlite chạy SQL thật, Supertest gọi HTTP thật trong tiến trình local. Có hồi quy cùng Draft cần sửa bị lõi cũ từ chối vì thiếu LMS, bản riêng chấp nhận; không dùng giả lập SQL theo thứ tự query để chứng minh nghiệp vụ.

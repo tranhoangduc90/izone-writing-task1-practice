@@ -69,4 +69,4 @@ Biên nhận và ảnh riêng tại `E:/Codex-Data/private-evals/task1-cutover-2
 
 Chỉ quay image/code khi cần, giữ DB hiện hành và bài mới. Không chạy lại provision/import/rehearsal/cutover, không restore snapshot cũ đè lên DB đã nhận bài. Không mở lại ghi nguồn hoặc đổi route về nguồn cũ khi chưa có phương án đồng bộ ngược và đối chiếu phần phát sinh mới. Các container API cũ đang dừng chỉ là phương tiện khôi phục code, không phải DB thay thế.
 
-Source backend được lưu trên branch local `codex/task1-socratic-backend-20261025-writing-practice`; chưa push/merge backend. Frontend đã phát hành qua hai PR nêu trên. Thêm lớp/bài mới cần đăng ký phạm vi và nguồn quyền tương ứng; không suy ra từ quyền cutover sáu bài này.
+Gói source backend gồm bốn commit từ `1f46fa0` đến `b4a5a86` và cập nhật hồ sơ trong branch `codex/task1-socratic-backend-20261025-writing-practice`. Trạng thái tích hợp được ghim trong bộ nhớ dự án và PR của gói này. Frontend đã phát hành qua hai PR nêu trên. Thêm lớp/bài mới cần đăng ký phạm vi và nguồn quyền tương ứng; không suy ra từ quyền cutover sáu bài này. Đợt lưu bộ nhớ/nhập main không triển khai lại server hoặc thay dữ liệu.

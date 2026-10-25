@@ -1,5 +1,7 @@
 # Chuyển Task 1 chuyên sâu sang backend riêng — 25/10/2026
 
+**Cập nhật sau cutover:** API hiện là `.5-ui-snapshots`, phục vụ snapshot lịch sử cho giao diện mới; đọc [biên nhận projection UI](PRODUCTION-UI-20261025.md). Các mốc `.4` dưới đây giữ lịch sử cutover. Worker, DB và phạm vi lớp không đổi.
+
 ## Kết quả và phạm vi
 
 Đức đã cho phép chuyển sáu bài Task 1 đang dùng sang backend riêng trên VPS1, giữ nguyên link, bài làm và toàn bộ lịch sử. Cutover hoàn tất lúc `2026-10-25T03:28:03Z` (10:28 giờ Việt Nam); bước khóa ghi, xuất cuối, nhập, đối chiếu và đổi tuyến mất 8,73 giây. Task 2, Writing 56–67 và các sản phẩm khác giữ backend hiện hành.

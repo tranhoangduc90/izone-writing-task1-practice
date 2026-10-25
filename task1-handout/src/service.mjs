@@ -12,8 +12,21 @@ export function createService({pool,pepper,history=null}){
    const scope=await pool.query("SELECT 1 FROM writing_practice.activity_class_scope c JOIN writing_practice.activity a ON a.id=c.activity_id WHERE a.slug=$1 AND c.public_id=$2 AND a.status='active' AND c.status='active' AND c.end_date>=CURRENT_DATE",[input.activitySlug,input.classRef]);
    if(!scope.rowCount)throw new ApiError(404,'SESSION_NOT_ALLOWED','Lớp hoặc bài không còn mở.');return core.openSession(input);
   },
-  async sessionDetails(ref){const h=history?await history():null;return h?.details(ref)||core.sessionDetails(ref);},
-  async getAttempt(ref){const h=history?await history():null;return h?.attempt(ref)||core.getAttempt(ref);},
+  async sessionDetails(ref){
+   const h=history?await history():null,old=h?.details(ref);if(old)return old;
+   const details=await core.sessionDetails(ref);
+   // Chỉ đọc bản gửi đã đóng băng theo đúng phiên; không dùng bài nháp hiện tại thay thế.
+   const rows=await pool.query('SELECT a.public_id,a.snapshot FROM writing_practice.check_attempt a JOIN writing_practice.activity_session s ON s.id=a.session_id WHERE s.public_id=$1',[ref]);
+   const snapshots=new Map(rows.rows.map(a=>[a.public_id,a.snapshot]));
+   return {...details,comments:details.comments.map(c=>({...c,snapshot:snapshots.get(c.attemptRef)||null}))};
+  },
+  async getAttempt(ref){
+   const h=history?await history():null,old=h?.attempt(ref);if(old)return old;
+   const attempt=await core.getAttempt(ref);
+   const rows=await pool.query('SELECT snapshot FROM writing_practice.check_attempt WHERE public_id=$1',[ref]);
+   const snapshot=rows.rows[0]?.snapshot||null;
+   return {...attempt,snapshot,comment:attempt.comment?{...attempt.comment,snapshot}:attempt.comment};
+  },
   async claimJobs(input){
    if(input.workerPool&&input.workerPool!=='task1')throw new ApiError(400,'WRONG_PRODUCT','Sai hàng chấm.');
    if(input.maxJobs>2)throw new ApiError(400,'CAPACITY_EXCEEDED','Tối đa hai lượt đồng thời.');

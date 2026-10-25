@@ -6,6 +6,7 @@
 import {randomUUID} from 'node:crypto';
 import {WebGradingError} from './web-grader.js';
 import {planReading67HomeworkWrite} from './web-homework-docs.js';
+import {reading67ResultSummary,reading67ProgressText} from './web-result-summary.js';
 const args=s=>[s.ownerId,s.courseId,s.code,s.version];
 const clause='owner_id=$1 AND course_id=$2 AND assignment_code=$3 AND content_version=$4';
 const fail=(code,status=409)=>{throw new WebGradingError(code,status);};
@@ -39,6 +40,8 @@ export function createReading67Homework({db,metadata,pageBase,owner,docs,clock=D
   let text=no===1?'Đã bắt đầu làm bài lần đầu tiên.':`Đã bắt đầu làm bài số ${no} (đã reset ${no-1} lần).`;
   if(attempt?.status==='done'){
    text=no===1?'Đã hoàn thành ngay từ lần đầu.':first&&first!==no?`Đã hoàn thành lượt luyện lại số ${no} (tổng ${no-1} lần reset). Lần hoàn thành đầu tiên: lượt ${first}.`:`Đã hoàn thành sau ${no-1} lần reset (lần làm bài số ${no}).`;
+   const saved=(await tx.query('SELECT data FROM reading_listening67.web_result WHERE attempt_id=$1',[attempt.id])).rows[0];
+   text+=reading67ProgressText(reading67ResultSummary(saved?.data));
    text+=' Giảng viên nhấn vào đây để xem kết quả.';
   }else if(attempt){
    text=['queued','processing'].includes(attempt.status)?`Đã nộp bài lần ${no}, đang chờ chấm. Giảng viên nhấn vào đây để xem bài đã nộp.`:`Bài lần ${no} đã được lưu, chưa có kết quả chấm. Giảng viên nhấn vào đây để xem bài đã nộp.`;
@@ -112,5 +115,25 @@ export function createReading67Homework({db,metadata,pageBase,owner,docs,clock=D
   }
   return true;
  }
- return {entryUrl,teacherUrl,start,submitted,outcome,register,status,once};
+ async function previewStatus(s){
+  return db.transaction(async tx=>{
+   const b=(await tx.query('SELECT * FROM reading_listening67.web_homework_binding WHERE '+clause,args(s))).rows[0];
+   if(!b)return null;
+   const payload=await state(tx,s,b);
+   return {sequence:b.sequence,previousText:b.last_doc_text,previousLink:b.last_doc_link,target:b.target,payload};
+  });
+ }
+ async function refreshStatus(s,expected){
+  return db.transaction(async tx=>{
+   const b=(await tx.query('SELECT * FROM reading_listening67.web_homework_binding WHERE '+clause+' FOR UPDATE',args(s))).rows[0];
+   if(!b)return null;
+   const payload=await state(tx,s,b);
+   if(!expected||b.sequence!==expected.sequence||b.last_doc_text!==expected.previousText||b.last_doc_link!==expected.previousLink||JSON.stringify(payload)!==JSON.stringify(expected.payload))fail('DOC_REFRESH_CHANGED');
+   const old=(await tx.query("SELECT payload,status FROM reading_listening67.web_homework_job WHERE binding_id=$1 AND kind='status' ORDER BY sequence DESC LIMIT 1",[b.id])).rows[0];
+   if(!old||old.payload.text===payload.text&&old.payload.link===payload.link)return null;
+   if(old.status!=='verified'||b.last_doc_sequence!==b.sequence)fail('DOC_REFRESH_PENDING');
+   return append(tx,b,'progress-v1:'+b.sequence+':'+(payload.attemptId||payload.runNo),'status',payload);
+  });
+ }
+ return {entryUrl,teacherUrl,start,submitted,outcome,register,status,once,previewStatus,refreshStatus};
 }

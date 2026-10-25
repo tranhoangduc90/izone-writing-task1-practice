@@ -10,7 +10,7 @@ import {createReading67Homework} from '../src/reading-listening67/web-homework.j
 import {HOMEWORK_CTA,HOMEWORK_STATUS,HOMEWORK_PREFIX} from '../src/reading-listening67/web-homework-docs.js';
 const A='11111111-1111-4111-8111-111111111111',B='22222222-2222-4222-8222-222222222222';
 const code='67-reading-materials-beyond-concrete-matching-information-nen-cap-1',version='fixture-v1';
-const scope={ownerId:A,courseId:'1124',code,version},targets=Array.from({length:20},(_,i)=>'target.'+i);
+const scope={ownerId:A,courseId:'1124',code,version},targets=[...'ABCDEFGH'].map(x=>'p.'+x).concat([1,2,3,4].flatMap(n=>['radar','evidence_l1','section'].map(x=>'q.'+n+'.'+x)));
 const body={answers:Object.fromEntries(targets.map(id=>[id,'Bài tự viết'])),notes:'Ghi chú riêng',flags:[],annotations:[]};
 const grader={pins:{sha256:'a'.repeat(64)},profile:{expected_target_ids:targets},inspectWeb:answers=>({parsed:{targets:Object.entries(answers).map(([target_id,source_text])=>({target_id,source_text}))},completeness:{filled_cells:Object.keys(answers).length,eligible_for_grading:Object.keys(answers).length>=16}})};
 const result=job=>({pins:grader.pins,context:{operationId:job.jobId,sourceDigest:job.inputHash},grading:{target_results:targets.map(target_id=>({target_id,verdict:'correct'}))},feedback:{}});
@@ -47,6 +47,38 @@ async function fixture(t){
  const drain=async()=>{for(let i=0;i<30;i++)if(!await homework.once())return;throw Error('Queue did not drain');};
  return {db,docs,control,homework,store,target,jobs,due,drain};
 }
+test('Vòng sửa: 4/4 nhưng nén còn sai, nộp lại đạt 20/20, Docs/link đúng bản mới và lịch sử nguyên vẹn',async t=>{
+ const f=await fixture(t);await f.store.save(scope,{baseRevision:0,mutationId:randomUUID(),body});
+ const first=await f.store.submit(scope,{revision:1,requestId:randomUUID()}),job=await f.store.claim(),partial=result(job);
+ partial.grading.target_results[0].verdict='partial';await f.store.finish(job,partial);await f.drain();
+ let last=(await f.jobs()).at(-1);assert.match(last.payload.text,/đúng 4\/4 câu.*15\/16.*Còn 1 phần cần sửa/);assert.doesNotMatch(last.payload.text,/Đã sửa đúng toàn bộ/);
+ const before=await f.store.attempt(scope,first.attemptId),fixed=structuredClone(body);fixed.answers[targets[0]]='Nội dung đã sửa';
+ await f.store.save(scope,{baseRevision:1,mutationId:randomUUID(),body:fixed});const second=await f.store.submit(scope,{revision:2,requestId:randomUUID()});const next=await f.store.claim();await f.store.finish(next,result(next));await f.drain();
+ last=(await f.jobs()).at(-1);assert.match(last.payload.text,/16\/16.*Đã sửa đúng toàn bộ/);assert.equal(new URL(last.payload.link).searchParams.get('attemptId'),second.attemptId);
+ assert.deepEqual(await f.store.attempt(scope,first.attemptId),before);assert.equal((await f.store.history(scope)).length,2);assert.equal((await f.store.draft(scope)).runNo,1);
+ const proof=await f.homework.previewStatus(scope);assert.equal(await f.homework.refreshStatus(scope,proof),null);
+ await assert.rejects(f.homework.refreshStatus(scope,{...proof,sequence:-1}),{code:'DOC_REFRESH_CHANGED'});
+ // Sửa rồi quay về nội dung cũ vẫn là bản nộp mới; không ghép link lịch sử cũ.
+ await f.store.save(scope,{baseRevision:2,mutationId:randomUUID(),body});
+ const reverted=await f.store.submit(scope,{revision:3,requestId:randomUUID()});assert.notEqual(reverted.attemptId,first.attemptId);assert.equal(reverted.fromCache,false);
+});
+
+test('Làm mới dòng Docs cũ thiếu điểm từ kết quả lưu: đọc lại, giữ bài/lịch sử/chữ tay, retry không nhân ghi',async t=>{
+ const f=await fixture(t);await f.store.save(scope,{baseRevision:0,mutationId:randomUUID(),body});await f.store.submit(scope,{revision:1,requestId:randomUUID()});const j=await f.store.claim();await f.store.finish(j,result(j));await f.drain();
+ const legacy='Đã hoàn thành ngay từ lần đầu. Giảng viên nhấn vào đây để xem kết quả.';
+ const b=(await f.db.query('SELECT * FROM reading_listening67.web_homework_binding')).rows[0],last=(await f.jobs()).at(-1);
+ await f.db.query('UPDATE reading_listening67.web_homework_binding SET last_doc_text=$1 WHERE id=$2',[legacy,b.id]);
+ await f.db.query("UPDATE reading_listening67.web_homework_job SET payload=jsonb_set(payload,'{text}',$1::jsonb) WHERE id=$2",[JSON.stringify(legacy),last.id]);
+ const doc=f.docs.get(f.target(scope).documentId),chars=doc.chars,at=chars.map(c=>c.text).join('').indexOf(HOMEWORK_PREFIX)+HOMEWORK_PREFIX.length;
+ chars.splice(at,chars.length-at,...[...legacy].map(text=>({text,style:{}})));
+ const before=await f.store.attempt(scope,j.attemptId),draft=await f.store.draft(scope),proof=await f.homework.previewStatus(scope);
+ assert.equal(proof.previousText,legacy);assert.match(proof.payload.text,/đúng 4\/4 câu/);
+ const refresh=await f.homework.refreshStatus(scope,proof);assert.equal(refresh.sequence,last.sequence+1);await f.drain();
+ assert.equal((await f.jobs()).at(-1).status,'verified');assert.match(doc.chars.map(c=>c.text).join(''),/Chữ tay giữ nguyên.*\n.*16\/16/s);
+ assert.deepEqual(await f.store.attempt(scope,j.attemptId),before);assert.deepEqual(await f.store.draft(scope),draft);
+ const writes=f.docs.calls.write;assert.equal(await f.homework.refreshStatus(scope,await f.homework.previewStatus(scope)),null);assert.equal(f.docs.calls.write,writes);
+});
+
 test('Save và job cùng transaction; autosave không gọi Google, CTA/status đọc lại đúng rồi mới verified',async t=>{
  const f=await fixture(t);await f.store.save(scope,{baseRevision:0,mutationId:randomUUID(),body});
  assert.equal(f.docs.calls.read,0);assert.deepEqual((await f.jobs()).map(j=>[j.sequence,j.kind,j.status]),[[0,'cta','pending'],[1,'status','pending']]);
@@ -70,12 +102,13 @@ test('Nộp lặp, hoàn tất và retry mất ACK: một lượt, đúng link a
  assert.equal(f.docs.get(f.target(scope).documentId).chars.map(c=>c.text).join('').split(HOMEWORK_PREFIX).length-1,1);
  assert.deepEqual(await f.store.draft(scope),draftBefore);
 });
-test('Reset khi chấm: callback lượt cũ không hạ trạng thái lượt mới; cache kết quả ở lượt mới vẫn ghi đúng số lượt',async t=>{
+test('Reset khi chấm: callback cũ không hạ trạng thái mới; không gắn cache của lượt trước vào lượt sau',async t=>{
  const f=await fixture(t);await f.store.save(scope,{baseRevision:0,mutationId:randomUUID(),body});await f.store.submit(scope,{revision:1,requestId:randomUUID()});const oldJob=await f.store.claim();
  await f.store.reset(scope,{baseRevision:1,mutationId:randomUUID()});await f.store.finish(oldJob,result(oldJob));
  let last=(await f.jobs()).at(-1);assert.equal(last.payload.runNo,2);assert.ok(last.payload.text.includes('Đã bắt đầu làm bài số 2'));assert.ok(!last.payload.text.includes('Đã hoàn thành'));
- await f.store.save(scope,{baseRevision:2,mutationId:randomUUID(),body});const cached=await f.store.submit(scope,{revision:3,requestId:randomUUID()});assert.equal(cached.fromCache,true);
- last=(await f.jobs()).at(-1);assert.equal(last.payload.runNo,2);assert.ok(last.payload.text.includes('Lần hoàn thành đầu tiên: lượt 1'));assert.equal(last.payload.attemptId,oldJob.attemptId);
+ await f.store.save(scope,{baseRevision:2,mutationId:randomUUID(),body});const cached=await f.store.submit(scope,{revision:3,requestId:randomUUID()});assert.equal(cached.fromCache,false);assert.notEqual(cached.attemptId,oldJob.attemptId);
+ const currentJob=await f.store.claim();await f.store.finish(currentJob,result(currentJob));
+ last=(await f.jobs()).at(-1);assert.equal(last.payload.runNo,2);assert.ok(last.payload.text.includes('Lần hoàn thành đầu tiên: lượt 1'));assert.equal(last.payload.attemptId,cached.attemptId);
 });
 test('Hai người xen kẽ và Google chưa có Homework hơn tám lần: pending giữ bài rồi nối đúng đích giao sau',async t=>{
  const f=await fixture(t),other={...scope,ownerId:B};await f.store.save(scope,{baseRevision:0,mutationId:randomUUID(),body});await f.store.save(other,{baseRevision:0,mutationId:randomUUID(),body:{...body,notes:'Người B'}});

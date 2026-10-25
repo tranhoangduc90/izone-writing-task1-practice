@@ -1,11 +1,12 @@
-import {ORDER} from './service.mjs';
+import {workflowFor,available,jobStateKey} from './workflow.mjs';
 
 // Nhận hai trạng thái đã khóa trong transaction; giữ mốc hoạt động ngoài nhật ký hết hạn.
 // Góp ý của GV và lượt đọc không đổi thời gian hoạt động học viên. Dữ liệu cũ thiếu mốc giữ null.
 export function markDashboardActivity(before,after,now){
+  const ORDER=workflowFor(after).order;
   const activity=after.dashboardActivity ||= {...before.dashboardActivity};
   if(JSON.stringify(before.responses)!==JSON.stringify(after.responses))activity.studentSavedAt=now;
-  if(!before.idea2Open&&after.idea2Open)activity.studentOpenedIdea2At=now;
+  if(!before.idea2Open&&after.idea2Open||JSON.stringify(before.bodyProgress)!==JSON.stringify(after.bodyProgress))activity.studentOpenedIdea2At=now;
   const oldJobs=new Map(before.jobs.map(j=>[j.jobRef,j]));
   for(const j of after.jobs){
     const old=oldJobs.get(j.jobRef);
@@ -18,12 +19,13 @@ export function markDashboardActivity(before,after,now){
 }
 const time=value=>typeof value==='number'?value:Number.isFinite(Date.parse(value))?Date.parse(value):0;
 const max=(...values)=>Math.max(0,...values.map(time))||null;
-const available=(s,key)=>{const i=ORDER.indexOf(key);return (i===0||s.steps[ORDER[i-1]].status==='passed')&&(!(key==='b2'||key==='a2'||key==='x2')||s.idea2Open);};
+
 
 // Nhận phiên Handout67; chỉ trả thống kê và trạng thái cần đọc. Không trả prompt/token/snapshot job.
 // Đếm một logical job là một Check; attempt kỹ thuật và từ vựng không được cộng vào đó.
 export function dashboardProjection(s,now=Date.now()){
-  const latest=Object.fromEntries(s.jobs.map(j=>[j.kind==='grade'?j.section:'vocab'+j.ideaIndex,j]));
+  const ORDER=workflowFor(s).order;
+  const latest=Object.fromEntries(s.jobs.map(j=>[jobStateKey(j),j]));
   const processing=Object.fromEntries(Object.entries(latest).filter(([,j])=>['queued','leased','failed'].includes(j.status)&&!(j.kind==='grade'&&s.steps[j.section].status==='passed')).map(([k,j])=>[k,{
     jobRef:j.jobRef,status:j.status,tries:j.tries,maxTries:3,createdAt:j.createdAt,
     deadlineAt:j.deadlineAt??null,leaseUntil:j.leaseUntil||null,nextAttemptAt:j.nextAttemptAt??null,error:j.error??null,
@@ -43,14 +45,14 @@ export function dashboardProjection(s,now=Date.now()){
   const resultAt=max(a.resultAt,...s.jobs.filter(j=>j.kind==='grade'&&['completed','failed'].includes(j.status)).map(j=>j.stateChangedAt),...ORDER.map(k=>s.steps[k].approval?.source==='ai'?s.steps[k].approval.at:0));
   const passed=ORDER.filter(k=>s.steps[k].status==='passed').length;
   const attention=Object.values(processing).some(j=>j.status==='failed'||j.overdue);
-  return {filled:Object.values(s.responses).filter(v=>typeof v==='string'&&v.trim()).length,passed,
+  return {totalSections:ORDER.length,sectionOrder:ORDER,filled:Object.values(s.responses).filter(v=>typeof v==='string'&&v.trim()).length,passed,
     checks:s.jobs.filter(j=>j.kind==='grade').length,aiComments:ORDER.reduce((n,k)=>n+s.steps[k].history.length,0),
-    current,currentLabel:!current&&passed<7?'Chờ học viên mở Ý 2':null,negativeStreak,supportLevel:negativeStreak>=9?9:negativeStreak>=6?6:negativeStreak>=3?3:0,
+    current,currentLabel:!current&&passed<ORDER.length?'Chờ học viên mở Ý 2':null,negativeStreak,supportLevel:negativeStreak>=9?9:negativeStreak>=6?6:negativeStreak>=3?3:0,
     openThreads:open.length,addressedThreads:threads.length-open.length,waitingReplyAt,
     attested:ORDER.filter(k=>s.steps[k].approval?.source==='student_attested_teacher_permission').length,
     edited:ORDER.filter(k=>s.steps[k].editedAfterApproval).length,stepStates,processing,
     activity:{studentSavedAt:a.studentSavedAt??null,studentCheckedAt:checked,studentAttestedAt:attested,studentRepliedAt,resultAt,
       studentAt:max(a.studentSavedAt,checked,attested,studentRepliedAt,edited,a.studentOpenedIdea2At),lastAt:max(a.studentSavedAt,checked,attested,studentRepliedAt,edited,a.studentOpenedIdea2At,resultAt)},
-    state:negativeStreak>=3?'support':attention?'attention':passed===7?'complete':Object.values(processing).some(j=>['queued','leased'].includes(j.status))?'pending':current&&s.steps[current].status==='revision'?'revision':'working',
-    priority:negativeStreak>=3?0:attention?1:edited||waitingReplyAt?2:passed<7?3:4};
+    state:negativeStreak>=3?'support':attention?'attention':passed===ORDER.length?'complete':Object.values(processing).some(j=>['queued','leased'].includes(j.status))?'pending':current&&s.steps[current].status==='revision'?'revision':'working',
+    priority:negativeStreak>=3?0:attention?1:edited||waitingReplyAt?2:passed<ORDER.length?3:4};
 }

@@ -1,0 +1,121 @@
+{
+  "version": "2026-10-25.socratic-v2.5",
+  "promptCount": 18,
+  "templateLocation": "private registry; see PROMPT-EVALUATION-20261025.md",
+  "packageSha256": "57c771bc8f1a5fbe75dbdfa347c2cec10cdae74f97a0bcb45d0f523af7f44505",
+  "rulesSha256": {
+    "rules-overview.md": "1713dadd08a9bf809812aa0f2406ffe11e00db4fa84e63859f0f8fd7a452e011",
+    "rules-outline.md": "a63eb8bf1abe7a9593c464963ab786b9a87d89dc680ce36c8d9f07e08e15a8bf",
+    "rules-draft.md": "f2eb3a4b869ba35720a143ce42fcc3eb5148ac7a78fd529f1db3871bcbb65355"
+  },
+  "prompts": [
+    {
+      "slug": "pie-app-users-by-age",
+      "section": "overview",
+      "version": "2026-10-25.socratic-v2.5",
+      "sha256": "2b32543bc141b6e903843eaa6dd1992b0193ee0d2cd22be99e105f8ce04d2a97"
+    },
+    {
+      "slug": "pie-app-users-by-age",
+      "section": "outline",
+      "version": "2026-10-25.socratic-v2.5",
+      "sha256": "a8db28c969bf93daf0da01603cbb3dfef1c0c9f44a85cb3f583107159bf30df4"
+    },
+    {
+      "slug": "pie-app-users-by-age",
+      "section": "draft",
+      "version": "2026-10-25.socratic-v2.5",
+      "sha256": "fe14d9563c003e8e6c9228764a9ce0fcc998ed02f50519fdb2563ecb3f999646"
+    },
+    {
+      "slug": "australian-destinations-1999-2009",
+      "section": "overview",
+      "version": "2026-10-25.socratic-v2.5",
+      "sha256": "0d3ac6fb9f7118e8490a103ac79ea5ee8c0d20175dc864830b2da9b1472c9ca3"
+    },
+    {
+      "slug": "australian-destinations-1999-2009",
+      "section": "outline",
+      "version": "2026-10-25.socratic-v2.5",
+      "sha256": "9672e45ac77dd9eff033d92011f0568321c2a527a7252524b78fb053a890896f"
+    },
+    {
+      "slug": "australian-destinations-1999-2009",
+      "section": "draft",
+      "version": "2026-10-25.socratic-v2.5",
+      "sha256": "bf3a7e3767655981d304627867bb52eec4163e74d0bcc89e821565f5615d2bc5"
+    },
+    {
+      "slug": "australian-physical-activity-2010",
+      "section": "overview",
+      "version": "2026-10-25.socratic-v2.5",
+      "sha256": "18f25082608f2610382ceb3c10f73a75eed2950656b9a807a30704adb5eb49fe"
+    },
+    {
+      "slug": "australian-physical-activity-2010",
+      "section": "outline",
+      "version": "2026-10-25.socratic-v2.5",
+      "sha256": "b72ad54f62d8f42315652a34723c37c813e3638a5846a2fdae14eb5c21feb218"
+    },
+    {
+      "slug": "australian-physical-activity-2010",
+      "section": "draft",
+      "version": "2026-10-25.socratic-v2.5",
+      "sha256": "11b52e702e7901d3914f35e21be143f79a84bdd4ab69d7716300ded71d2f4315"
+    },
+    {
+      "slug": "new-zealand-employment-1993-2003",
+      "section": "overview",
+      "version": "2026-10-25.socratic-v2.5",
+      "sha256": "0310d5605a8a4381ce7ba4c4970c519db22f18d5790f6a14d965ebebc53b0637"
+    },
+    {
+      "slug": "new-zealand-employment-1993-2003",
+      "section": "outline",
+      "version": "2026-10-25.socratic-v2.5",
+      "sha256": "14c38921dc49437231205c715c30b369557f9e5a6ba80af55bc9431a93d11ce3"
+    },
+    {
+      "slug": "new-zealand-employment-1993-2003",
+      "section": "draft",
+      "version": "2026-10-25.socratic-v2.5",
+      "sha256": "f66984d21bc39adfdd418786a68fbb68cff4d80db052768d7a58359337e24e6f"
+    },
+    {
+      "slug": "average-earnings-by-sector-2000-2010",
+      "section": "overview",
+      "version": "2026-10-25.socratic-v2.5",
+      "sha256": "f4b8429fb8a9f739e6dd31a7775b160d3dd188c356ab43b6db37f331f83cdc07"
+    },
+    {
+      "slug": "average-earnings-by-sector-2000-2010",
+      "section": "outline",
+      "version": "2026-10-25.socratic-v2.5",
+      "sha256": "89062c04d9a9401c21c4305180fd98b0b59fc09e19a7911bdfbb9eaa03bb72c8"
+    },
+    {
+      "slug": "average-earnings-by-sector-2000-2010",
+      "section": "draft",
+      "version": "2026-10-25.socratic-v2.5",
+      "sha256": "76656d7c7883d6d643f173b560956327cce49bf13e4f7b3de2da11c56b304b37"
+    },
+    {
+      "slug": "mobile-phone-market-share-1994-2004",
+      "section": "overview",
+      "version": "2026-10-25.socratic-v2.5",
+      "sha256": "c0911c943a14c5265a08300ef0948faf1e880726f7b66fd400f7d76142ede216"
+    },
+    {
+      "slug": "mobile-phone-market-share-1994-2004",
+      "section": "outline",
+      "version": "2026-10-25.socratic-v2.5",
+      "sha256": "198bf975786eef52351337f850c536ed9049f22bbe5f7f670db3d793f7bacaee"
+    },
+    {
+      "slug": "mobile-phone-market-share-1994-2004",
+      "section": "draft",
+      "version": "2026-10-25.socratic-v2.5",
+      "sha256": "7d012a0b15ac9bb8e31b51fce253b3e3ba373183c38d478c15e43abd94fa99cb"
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 import {createHash,randomUUID} from 'node:crypto';
+import {sectionFor,isMulti,bodyIndexOf} from './workflow.mjs';
 
 const fail=(code,status=400)=>{throw Object.assign(new Error(code),{status});};
 export const contentHash=value=>createHash('sha256').update(value).digest('hex');
@@ -29,11 +30,12 @@ export function changeThread(s,actor,input,now){
   let thread;
   if(input.action==='create'){
     if(actor.role!=='teacher')fail('COMMENT_FORBIDDEN',403);
-    if(!fields.includes(input.field)||typeof input.body!=='string'||!input.body.trim()||input.body.length>5000)fail('COMMENT_INVALID');
+    if(!sectionFor(s,input.field)||typeof input.body!=='string'||!input.body.trim()||input.body.length>5000)fail('COMMENT_INVALID');
+    if(isMulti(s)&&input.bodyIndex!==bodyIndexOf(input.field))fail('BODY_IDENTITY_MISMATCH',409);
     const text=s.responses[input.field];
     if(typeof text!=='string'||!text.trim())fail('EMPTY_RESPONSE');
     if(input.fieldHash!==contentHash(text))fail('COMMENT_CONTENT_CHANGED',409);
-    const section=['idea1','idea2','topicSentence'].includes(input.field)?'topic':input.field;
+    const section=sectionFor(s,input.field);if(!section)fail('COMMENT_INVALID');
     let anchor={kind:'field',sourceHash:contentHash(text),quote:''};
     if(input.range!==undefined){
       const r=input.range;
@@ -45,6 +47,7 @@ export function changeThread(s,actor,input,now){
   }else{
     thread=s.commentThreads.find(t=>t.ref===input.threadRef);
     if(!thread)fail('COMMENT_NOT_FOUND',404);
+    if(isMulti(s)&&input.bodyIndex!==bodyIndexOf(thread.field))fail('BODY_IDENTITY_MISMATCH',409);
     if(input.action==='status'){
       if(actor.role!=='teacher')fail('COMMENT_FORBIDDEN',403);
       if(!['open','addressed'].includes(input.status))fail('COMMENT_INVALID');

@@ -5,6 +5,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { sha256, WebGradingError,reading67AnswerFingerprint } from './web-grader.js';
+import {reading67ResultSummary} from './web-result-summary.js';
 const emptyBody=()=>({answers:{},annotations:[],notes:'',flags:[]});
 const values=s=>[s.ownerId,s.courseId,s.code,s.version];
 const where='owner_id=$1 AND course_id=$2 AND assignment_code=$3 AND content_version=$4';
@@ -45,7 +46,9 @@ export function createReading67WebStore({db,grader,homework}) {
       const gate=gateFor(row.body);
       if(!gate.completeness.eligible_for_grading)throw new WebGradingError('BELOW_COMPLETION_THRESHOLD',422,gate.completeness);
       const inputHash=reading67AnswerFingerprint(gate.parsed);
-      const cached=(await tx.query(`SELECT a.id,j.status FROM reading_listening67.web_attempt a JOIN reading_listening67.web_job j ON j.attempt_id=a.id WHERE a.owner_id=$1 AND a.course_id=$2 AND a.assignment_code=$3 AND a.content_version=$4 AND a.input_hash=$5 AND a.grader_hash=$6 AND j.status IN ('queued','processing','done','needs_review') ORDER BY a.created_at DESC LIMIT 1`,[...args,inputHash,grader.pins.sha256])).rows[0];
+      const unknown=(await tx.query(`SELECT a.id FROM reading_listening67.web_attempt a JOIN reading_listening67.web_job j ON j.attempt_id=a.id WHERE a.owner_id=$1 AND a.course_id=$2 AND a.assignment_code=$3 AND a.content_version=$4 AND a.input_hash=$5 AND a.grader_hash=$6 AND j.status='needs_review' LIMIT 1`,[...args,inputHash,grader.pins.sha256])).rows[0];
+      if(unknown)throw new WebGradingError('PREVIOUS_GRADING_NEEDS_REVIEW',409);
+      const cached=(await tx.query(`SELECT a.id,j.status FROM reading_listening67.web_attempt a JOIN reading_listening67.web_job j ON j.attempt_id=a.id WHERE a.owner_id=$1 AND a.course_id=$2 AND a.assignment_code=$3 AND a.content_version=$4 AND a.input_hash=$5 AND a.grader_hash=$6 AND a.run_no=$7 AND a.draft_revision=$8 AND j.status IN ('queued','processing','done','needs_review') ORDER BY a.created_at DESC LIMIT 1`,[...args,inputHash,grader.pins.sha256,row.run_no,row.revision])).rows[0];
       if(cached?.status==='needs_review')throw new WebGradingError('PREVIOUS_GRADING_NEEDS_REVIEW',409);
       const attemptId=cached?.id||randomUUID();
       if(!cached){
@@ -60,10 +63,10 @@ export function createReading67WebStore({db,grader,homework}) {
   async function attemptView(executor,scope,attemptId,fromCache=false){
     const row=(await executor.query('SELECT a.*,j.id AS job_id,j.status,j.error_code,j.finished_at,r.data AS result FROM reading_listening67.web_attempt a JOIN reading_listening67.web_job j ON j.attempt_id=a.id LEFT JOIN reading_listening67.web_result r ON r.attempt_id=a.id WHERE a.id=$5 AND a.owner_id=$1 AND a.course_id=$2 AND a.assignment_code=$3 AND a.content_version=$4',[...values(scope),attemptId])).rows[0];
     if(!row)throw new WebGradingError('ATTEMPT_NOT_FOUND',404);
-    return {attemptId:row.id,jobId:row.job_id,status:row.status,errorCode:row.error_code,createdAt:row.created_at,finishedAt:row.finished_at,runNo:row.run_no,draftRevision:row.draft_revision,snapshot:row.snapshot,completeness:row.completeness,result:row.status==='done'?row.result:null,graderHash:row.grader_hash,fromCache};
+    return {attemptId:row.id,jobId:row.job_id,status:row.status,errorCode:row.error_code,createdAt:row.created_at,finishedAt:row.finished_at,runNo:row.run_no,draftRevision:row.draft_revision,snapshot:row.snapshot,completeness:row.completeness,result:row.status==='done'?row.result:null,progress:row.status==='done'?reading67ResultSummary(row.result):null,graderHash:row.grader_hash,fromCache};
   }
   async function attempt(scope,id){return attemptView(db,scope,id);}
-  async function history(scope){return (await db.query(`SELECT a.id AS "attemptId",a.run_no AS "runNo",a.draft_revision AS "draftRevision",a.created_at AS "createdAt",j.finished_at AS "finishedAt",j.status,j.error_code AS "errorCode",r.data->'grading'->'summary' AS summary FROM reading_listening67.web_attempt a JOIN reading_listening67.web_job j ON j.attempt_id=a.id LEFT JOIN reading_listening67.web_result r ON r.attempt_id=a.id WHERE a.owner_id=$1 AND a.course_id=$2 AND a.assignment_code=$3 AND a.content_version=$4 ORDER BY a.created_at DESC LIMIT 40`,values(scope))).rows;}
+  async function history(scope){return (await db.query(`SELECT a.id AS "attemptId",a.run_no AS "runNo",a.draft_revision AS "draftRevision",a.created_at AS "createdAt",j.finished_at AS "finishedAt",j.status,j.error_code AS "errorCode",r.data->'grading'->'summary' AS summary,r.data AS result FROM reading_listening67.web_attempt a JOIN reading_listening67.web_job j ON j.attempt_id=a.id LEFT JOIN reading_listening67.web_result r ON r.attempt_id=a.id WHERE a.owner_id=$1 AND a.course_id=$2 AND a.assignment_code=$3 AND a.content_version=$4 ORDER BY a.created_at DESC LIMIT 40`,values(scope))).rows.map(({result,...item})=>({...item,progress:item.status==='done'?reading67ResultSummary(result):null}));}
   // Reset lưu nguyên nháp cũ rồi mới mở lượt mới, cùng giao dịch và ID chống lặp.
   async function reset(scope,{baseRevision,mutationId}){return db.transaction(async tx=>{
     const args=values(scope),requestHash=sha256(canonical({operation:'reset',baseRevision}));

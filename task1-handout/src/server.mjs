@@ -1,0 +1,11 @@
+import {createDatabasePool} from '../vendor/db.js';
+import {createSharedTeacherVerifier} from '../vendor/teacher-sso/consumer.js';
+import {loadConfig} from './config.mjs';
+import {createService} from './service.mjs';
+import {createApp} from './app.mjs';
+const config=loadConfig(),pool=createDatabasePool(config),service=createService({pool,pepper:config.pepper});
+const verifyTeacher=config.ssoUrl?createSharedTeacherVerifier({url:config.ssoUrl,key:config.ssoKey}):null;
+const app=createApp({config,pool,service,verifyTeacher});
+const server=app.listen(config.port,'0.0.0.0',()=>console.log('SW Task 1 API ready'));
+server.requestTimeout=30000;server.headersTimeout=31000;
+for(const signal of ['SIGTERM','SIGINT'])process.on(signal,()=>{server.close(async()=>{await pool.end();process.exit(0);});setTimeout(()=>process.exit(1),10000).unref();});

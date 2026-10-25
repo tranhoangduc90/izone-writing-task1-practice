@@ -1,0 +1,46 @@
+name: sw-task1
+services:
+  db:
+    image: ${TASK1_POSTGRES_IMAGE:?Set the verified postgres image digest}
+    environment:
+      POSTGRES_USER: task1_owner
+      POSTGRES_DB: sw_task1
+      POSTGRES_PASSWORD: ${TASK1_OWNER_PASSWORD:?Set an independent owner password}
+    volumes: [task1-db:/var/lib/postgresql/data]
+    networks: [database]
+    mem_limit: 384m
+    cpus: 0.5
+    pids_limit: 128
+    restart: unless-stopped
+  api:
+    build: .
+    image: sw-task1:${TASK1_RELEASE:?Set a release id}
+    env_file: ./private/runtime.env
+    ports: [127.0.0.1:18928:8790]
+    networks: [database,egress]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+    restart: unless-stopped
+    volumes: [./private/sso-consumer.key:/run/secrets/task1-sso:ro]
+  worker:
+    image: sw-task1:${TASK1_RELEASE:?Set a release id}
+    command: [node,src/worker.mjs]
+    env_file: ./private/runtime.env
+    networks: [database,egress]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+    restart: unless-stopped
+    volumes: [./private/sso-consumer.key:/run/secrets/task1-sso:ro]
+networks:
+  database: {internal: true}
+  egress: {}
+volumes:
+  task1-db: {}

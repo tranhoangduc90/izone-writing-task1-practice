@@ -1,6 +1,6 @@
 # Chuẩn bị bản thử Task 1 riêng
 
-Không chạy hướng dẫn này lên VPS khi chưa có quyền cho môi trường đó. Gói hiện là local/candidate có thể kiểm và review.
+Chỉ chạy với quyền cho môi trường đích. Bản thử riêng ngày 25/10/2026 đã được triển khai theo yêu cầu Đức; xem [biên nhận và phạm vi](PREVIEW-20261025.md). Các bước chuyển lớp thật dưới đây vẫn chưa được thực hiện.
 
 ## Ranh giới và cách chạy
 

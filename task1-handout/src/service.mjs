@@ -3,11 +3,13 @@ import {createProvisionalStudentService} from '../vendor/provisional-service.js'
 import {createTeacherCommentService} from '../vendor/teacher-comment-service.js';
 import {validateFeedback,sha} from './grading.mjs';
 export {ApiError};
-export function createService({pool,pepper}){
+export function createService({pool,pepper,history=null}){
  const provisional=createProvisionalStudentService({pool,pepper});
  const core=createWritingPracticeService({pool,provisionalService:provisional});
  const comments=createTeacherCommentService({pool});
- return {...core,provisional,comments,
+ return {...core,provisional,history,comments:{...comments,async list(input){const h=history?await history():null;return h?.comments(input.sessionRef)||comments.list(input);}},
+  async sessionDetails(ref){const h=history?await history():null;return h?.details(ref)||core.sessionDetails(ref);},
+  async getAttempt(ref){const h=history?await history():null;return h?.attempt(ref)||core.getAttempt(ref);},
   async claimJobs(input){
    if(input.workerPool&&input.workerPool!=='task1')throw new ApiError(400,'WRONG_PRODUCT','Sai hàng chấm.');
    if(input.maxJobs>2)throw new ApiError(400,'CAPACITY_EXCEEDED','Tối đa hai lượt đồng thời.');

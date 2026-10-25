@@ -7,5 +7,7 @@ COPY vendor ./vendor
 COPY vendor-lock.json ./
 COPY tools ./tools
 COPY db ./db
+RUN find src vendor tools db -type d -exec chmod 755 {} + \
+ && find src vendor tools db -type f -exec chmod 644 {} +
 USER node
 CMD ["node","src/server.mjs"]

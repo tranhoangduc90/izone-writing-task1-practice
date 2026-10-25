@@ -3,6 +3,7 @@ import helmet from 'helmet';
 import {rateLimit,ipKeyGenerator} from 'express-rate-limit';
 import {z} from 'zod';
 import {ApiError} from './service.mjs';
+import {dashboard} from './dashboard.mjs';
 const uuid=z.uuid(),section=z.enum(['overview','outline','draft']);
 const snapshot=z.object({overview:z.string().max(20000),body1:z.string().max(20000),body2:z.string().max(20000),draft1:z.string().max(30000).default(''),draft2:z.string().max(30000).default('')}).strict();
 const save=snapshot.extend({baseVersion:z.number().int().nonnegative(),requestId:uuid,draft2Unlocked:z.boolean().optional()});
@@ -14,7 +15,8 @@ export function createApp({config,pool,service,verifyTeacher}){
   r.set('Cache-Control','no-store');const origin=q.get('Origin');
   if(origin&&!config.origins.has(origin))return r.status(403).json({ok:false,error:'ORIGIN_DENIED'});
   if(origin){r.set('Access-Control-Allow-Origin',origin);r.set('Access-Control-Allow-Credentials','true');r.vary('Origin');}
-  if(q.method==='OPTIONS')return r.set('Access-Control-Allow-Methods','GET,PUT,POST,OPTIONS').set('Access-Control-Allow-Headers','Content-Type').sendStatus(204);
+  if(q.method==='OPTIONS')return r.set('Access-Control-Allow-Methods','GET,PUT,POST,DELETE,OPTIONS').set('Access-Control-Allow-Headers','Content-Type,If-Match,If-None-Match,X-Izone-Csrf').sendStatus(204);
+  r.set('Access-Control-Expose-Headers','ETag,Retry-After');
   // Browser writes require an explicit allowed origin; server health/read calls may omit it.
   if(!['GET','HEAD'].includes(q.method)&&!origin)return r.status(403).json({ok:false,error:'ORIGIN_REQUIRED'});
   next();
@@ -23,6 +25,7 @@ export function createApp({config,pool,service,verifyTeacher}){
  app.use(express.json({limit:'128kb',strict:true}));
  const writes=rateLimit({windowMs:60000,limit:60,standardHeaders:'draft-8',legacyHeaders:false,keyGenerator:q=>q.params.ref||q.body?.studentRef||ipKeyGenerator(q.ip)});
  const teacher=(q,r,next)=>Promise.resolve().then(async()=>{
+  if(q.reviewer)return next();
   if(!verifyTeacher)throw new ApiError(503,'SSO_UNAVAILABLE','Chưa xác minh được phiên giảng viên.');
   const id=await verifyTeacher(q);
   const result=await pool.query('SELECT * FROM task1_private.teacher_grant WHERE email=$1 AND google_subject=$2 AND active',[id.email.toLowerCase(),id.sub]);
@@ -41,6 +44,14 @@ export function createApp({config,pool,service,verifyTeacher}){
   if(!result.rowCount)throw new ApiError(404,'THREAD_NOT_FOUND','Không tìm thấy trao đổi.');
   await allowSession(q,result.rows[0].ref);
  }
+ app.use((q,r,next)=>{
+  if(!service.history)return next();
+  void service.history().then(h=>{
+   const historical=h?.target(q);if(!historical)return next();
+   if(!['GET','HEAD'].includes(q.method))return r.status(403).json({ok:false,error:'HISTORY_READ_ONLY',message:'Bản sao bài cũ chỉ để đọc đối chiếu; dữ liệu gốc được giữ nguyên.'});
+   teacher(q,r,err=>{if(err)return next(err);void allowClass(q,historical.classRef).then(()=>next(),next);});
+  }).catch(next);
+ });
  app.get('/health',(_q,r)=>r.json({ok:true,productId:'sw-task1'}));
  app.get('/ready',safe(async(_q,r)=>{await pool.query('SELECT 1');r.json({ok:true,productId:'sw-task1'});}));
  app.get('/api/v1/activities/:slug/roster',safe(async(q,r)=>r.json({ok:true,...await service.getRoster(q.params.slug)})));
@@ -48,7 +59,7 @@ export function createApp({config,pool,service,verifyTeacher}){
   const input=parse(z.object({classRef:uuid,displayName:z.string().min(2).max(100),pin:z.string().regex(/^\d{4}$/),requestId:uuid,duplicateConfirmed:z.boolean().optional()}).strict(),q.body);
   r.status(201).json({ok:true,...await service.provisional.createStudent({activitySlug:q.params.slug,...input})});
  }));
- app.post('/api/v1/sessions',writes,safe(async(q,r)=>r.status(201).json({ok:true,session:await service.openSession(parse(z.object({activitySlug:z.string().min(2).max(80),classRef:uuid,studentRef:uuid,accessCode:z.string().regex(/^\d{4}$/).optional()}).strict(),q.body))})));
+ app.post('/api/v1/sessions',writes,safe(async(q,r)=>r.status(201).json({ok:true,session:await service.openSession(parse(z.object({activitySlug:z.string().min(2).max(80),classRef:uuid,studentRef:uuid,accessCode:z.string().regex(/^\d{4}$/).optional(),requestId:uuid.optional()}).strict(),q.body))})));
  app.get('/api/v1/sessions/:ref',safe(async(q,r)=>r.json({ok:true,session:await service.sessionDetails(parse(uuid,q.params.ref))})));
  app.put('/api/v1/sessions/:ref/draft',writes,safe(async(q,r)=>r.json({ok:true,session:await service.saveDraft({sessionRef:parse(uuid,q.params.ref),...parse(save,q.body)})})));
  app.post('/api/v1/sessions/:ref/checks',writes,safe(async(q,r)=>r.status(202).json({ok:true,attempt:await service.submitCheck({sessionRef:parse(uuid,q.params.ref),...parse(z.object({section,requestId:uuid,snapshot}).strict(),q.body)})})));
@@ -62,10 +73,11 @@ export function createApp({config,pool,service,verifyTeacher}){
   const classes=await pool.query("SELECT public_id AS \"classRef\",class_name_snapshot AS \"className\" FROM writing_practice.activity_class_scope WHERE status='active' AND ($1 OR public_id=ANY($2::uuid[]))",[q.reviewer.canManage,q.reviewer.class_refs]);
   r.json({ok:true,reviewer:{role:q.reviewer.role,canManage:q.reviewer.canManage},classes:classes.rows});
  }));
+ app.get('/api/v1/auth/session',teacher,safe(async(q,r)=>r.json({ok:true,reviewer:{email:q.reviewer.email,role:q.reviewer.role,canManage:q.reviewer.canManage}})));
+ app.get('/api/v1/admin/activities/:slug/provisional-students',teacher,safe(async(q,r)=>r.json({ok:true,students:[]})));
  app.get('/api/v1/admin/live/activities/:slug',teacher,safe(async(q,r)=>{
   const classRef=q.query.classRef?parse(uuid,q.query.classRef):null;if(classRef)await allowClass(q,classRef);
-  const data=await pool.query(`SELECT s.public_id AS "sessionRef",c.public_id AS "classRef",c.class_name_snapshot AS "className",s.student_public_id AS "studentRef",r.display_alias AS "displayName",s.updated_at AS "updatedAt" FROM writing_practice.activity_session s JOIN writing_practice.activity a ON a.id=s.activity_id JOIN writing_practice.activity_class_scope c ON c.id=s.activity_class_id JOIN writing_practice.activity_roster r ON r.activity_class_id=c.id AND r.student_public_id=s.student_public_id WHERE a.slug=$1 AND ($2::uuid IS NULL OR c.public_id=$2) AND ($3 OR c.public_id=ANY($4::uuid[]))`,[q.params.slug,classRef,q.reviewer.canManage,q.reviewer.class_refs]);
-  r.json({ok:true,students:data.rows,permissions:{canManage:q.reviewer.canManage}});
+  r.json({ok:true,...await dashboard({pool,service,slug:q.params.slug,classRef,reviewer:q.reviewer})});
  }));
  app.get('/api/v1/admin/live/sessions/:ref',teacher,safe(async(q,r)=>r.json({ok:true,session:await allowSession(q,parse(uuid,q.params.ref))})));
  app.get('/api/v1/admin/live/sessions/:ref/teacher-comments',teacher,safe(async(q,r)=>{const ref=parse(uuid,q.params.ref);await allowSession(q,ref);r.json({ok:true,...await service.comments.list({sessionRef:ref})});}));

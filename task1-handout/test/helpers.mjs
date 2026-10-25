@@ -12,6 +12,7 @@ export function adapt(db){
  return {query:async(sql,args)=>{const unlock=await lock();try{return await result(sql,args);}finally{unlock();}},connect:async()=>{const release=await lock();return {query:result,release};}};
 }
 export async function setup(t){
+ globalThis.gc?.(); // Release previous closed WASM databases when the runner exposes GC.
  const db=new PGlite();if(t)t.after(()=>db.close());
  await db.exec(await fs.readFile(new URL('../db/001-initial.sql',import.meta.url),'utf8'));
  const pool=adapt(db),service=createService({pool,pepper:'test-pepper-'.repeat(4)});

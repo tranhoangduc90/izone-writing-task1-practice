@@ -12,5 +12,7 @@ export function loadConfig(env=process.env){
  if(ai.origin!=='https://ducizone.ddns.net'||ai.pathname!=='/dispatcher/webhook/phan_phoi_31_pro'||ai.search||ai.username||ai.password)throw Error('TASK1_AI_TARGET_REQUIRED');
  const origins=new Set(e.TASK1_ALLOWED_ORIGINS.split(',').map(x=>new URL(x.trim()).origin));
  if(e.NODE_ENV==='production'&&[...origins].some(x=>!x.startsWith('https://')))throw Error('HTTPS_ORIGIN_REQUIRED');
- return {productId:PRODUCT,nodeEnv:e.NODE_ENV,port:e.PORT,databaseUrl:e.TASK1_DATABASE_URL,dbPoolMax:4,pepper:e.TASK1_PIN_PEPPER,origins,aiUrl:e.TASK1_AI_URL,ssoUrl:e.TASK1_SSO_URL,ssoKey:e.TASK1_SSO_KEY_FILE?fs.readFileSync(e.TASK1_SSO_KEY_FILE,'utf8').trim():null};
+ if(env.TASK1_LEGACY_BASE&&new URL(env.TASK1_LEGACY_BASE).href!=='http://writing-legacy:8790/')throw Error('TASK1_LEGACY_TARGET_REQUIRED');
+ if(env.TASK1_AUTHORITY_DATABASE_URL){const u=new URL(env.TASK1_AUTHORITY_DATABASE_URL);if(u.username!=='sw_task1_reader'||u.pathname!=='/mapping_db'||u.hostname!=='task1-authority-source')throw Error('TASK1_AUTHORITY_TARGET_REQUIRED');}
+ return {productId:PRODUCT,nodeEnv:e.NODE_ENV,port:e.PORT,databaseUrl:e.TASK1_DATABASE_URL,dbPoolMax:4,pepper:e.TASK1_PIN_PEPPER,origins,aiUrl:e.TASK1_AI_URL,ssoUrl:e.TASK1_SSO_URL,ssoKey:e.TASK1_SSO_KEY_FILE?fs.readFileSync(e.TASK1_SSO_KEY_FILE,'utf8').trim():null,legacyBase:env.TASK1_LEGACY_BASE,authorityUrl:env.TASK1_AUTHORITY_DATABASE_URL};
 }

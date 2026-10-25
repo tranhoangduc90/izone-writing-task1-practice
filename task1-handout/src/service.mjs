@@ -8,6 +8,10 @@ export function createService({pool,pepper,history=null}){
  const core=createWritingPracticeService({pool,provisionalService:provisional});
  const comments=createTeacherCommentService({pool});
  return {...core,provisional,history,comments:{...comments,async list(input){const h=history?await history():null;return h?.comments(input.sessionRef)||comments.list(input);}},
+  async openSession(input){
+   const scope=await pool.query("SELECT 1 FROM writing_practice.activity_class_scope c JOIN writing_practice.activity a ON a.id=c.activity_id WHERE a.slug=$1 AND c.public_id=$2 AND a.status='active' AND c.status='active' AND c.end_date>=CURRENT_DATE",[input.activitySlug,input.classRef]);
+   if(!scope.rowCount)throw new ApiError(404,'SESSION_NOT_ALLOWED','Lớp hoặc bài không còn mở.');return core.openSession(input);
+  },
   async sessionDetails(ref){const h=history?await history():null;return h?.details(ref)||core.sessionDetails(ref);},
   async getAttempt(ref){const h=history?await history():null;return h?.attempt(ref)||core.getAttempt(ref);},
   async claimJobs(input){

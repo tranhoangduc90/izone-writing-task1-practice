@@ -1,6 +1,6 @@
-# Chuẩn bị bản thử Task 1 riêng
+# Vận hành backend Task 1 riêng
 
-Chỉ chạy với quyền cho môi trường đích. Bản thử riêng ngày 25/10/2026 đã được triển khai theo yêu cầu Đức; xem [biên nhận và phạm vi](PREVIEW-20261025.md). Các bước chuyển lớp thật dưới đây vẫn chưa được thực hiện.
+Chỉ chạy với quyền cho môi trường đích. Sáu bài Task 1 lớp Speaking Writing chuyên sâu đã chuyển sang backend riêng ngày 25/10/2026 theo yêu cầu Đức, giữ nguyên link. Xem [biên nhận production](PRODUCTION-20261025.md) trước mọi thao tác; phần dưới mô tả quy trình dựng mới và chuyển đổi đã thực hiện, không phải lệnh cần chạy lại. Bản [preview](PREVIEW-20261025.md) vẫn là môi trường riêng.
 
 ## Ranh giới và cách chạy
 

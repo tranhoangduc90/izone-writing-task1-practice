@@ -1,0 +1,31 @@
+{
+  "revision": "5e09afa6b3467cf88d4a9c9e5a7e72ecea4a6fb8",
+  "source": "backend/src",
+  "files": {
+    "db.js": {
+      "upstream_sha256": "7fc811497a1433bda0557f9874fa4912317c61865009f9a377f421348bc2ff8c",
+      "candidate_sha256": "7fc811497a1433bda0557f9874fa4912317c61865009f9a377f421348bc2ff8c"
+    },
+    "service.js": {
+      "upstream_sha256": "3945d5e9f0ee76ac3f45cacaeade5844cdc95a74edaa2ebd1b64e301e1543422",
+      "candidate_sha256": "57ccd538278ebac044412bb3bb444edda3ffea799f0071ad84b073398c4961ed"
+    },
+    "provisional-service.js": {
+      "upstream_sha256": "71a2ed2ee16ef699757c7f1e5edc28ce1d667b8abd8cd34f4038482f20f5525d",
+      "candidate_sha256": "71a2ed2ee16ef699757c7f1e5edc28ce1d667b8abd8cd34f4038482f20f5525d"
+    },
+    "teacher-class-access-sql.js": {
+      "upstream_sha256": "b6cbdde60a7a6a196140390e11a37968855a489c1743689e692ad20640b00479",
+      "candidate_sha256": "b6cbdde60a7a6a196140390e11a37968855a489c1743689e692ad20640b00479"
+    },
+    "teacher-comment-service.js": {
+      "upstream_sha256": "f4c5587768b9b68f9e5ad50ddb288ebb6d6b257096da6e31322ec7e2d19c2e88",
+      "candidate_sha256": "f4c5587768b9b68f9e5ad50ddb288ebb6d6b257096da6e31322ec7e2d19c2e88"
+    },
+    "teacher-sso/consumer.js": {
+      "upstream_sha256": "50d44a2ca1aaa883dabf967c3d866a377ac99f0115320aa7b855a1188ab79992",
+      "candidate_sha256": "50d44a2ca1aaa883dabf967c3d866a377ac99f0115320aa7b855a1188ab79992"
+    }
+  },
+  "hash_normalization": "utf8_lf"
+}

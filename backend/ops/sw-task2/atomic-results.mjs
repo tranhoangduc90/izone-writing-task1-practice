@@ -3,12 +3,15 @@ import {ApiError} from '../../src/service.js';
 import {createLmsResultService,normalizeLmsResult} from '../../src/lms-result-service.js';
 const engine='sw-task2-writing56-67-preview-20261025.1';
 const base='https://ducizone.ddns.net/sw-task2-preview-api/results';
+const historicalEngine='shops-writing56-67-production-20261024.1';
+const historicalBase='https://ducizone.ddns.net/shops-writing-api/results';
 const assets='https://tranhoangduc90.github.io/izone-ai-team-pages/sw-task2-preview-20261025';
 export function createShopsResults({pool,fetchImpl=fetch}){
  const legacy=createLmsResultService({pool,fetchImpl});
  async function snapshot(row){
   const a=row.artifacts,id=a.writerGroupId,v=a.writerVersion;
-  if(a.gradingEngine!==engine||a.readbackOk!==true||!/^[a-f0-9]{48}$/.test(id||'')||!Number.isSafeInteger(v)||v<1||a.lmsUrl!==`${base}/shared/writing-essays/${id}/view?v=${v}`)throw new ApiError(502,'SHOPS_RESULT_BINDING','Kết quả chưa được đối chiếu đầy đủ.');
+  const pinnedBase=a.gradingEngine===engine?base:a.gradingEngine===historicalEngine?historicalBase:null;
+  if(!pinnedBase||a.readbackOk!==true||!/^[a-f0-9]{48}$/.test(id||'')||!Number.isSafeInteger(v)||v<1||a.lmsUrl!==`${pinnedBase}/shared/writing-essays/${id}/view?v=${v}`)throw new ApiError(502,'SHOPS_RESULT_BINDING','Kết quả chưa được đối chiếu đầy đủ.');
   const response=await fetchImpl(`http://sw-task2-preview-writer:8780/writing-data/${id}/v${String(v).padStart(6,'0')}.json`,{signal:AbortSignal.timeout(8000),redirect:'error'});
   if(!response.ok||Number(response.headers.get('content-length'))>4*1024*1024)throw new ApiError(502,'SHOPS_RESULT_UNAVAILABLE','Tạm thời chưa đọc được kết quả.');
   const bytes=await response.arrayBuffer();if(bytes.byteLength>4*1024*1024)throw new ApiError(502,'SHOPS_RESULT_TOO_LARGE','Kết quả vượt giới hạn.');
@@ -22,13 +25,13 @@ export function createShopsResults({pool,fetchImpl=fetch}){
    FROM writing_practice.activity_session s JOIN writing_practice.check_attempt attempt ON attempt.session_id=s.id
    WHERE s.public_id=$1 AND attempt.section_key='draft' AND attempt.status='completed' AND attempt.result_status='passed'
    ORDER BY attempt.completed_at DESC NULLS LAST,attempt.id DESC LIMIT 1`,[sessionRef]);
-  if(result.rows[0]?.artifacts?.gradingEngine===engine)return snapshot(result.rows[0]);
+  if([engine,historicalEngine].includes(result.rows[0]?.artifacts?.gradingEngine))return snapshot(result.rows[0]);
   return legacy.getDraftResult({sessionRef});
  }
  async function byCapability(id,version){
   if(!/^[a-f0-9]{48}$/.test(id)||!Number.isSafeInteger(version)||version<1)throw new ApiError(404,'NOT_FOUND','Không tìm thấy kết quả.');
   const result=await pool.query(`SELECT result_artifacts AS artifacts,completed_at AS "updatedAt" FROM writing_practice.check_attempt
-   WHERE status='completed' AND result_status='passed' AND result_artifacts->>'gradingEngine'=$1 AND result_artifacts->>'writerGroupId'=$2 AND result_artifacts->>'writerVersion'=$3 LIMIT 1`,[engine,id,String(version)]);
+   WHERE status='completed' AND result_status='passed' AND result_artifacts->>'gradingEngine'=ANY($1::text[]) AND result_artifacts->>'writerGroupId'=$2 AND result_artifacts->>'writerVersion'=$3 LIMIT 1`,[[engine,historicalEngine],id,String(version)]);
   if(!result.rowCount)throw new ApiError(404,'NOT_FOUND','Không tìm thấy kết quả.');return snapshot(result.rows[0]);
  }
  return {getDraftResult,byCapability};

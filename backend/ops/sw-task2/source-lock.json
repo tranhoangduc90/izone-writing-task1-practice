@@ -1,0 +1,43 @@
+{
+  "baseline": [
+    {
+      "path": "image/src/service.js",
+      "sha256": "fc9c1813948b3c8fcc4d07a6bada0462cab6e4a1dcbdbdd386db21cc4ab6be68"
+    },
+    {
+      "path": "image/src/lesson9-service.js",
+      "sha256": "7432d8f83b6ee6129d7009781ebcea3f0b2a2a134518b33bbed02f0b8affbc4d"
+    },
+    {
+      "path": "image/src/lesson9-vocabulary.js",
+      "sha256": "cb17546ad21b68d4484e0ee10a165eac4a284cc78bf7859a63b8625e7def89d4"
+    },
+    {
+      "path": "image/src/teacher-class-access-sql.js",
+      "sha256": "f556c462a339569bfea4e03c353e7204b271d0d0ccacaa3b26d0766d80d9757c"
+    },
+    {
+      "path": "image/ops/shops-production/server.mjs",
+      "sha256": "f172cdfb2a43fbf4634e43bb26d540046271cdcbc6c188916ecdfa63f8d3d53a"
+    },
+    {
+      "path": "image/ops/shops-production/atomic-results.mjs",
+      "sha256": "229da86909b6d65823b3e4bc3002523105afc5dd930f2d21062c97f39bf5c5a4"
+    },
+    {
+      "path": "writer-image/server.mjs",
+      "sha256": "3ceb18bb65e54da3bc1a821fab73909a54af5e75fa6208c3f5c589b5b4e9f563"
+    },
+    {
+      "path": "worker.py",
+      "sha256": "3c78d99c63e7e05af9250b5f8532af93a08d6581e89a8fea389ababe8d6b5e30"
+    }
+  ],
+  "newRuntimeDirectory": "C:\\Users\\ADMIN\\Documents\\Codex\\sw-task2-worktrees\\backend\\backend\\ops\\sw-task2",
+  "queueDeadlineMinutes": 45,
+  "draftLeaseSeconds": 1200,
+  "newJobContext": [
+    "activitySlug"
+  ],
+  "productionRuntimeTouched": false
+}

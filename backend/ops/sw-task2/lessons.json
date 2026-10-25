@@ -1,0 +1,162 @@
+{
+  "writing-task2-public-health-ban": {
+    "slug": "writing-task2-public-health-ban",
+    "number": 1,
+    "title": "Cấm bán thực phẩm, đồ uống có hại",
+    "shortTitle": "Shops",
+    "questionType": "agree-disagree",
+    "statement": "Shops should be banned from selling any food or drink that has been scientifically proven to be damaging to public health. Do you agree or disagree?",
+    "contentVersion": "2026-08-20.1",
+    "uiVersion": "sw-task2-lesson9-v1",
+    "guide": {
+      "label": "Agree or disagree",
+      "steps": [
+        "Làm rõ quan điểm của thân bài, giữ đúng phạm vi và mức độ so sánh trong đề.",
+        "Chọn hai ý riêng cùng hỗ trợ thông điệp; phát triển mỗi ý qua A → X → B.",
+        "X giải thích mối nối, B chốt điều muốn chứng minh; không chỉ lặp lại Idea."
+      ],
+      "topic": "Hai idea cần cùng hỗ trợ thông điệp của thân bài về vấn đề được hỏi."
+    },
+    "previewAvailable": true
+  },
+  "writing-task2-public-health-spending": {
+    "slug": "writing-task2-public-health-spending",
+    "number": 2,
+    "title": "Ngân sách y tế: phòng bệnh hay điều trị",
+    "shortTitle": "Ngân sách y tế",
+    "questionType": "agree-disagree",
+    "statement": "It is more important to spend public money promoting a healthy lifestyle to prevent illness than to spend it on treating people who are already ill. To what extent do you agree or disagree?",
+    "contentVersion": "2026-09-04.1",
+    "uiVersion": "sw-task2-lesson9-v1",
+    "guide": {
+      "label": "Agree or disagree",
+      "steps": [
+        "Làm rõ quan điểm của thân bài, giữ đúng phạm vi và mức độ so sánh trong đề.",
+        "Chọn hai ý riêng cùng hỗ trợ thông điệp; phát triển mỗi ý qua A → X → B.",
+        "X giải thích mối nối, B chốt điều muốn chứng minh; không chỉ lặp lại Idea."
+      ],
+      "topic": "Hai idea cần cùng hỗ trợ thông điệp của thân bài về vấn đề được hỏi."
+    },
+    "previewAvailable": true
+  },
+  "writing-task2-live-performances-at-home": {
+    "slug": "writing-task2-live-performances-at-home",
+    "number": 3,
+    "title": "Biểu diễn trực tiếp hay xem tại nhà",
+    "shortTitle": "Biểu diễn trực tiếp",
+    "questionType": "agree-disagree",
+    "statement": "In today’s world, it is no longer necessary to attend live performances such as shows or concerts, as watching them on television or on a computer at home is considered a better option. Do you agree or disagree with this opinion?",
+    "contentVersion": "2026-09-13.1",
+    "uiVersion": "sw-task2-lesson9-v1",
+    "guide": {
+      "label": "Agree or disagree",
+      "steps": [
+        "Làm rõ quan điểm của thân bài, giữ đúng phạm vi và mức độ so sánh trong đề.",
+        "Chọn hai ý riêng cùng hỗ trợ thông điệp; phát triển mỗi ý qua A → X → B.",
+        "X giải thích mối nối, B chốt điều muốn chứng minh; không chỉ lặp lại Idea."
+      ],
+      "topic": "Hai idea cần cùng hỗ trợ thông điệp của thân bài về vấn đề được hỏi."
+    },
+    "previewAvailable": false
+  },
+  "writing-task2-crime-prevention-responsibility": {
+    "slug": "writing-task2-crime-prevention-responsibility",
+    "number": 4,
+    "title": "Trách nhiệm phòng chống tội phạm",
+    "shortTitle": "Phòng chống tội phạm",
+    "questionType": "discussion",
+    "statement": "Some people think that the government should be responsible for crime prevention, while others believe that it is the responsibility of the individual to protect themselves. Discuss both views and give your opinion.",
+    "contentVersion": "2026-09-13.1",
+    "uiVersion": "sw-task2-lesson9-v1",
+    "guide": {
+      "label": "Discuss both views",
+      "steps": [
+        "Lập kế hoạch thể hiện cả hai quan điểm được hỏi và quan điểm cá nhân.",
+        "Chọn rõ vai trò của thân bài đang luyện; hai Idea cùng phát triển quan điểm đó.",
+        "Giải thích A → X → B và kiểm liên hệ với quan điểm được hỏi."
+      ],
+      "topic": "Hai idea cần phát triển rõ quan điểm mà thân bài này đảm nhiệm."
+    },
+    "previewAvailable": false
+  },
+  "writing-task2-living-alone-development": {
+    "slug": "writing-task2-living-alone-development",
+    "number": 9,
+    "title": "Sống một mình: tích cực hay tiêu cực",
+    "shortTitle": "Sống một mình",
+    "questionType": "development",
+    "statement": "Nowadays, more and more people are choosing to live alone. Is this a positive or negative development?",
+    "contentVersion": "2026-08-21.1",
+    "uiVersion": "sw-task2-lesson9-v1",
+    "guide": {
+      "label": "Positive or negative development",
+      "steps": [
+        "Xác định đánh giá của bạn về xu hướng trong đề.",
+        "Hai Idea cần đưa ra lý do hoặc hệ quả hỗ trợ đánh giá của thân bài.",
+        "Nối A → X → B để giải thích vì sao xu hướng có ý nghĩa tích cực hoặc tiêu cực."
+      ],
+      "topic": "Hai idea cần hỗ trợ đánh giá về xu hướng, không chỉ liệt kê hai mặt."
+    },
+    "previewAvailable": false
+  },
+  "writing-task2-urban-crowding-traffic-congestion": {
+    "slug": "writing-task2-urban-crowding-traffic-congestion",
+    "number": 10,
+    "title": "Đô thị đông đúc và ùn tắc giao thông",
+    "shortTitle": "Ùn tắc giao thông",
+    "questionType": "problems-solutions",
+    "statement": "Many cities are becoming increasingly crowded, and traffic congestion is getting worse. What problems does this cause, and what measures can be taken to solve them?",
+    "contentVersion": "2026-09-04.1",
+    "uiVersion": "sw-task2-lesson9-v1",
+    "guide": {
+      "label": "Problems and solutions",
+      "steps": [
+        "Lập kế hoạch phân biệt vấn đề/hệ quả và biện pháp giải quyết.",
+        "Chọn thân bài nêu vấn đề hoặc giải pháp; hai Idea cùng phục vụ vai trò đó.",
+        "Giải thích biện pháp tác động tới đúng vấn đề, với cầu nối A → X → B rõ ràng."
+      ],
+      "topic": "Hai idea cần đúng vai trò vấn đề hoặc giải pháp của thân bài đã chọn."
+    },
+    "previewAvailable": false
+  },
+  "writing-task2-economic-development-environment": {
+    "slug": "writing-task2-economic-development-environment",
+    "number": 11,
+    "title": "Phát triển kinh tế hay bảo vệ môi trường",
+    "shortTitle": "Kinh tế và môi trường",
+    "questionType": "discussion",
+    "statement": "Some people believe economic development should be the main priority for governments, while others think protecting the natural environment is more important. Discuss both views and give your own opinion.",
+    "contentVersion": "2026-09-13.1",
+    "uiVersion": "sw-task2-lesson9-v1",
+    "guide": {
+      "label": "Discuss both views",
+      "steps": [
+        "Lập kế hoạch thể hiện cả hai quan điểm được hỏi và quan điểm cá nhân.",
+        "Chọn rõ vai trò của thân bài đang luyện; hai Idea cùng phát triển quan điểm đó.",
+        "Giải thích A → X → B và kiểm liên hệ với quan điểm được hỏi."
+      ],
+      "topic": "Hai idea cần phát triển rõ quan điểm mà thân bài này đảm nhiệm."
+    },
+    "previewAvailable": false
+  },
+  "writing-task2-english-medium-instruction": {
+    "slug": "writing-task2-english-medium-instruction",
+    "number": 12,
+    "title": "Tiếng Anh làm ngôn ngữ giảng dạy",
+    "shortTitle": "Giảng dạy bằng tiếng Anh",
+    "questionType": "outweigh",
+    "statement": "In many countries, English is used as the main language of instruction in schools and universities. Do the advantages of this policy outweigh the disadvantages?",
+    "contentVersion": "2026-09-19.1",
+    "uiVersion": "sw-task2-lesson9-v1",
+    "guide": {
+      "label": "Advantages outweigh disadvantages",
+      "steps": [
+        "Lập kế hoạch xem xét hai mặt và nêu đánh giá về mức độ.",
+        "Chọn hai Idea có vai trò rõ trong phép so sánh, tránh chỉ kể ưu và nhược.",
+        "Giải thích A → X → B để làm rõ ý nghĩa, phạm vi hoặc mức độ tác động."
+      ],
+      "topic": "Hai idea cần hỗ trợ đánh giá và phép so sánh mức độ của bài."
+    },
+    "previewAvailable": false
+  }
+}

@@ -1,0 +1,31 @@
+# SW Task 2 — bản thử ngày 25/10/2026
+
+Phạm vi được duyệt: nền nhiều bài và toàn tuyến buổi 2 trên môi trường thử. Không mở lớp thật, không đổi đường ghi của Shops hay Writing 56–67.
+
+## Runtime và định danh
+
+- VPS root `/opt/izone-sw-task2-preview-20261025`; API port loopback `18935`.
+- HTTPS `/sw-task2-preview-api/`; internal grading endpoints bị chặn ở public Nginx.
+- Database `sw_task2_preview_20261025`, role `sw_api`; server dừng nếu database khác. DB không public port.
+- Container API/DB/writer và results mount riêng; service `sw-task2-preview-worker.service`, hai việc đồng thời cho cả môi trường thử. Worker sống độc lập máy Windows.
+- Hàng chờ 45 phút; Draft lease 1.200 giây; recover 30 giây. Hạn hàng chờ và lease được kiểm riêng.
+- Cấu hình tám đề trong `lessons.json`; chỉ Shops và `writing-task2-public-health-spending` cho phép preview. Không fallback đề hoặc registry khi khóa không hợp lệ.
+- Workflow parent `o1loAzKOWq3OIJbC`, Draft child `xvqBcpFXJRDw33DE`, error `mIpNjaCkiXvuiMio`. Redis registry `ielts:writing:sw-task2-preview:prompt_registry:20261025.1`.
+- Dùng chung AI gateway/quota của sản phẩm SW; operation key, DB, callback credentials, writer, result capabilities và workflow riêng. Không gọi Lark để chấm/ghi kết quả.
+- Google dùng nguồn phiên SW hiện có qua broker; xác minh identity phía máy chủ rồi kiểm tài khoản/quyền trong DB thử. Không thay cấu hình broker/production. Đây là phần dùng chung danh tính, không phải dùng chung dữ liệu bài với Writing 56–67.
+
+## Dữ liệu và thử nghiệm
+
+Lớp ghi thử `SW-THU-A/B`; mỗi lớp có sáu hồ sơ giả. Bản sao lịch sử Shops/buổi 2 chỉ giảng viên đúng quyền được đọc và mọi mutation bị chặn. Bản nguồn không bị thay đổi. Giữ UUID công khai, ánh xạ tất cả ID nội bộ/FK; đã thử collision ID 14. Đối chiếu trường dữ liệu trước khi áp metadata UI mới, giữ NULL, timestamp, snapshot và feedback.
+
+`preview-contract.sql` chỉ áp vào DB thử, sửa bất tương thích CHECK constraint khi mã ghi `SHOPS_GRADING_TIMEOUT`. Chưa áp bản vá này vào Shops chính thức.
+
+`runtime-regression.test.mjs` và `vocabulary.test.mjs`: bảy ca không gọi AI. Các script `native-*` gọi AI thật trên hồ sơ giả; `protocol-tests.py` dùng callback giả trên API/DB thật. Không coi callback giả là kiểm AI thật. Các script vận hành không dành để chạy mù trên môi trường khác; đọc guard/điều kiện có sẵn trước khi dùng.
+
+## Source và bàn giao
+
+Đã ghim baseline thực chạy ngày 24/10 trong `source-lock.json`. Phần runtime riêng nằm trong module này; import phần chung đã được kiểm từ image nguồn. Docker build preview dùng Node image ghim và mã nguồn baseline, không kế thừa image ứng dụng đang chạy. `worker.py` và unit là bản đã đọc lại từ VPS. Exact workflow JSON, registry, migration và fixture receipts giữ riêng trong thư mục công việc của Đức, không chứa trong public Pages.
+
+Báo cáo và evidence tại `C:/Users/ADMIN/Documents/Codex/sw-task2-expansion-plan-20261025/`. Backend chỉ commit vào branch riêng; chưa push/merge main. Pages preview đã phát hành qua PR 275 và 278; thư viện/lớp thật không đổi. Workflow tạm giữ để Đức kiểm, mốc rà 01/11/2026, chưa tự xóa hay tạo lịch dọn.
+
+Chưa phải gói chuyển production: tải 24/47 người, chuyển nháp thiết bị và đổi thư viện/đường vào cũ theo từng activity thuộc đợt diễn tập/phát hành sau. Chỉ chuyển thật sau khi Đức chốt bản thử và phạm vi lớp.

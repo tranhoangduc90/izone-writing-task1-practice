@@ -8,7 +8,8 @@ test('timeline retains the submitted five fields after a newer draft is saved',a
  const first={...x.snapshot,overview:'Bản đã gửi, không phải bản đang viết'};
  const sent=await x.service.submitCheck({sessionRef:x.sessionRef,section:'overview',snapshot:first,requestId:randomUUID()});
  const saved=await x.service.sessionDetails(x.sessionRef);
- await x.service.saveDraft({sessionRef:x.sessionRef,baseVersion:saved.draftVersion,requestId:randomUUID(),...x.snapshot,overview:'Nháp mới sau khi gửi'});
+ const saveResponse=await x.service.saveDraft({sessionRef:x.sessionRef,baseVersion:saved.draftVersion,requestId:randomUUID(),...x.snapshot,overview:'Nháp mới sau khi gửi'});
+ assert.deepEqual(saveResponse.comments.find(c=>c.attemptRef===sent.attemptRef).snapshot,first);
  const after=await x.service.sessionDetails(x.sessionRef);
  assert.equal(after.overview,'Nháp mới sau khi gửi');
  const feedback=after.comments.find(c=>c.attemptRef===sent.attemptRef);

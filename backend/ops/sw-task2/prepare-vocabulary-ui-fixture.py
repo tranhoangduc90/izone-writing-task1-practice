@@ -1,0 +1,11 @@
+from pathlib import Path
+import json,subprocess,urllib.request
+root=Path('/opt/izone-sw-task2-preview-20261025');f=json.loads((root/'fixtures.private.json').read_text());native=json.loads((root/'native-e2e.private.json').read_text())
+target=next(c for c in f['classes'] if c['activitySlug'].endswith('health-spending') and c['className']=='SW-THU-B')
+q=urllib.request.Request('http://127.0.0.1:18935/api/v1/lesson9/sessions',data=json.dumps({'activitySlug':target['activitySlug'],'classRef':target['classRef'],'studentRef':target['students'][3]}).encode(),headers={'Content-Type':'application/json','Origin':'https://tranhoangduc90.github.io','X-Izone-Csrf':'1'})
+with urllib.request.urlopen(q,timeout=20) as r:s=json.load(r)['session']
+def lit(v):return "'"+str(v).replace("'","''")+"'"
+source=lit(native['sessionRef']);dest=lit(s['sessionRef'])
+sql="BEGIN; DO $$ BEGIN IF (SELECT count(*) FROM writing_practice.activity_session s JOIN writing_practice.sw_preview_scope p ON p.scope_id=s.activity_class_id AND p.kind='fixture' WHERE s.public_id IN ("+source+","+dest+"))<>2 THEN RAISE EXCEPTION 'Fixture isolation mismatch'; END IF; END $$; UPDATE writing_practice.activity_session target SET response_data=(SELECT response_data||'{\"draft1\":\"\",\"draft2\":\"\"}'::jsonb FROM writing_practice.activity_session WHERE public_id="+source+") WHERE target.public_id="+dest+"; UPDATE writing_practice.session_section SET locked=(section_key IN ('topic_sentence','supporting_idea_1')) WHERE session_id=(SELECT id FROM writing_practice.activity_session WHERE public_id="+dest+"); UPDATE writing_practice.lesson9_session_state SET data='{\"idea2Opened\":true,\"draft2Open\":false,\"fixtureSetup\":true}'::jsonb WHERE session_id=(SELECT id FROM writing_practice.activity_session WHERE public_id="+dest+"); COMMIT;"
+p=subprocess.run(['docker','exec','-i','sw-task2-preview-db','psql','-U','sw_owner','-d','sw_task2_preview_20261025','-qAt','-v','ON_ERROR_STOP=1'],input=sql,text=True,capture_output=True);assert p.returncode==0,p.stderr
+(root/'vocabulary-ui-fixture.json').write_text(json.dumps({'sessionRef':s['sessionRef'],'fixtureOnly':True,'nativeTestSections':['supporting_idea_2','vocabulary']}));print(json.dumps({'prepared':True,'className':'SW-THU-B','studentNumber':4,'nativeCheckPending':True}))

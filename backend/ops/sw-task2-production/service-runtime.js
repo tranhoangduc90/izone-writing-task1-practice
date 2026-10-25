@@ -1,0 +1,397 @@
+import crypto from 'node:crypto';
+import { withTransaction } from '../../src/db.js';
+
+import {ApiError} from '../../src/service.js';
+export {ApiError};
+const sections = ['overview', 'outline', 'draft'];
+const hash = value => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const meaningfulText = value => String(value ?? '').replace(/[\s\u200B-\u200D\u2060\uFEFF]/gu, '');
+const draftLeaseSeconds = 1200;
+function normalizeLmsUrl(value) {
+  if (typeof value !== 'string' || value.length > 2048) return null;
+  try {
+    const url = new URL(value);
+    // Giữ link LMS cũ; viewer mới chỉ nhận đúng trang edit với mã 48 ký tự hex.
+    // Host, path, query hoặc credential không đúng bị chặn trước khi ghi kết quả.
+    const legacy = url.protocol === 'https:'
+      && url.hostname.toLowerCase() === 'practice.izone.edu.vn'
+      && url.pathname.startsWith('/shared/writing-essays/');
+    const viewer = url.origin === 'https://ducizone.ddns.net'
+      && !url.username && !url.password && !url.search && !url.hash
+      && /^\/writing\/shared\/writing-essays\/[a-f0-9]{48}\/edit$/.test(url.pathname);
+    const shops = url.origin === 'https://ducizone.ddns.net'
+      && !url.username && !url.password && !url.hash
+      && /^\/shops-writing-api\/results\/shared\/writing-essays\/[a-f0-9]{48}\/view$/.test(url.pathname)
+      && /^\?v=[1-9]\d{0,5}$/.test(url.search);
+    return legacy || viewer || shops ? url.href : null;
+  } catch { return null; }
+}
+
+export function createWritingPracticeService({ pool, provisionalService = null }) {
+  const pendingRosters = new Map();
+  async function getRoster(slug) {
+    // Chỉ gộp các lượt cùng bài đang chờ; kết quả/lỗi không được giữ sang yêu cầu sau.
+    if (pendingRosters.has(slug)) return pendingRosters.get(slug);
+    const pending = readRoster(slug);
+    pendingRosters.set(slug, pending);
+    try { return await pending; }
+    finally { pendingRosters.delete(slug); }
+  }
+  async function readRoster(slug) {
+    const activity = await pool.query(`SELECT id, slug, title FROM writing_practice.activity WHERE slug = $1 AND status = 'active'`, [slug]);
+    if (!activity.rowCount) throw new ApiError(404, 'ACTIVITY_NOT_FOUND', 'Hoạt động chưa được mở.');
+    const rows = await pool.query(`SELECT class.public_id AS class_ref, class.class_name_snapshot, roster.student_public_id AS student_ref,
+      roster.display_name, roster.display_alias, (provisional.status='pending') AS provisional,
+      (provisional.status='pending') AS requires_access_code FROM writing_practice.activity_class_scope class
+      LEFT JOIN writing_practice.activity_roster roster ON roster.activity_class_id = class.id AND roster.active
+      LEFT JOIN writing_practice.provisional_student provisional ON provisional.activity_class_id=class.id
+        AND provisional.student_public_id=roster.student_public_id
+      WHERE class.activity_id = $1 AND class.status='active' AND class.end_date >= CURRENT_DATE ORDER BY class.class_name_snapshot, roster.display_name, roster.display_alias`, [activity.rows[0].id]);
+    const classes = new Map();
+    for (const row of rows.rows) {
+      if (!classes.has(row.class_ref)) classes.set(row.class_ref, { classRef: row.class_ref, className: row.class_name_snapshot, students: [] });
+      if (row.student_ref) classes.get(row.class_ref).students.push({ studentRef: row.student_ref, displayName: row.display_name, alias: row.display_alias,
+        provisional: Boolean(row.provisional), requiresAccessCode: Boolean(row.requires_access_code) });
+    }
+    return { activity: { slug: activity.rows[0].slug, title: activity.rows[0].title }, classes: [...classes.values()] };
+  }
+  async function sessionDetails(sessionRef, client = pool) {
+    const session = await client.query(`SELECT s.id, s.public_id AS "sessionRef", s.overview, s.body1, s.body2, s.draft1, s.draft2,
+      s.draft2_unlocked AS "draft2Unlocked", s.draft_version AS "draftVersion", s.updated_at AS "updatedAt",
+      s.student_public_id AS "studentRef", scope.public_id AS "classRef", activity.slug AS "activitySlug"
+      FROM writing_practice.activity_session s
+      JOIN writing_practice.activity_class_scope scope ON scope.id=s.activity_class_id
+      JOIN writing_practice.activity activity ON activity.id=s.activity_id
+      WHERE s.public_id = $1`, [sessionRef]);
+    if (!session.rowCount) throw new ApiError(404, 'SESSION_NOT_FOUND', 'Không tìm thấy phiên làm bài.');
+    // Một pg Client chỉ chạy an toàn một truy vấn tại một thời điểm. Đọc tuần tự để tránh
+    // lỗi ngẫu nhiên khi sessionDetails chạy bên trong transaction mở/lưu/check.
+    const sectionRows = await client.query(`SELECT section_key AS section, locked, fail_streak AS "failStreak", round_number AS "roundNumber" FROM writing_practice.session_section WHERE session_id = $1 ORDER BY section_key`, [session.rows[0].id]);
+    const comments = await client.query(`SELECT comment.public_id AS "commentRef", attempt.public_id AS "attemptRef", comment.section_key AS section,
+        comment.comment_number AS "commentNumber", comment.status, comment.content AS feedback, comment.created_at AS "createdAt",
+        attempt.result_artifacts AS artifacts,
+        (attempt.status='failed' AND attempt.retry_count<3
+          AND attempt.error_code IS DISTINCT FROM 'GRADING_TIMEOUT_RESULT_ADOPTED') AS "canRetry"
+        FROM writing_practice.comment comment JOIN writing_practice.check_attempt attempt ON attempt.id=comment.attempt_id
+        WHERE comment.session_id = $1 ORDER BY comment.created_at`, [session.rows[0].id]);
+    const attempts = await client.query(`SELECT public_id AS "attemptRef", section_key AS section, comment_number AS "commentNumber", status, result_status AS "resultStatus", error_code AS "errorCode", created_at AS "createdAt", completed_at AS "completedAt" FROM writing_practice.check_attempt WHERE session_id = $1 ORDER BY created_at DESC`, [session.rows[0].id]);
+    const sectionStates = Object.fromEntries(sectionRows.rows.map(row => [row.section, {
+      status: row.locked ? 'passed' : row.failStreak > 0 ? 'revision' : 'draft',
+      locked: row.locked,
+      failStreak: row.failStreak,
+      attemptsWithoutPass: row.failStreak,
+      roundNumber: row.roundNumber
+    }]));
+    const latestSections = new Set();
+    for (const attempt of attempts.rows) {
+      if (latestSections.has(attempt.section) || !sectionStates[attempt.section]) continue;
+      latestSections.add(attempt.section);
+      if (['queued', 'leased'].includes(attempt.status)) sectionStates[attempt.section].status = 'queued';
+      else if (attempt.status === 'failed' && attempt.errorCode !== 'GRADING_TIMEOUT_RESULT_ADOPTED') {
+        sectionStates[attempt.section].status = 'technical_error';
+      }
+    }
+    return { ...session.rows[0], sections: sectionStates, comments: comments.rows, attempts: attempts.rows };
+  }
+  async function openSession({ activitySlug, classRef, studentRef, accessCode }) {
+    const result = await withTransaction(pool, async client => {
+      const identity = provisionalService ? await provisionalService.resolveStudent(client, { activitySlug, classRef, studentRef, accessCode }) : null;
+      if (identity?.accessError) return { accessError: identity.accessError };
+      const roster = identity ? { rowCount: 1, rows: [{ activity_id: identity.activityId, class_id: identity.classId, student_ref: identity.studentRef }] } : await client.query(`SELECT a.id AS activity_id, c.id AS class_id, r.student_public_id AS student_ref FROM writing_practice.activity a
+        JOIN writing_practice.activity_class_scope c ON c.activity_id = a.id AND c.public_id = $2 AND c.status='active' AND c.end_date >= CURRENT_DATE
+        JOIN writing_practice.activity_roster r ON r.activity_class_id = c.id AND r.student_public_id = $3 AND r.active
+        WHERE a.slug = $1 AND a.status = 'active' AND a.grading_pool='task1' FOR KEY SHARE`, [activitySlug, classRef, studentRef]);
+      if (!roster.rowCount) throw new ApiError(404, 'SESSION_NOT_ALLOWED', 'Học viên không thuộc lớp đang hoạt động.');
+      const row = roster.rows[0];
+      const canonicalStudentRef = row.student_ref || studentRef;
+      await client.query(`INSERT INTO writing_practice.activity_session(activity_id, activity_class_id, student_public_id,last_seen_at)
+        VALUES($1,$2,$3,now()) ON CONFLICT(activity_id, student_public_id) DO UPDATE SET updated_at=now(),last_seen_at=now()`, [row.activity_id, row.class_id, canonicalStudentRef]);
+      const session = await client.query(`SELECT id FROM writing_practice.activity_session WHERE activity_id=$1 AND student_public_id=$2`, [row.activity_id, canonicalStudentRef]);
+      for (const section of sections) await client.query(`INSERT INTO writing_practice.session_section(session_id,section_key) VALUES($1,$2) ON CONFLICT DO NOTHING`, [session.rows[0].id, section]);
+      return sessionDetails((await client.query(`SELECT public_id FROM writing_practice.activity_session WHERE id=$1`, [session.rows[0].id])).rows[0].public_id, client);
+    });
+    if (result?.accessError) throw new ApiError(result.accessError.status, result.accessError.code, result.accessError.message);
+    return result;
+  }
+  async function saveDraft({ sessionRef, baseVersion, requestId, overview, body1, body2, draft1, draft2, draft2Unlocked }) {
+    const body = { overview, body1, body2, draft1, draft2, draft2Unlocked, baseVersion };
+    return withTransaction(pool, async client => {
+      const session = await client.query(`SELECT id, draft_version FROM writing_practice.activity_session WHERE public_id=$1 FOR UPDATE`, [sessionRef]);
+      if (!session.rowCount) throw new ApiError(404, 'SESSION_NOT_FOUND', 'Không tìm thấy phiên làm bài.');
+      const prior = await client.query(`SELECT body_hash, draft_version FROM writing_practice.draft_request WHERE session_id=$1 AND request_id=$2`, [session.rows[0].id, requestId]);
+      if (prior.rowCount) {
+        if (prior.rows[0].body_hash !== hash(body)) throw new ApiError(409, 'REQUEST_ID_REUSED', 'Mã lưu đã được dùng cho nội dung khác.');
+        return sessionDetails(sessionRef, client);
+      }
+      if (session.rows[0].draft_version !== baseVersion) throw new ApiError(409, 'DRAFT_VERSION_CONFLICT', 'Bản nháp đã đổi ở nơi khác.', { current: await sessionDetails(sessionRef, client) });
+      await client.query(`UPDATE writing_practice.activity_session SET overview=$2, body1=$3, body2=$4,
+        draft1=COALESCE($5,draft1), draft2=COALESCE($6,draft2), draft2_unlocked=draft2_unlocked OR COALESCE($7,false),
+        draft_version=draft_version+1,updated_at=now(),last_seen_at=now() WHERE id=$1`, [session.rows[0].id, overview, body1, body2, draft1 ?? null, draft2 ?? null, draft2Unlocked ?? null]);
+      await client.query(`INSERT INTO writing_practice.draft_request(session_id,request_id,body_hash,draft_version) VALUES($1,$2,$3,$4)`, [session.rows[0].id, requestId, hash(body), baseVersion + 1]);
+      return sessionDetails(sessionRef, client);
+    });
+  }
+  async function submitCheck({ sessionRef, section, requestId, snapshot }) {
+    if ((section === 'overview' && !meaningfulText(snapshot.overview))
+      || (section === 'outline' && !meaningfulText(snapshot.body1) && !meaningfulText(snapshot.body2))
+      || (section === 'draft' && (!meaningfulText(snapshot.draft1) || !meaningfulText(snapshot.draft2)))) throw new ApiError(400, 'EMPTY_SECTION', 'Phần cần kiểm tra không được để trống.');
+    return withTransaction(pool, async client => {
+      const session = await client.query(`SELECT id,draft1,draft2,draft2_unlocked FROM writing_practice.activity_session WHERE public_id=$1 FOR UPDATE`, [sessionRef]);
+      if (!session.rowCount) throw new ApiError(404, 'SESSION_NOT_FOUND', 'Không tìm thấy phiên làm bài.');
+      await client.query(`UPDATE writing_practice.activity_session SET last_seen_at=now() WHERE id=$1`, [session.rows[0].id]);
+      if (section === 'draft') {
+        const prerequisites = await client.query(`SELECT section_key,locked FROM writing_practice.session_section WHERE session_id=$1 AND section_key IN ('overview','outline') FOR SHARE`, [session.rows[0].id]);
+        if (prerequisites.rowCount !== 2 || prerequisites.rows.some(row => !row.locked)) throw new ApiError(409, 'DRAFT_PREREQUISITES_NOT_PASSED', 'Cần đạt Overview và Outline trước khi Check Draft 2.');
+        if (!session.rows[0].draft2_unlocked) throw new ApiError(409, 'DRAFT2_NOT_UNLOCKED', 'Cần hoàn thành Draft 1 và mở Draft 2 trước.');
+        if (!meaningfulText(session.rows[0].draft1) || !meaningfulText(session.rows[0].draft2)) throw new ApiError(400, 'EMPTY_SECTION', 'Draft 1 và Draft 2 không được để trống.');
+        if (session.rows[0].draft1 !== snapshot.draft1 || session.rows[0].draft2 !== snapshot.draft2) throw new ApiError(409, 'DRAFT_NOT_SAVED', 'Hãy lưu bản Draft mới nhất trước khi Check.');
+      }
+      const sectionState = await client.query(`SELECT locked,round_number FROM writing_practice.session_section WHERE session_id=$1 AND section_key=$2 FOR UPDATE`, [session.rows[0].id, section]);
+      if (!sectionState.rowCount) throw new ApiError(409, 'SECTION_NOT_READY', 'Phần này chưa sẵn sàng để chấm.');
+      if (sectionState.rows[0].locked) throw new ApiError(423, 'SECTION_LOCKED', 'Phần này đã đạt yêu cầu và đã được khóa.');
+      const bodyHash = hash({ section, snapshot });
+      const prior = await client.query(`SELECT attempt.public_id,attempt.session_id,attempt.section_key,attempt.status,attempt.version,
+        attempt.body_hash,attempt.comment_number,comment.public_id AS comment_ref
+        FROM writing_practice.check_attempt attempt JOIN writing_practice.comment comment ON comment.attempt_id=attempt.id
+        WHERE attempt.request_id=$1`, [requestId]);
+      if (prior.rowCount) {
+        if (prior.rows[0].session_id !== session.rows[0].id || prior.rows[0].section_key !== section || prior.rows[0].body_hash !== bodyHash) {
+          throw new ApiError(409, 'REQUEST_ID_REUSED', 'Mã Check đã được dùng cho nội dung khác.');
+        }
+        return { attemptRef: prior.rows[0].public_id, commentRef: prior.rows[0].comment_ref, status: prior.rows[0].status, version: prior.rows[0].version, commentNumber: prior.rows[0].comment_number, section, idempotent: true };
+      }
+      const active = await client.query(`SELECT attempt.public_id,attempt.status,attempt.version,attempt.comment_number,comment.public_id AS comment_ref
+        FROM writing_practice.check_attempt attempt JOIN writing_practice.comment comment ON comment.attempt_id=attempt.id
+        WHERE attempt.session_id=$1 AND attempt.section_key=$2 AND attempt.status IN ('queued','leased') FOR UPDATE OF attempt`, [session.rows[0].id, section]);
+      if (active.rowCount) return { attemptRef: active.rows[0].public_id, commentRef: active.rows[0].comment_ref, status: active.rows[0].status, version: active.rows[0].version, commentNumber: active.rows[0].comment_number, section, idempotent: true };
+      const sequence = await client.query(`SELECT COALESCE(max(comment_number),0)+1 AS next FROM writing_practice.check_attempt WHERE session_id=$1 AND section_key=$2`, [session.rows[0].id, section]);
+      const commentNumber = sequence.rows[0].next;
+      const inserted = await client.query(`INSERT INTO writing_practice.check_attempt(session_id,section_key,round_number,comment_number,request_id,body_hash,snapshot)
+        VALUES($1,$2,$3,$4,$5,$6,$7::jsonb) RETURNING id,public_id,status,version`, [session.rows[0].id, section, sectionState.rows[0].round_number, commentNumber, requestId, bodyHash, JSON.stringify(snapshot)]);
+      const comment = await client.query(`INSERT INTO writing_practice.comment(attempt_id,session_id,section_key,comment_number,status,content)
+        VALUES($1,$2,$3,$4,'queued','Đang chấm') RETURNING public_id`, [inserted.rows[0].id, session.rows[0].id, section, commentNumber]);
+      return { attemptRef: inserted.rows[0].public_id, commentRef: comment.rows[0].public_id, status: inserted.rows[0].status, version: inserted.rows[0].version, commentNumber, section, idempotent: false };
+    });
+  }
+  async function getAttempt(attemptRef) {
+    return withTransaction(pool, async client => {
+      const timeoutMessage = 'Lượt chấm đã quá thời hạn xử lý. Em hãy bấm Check lại.';
+      await client.query(`WITH expired AS (
+        UPDATE writing_practice.check_attempt attempt
+        SET status='failed',error_code='SHOPS_GRADING_TIMEOUT',worker_id=NULL,
+          late_callback_token=CASE WHEN attempt.status='leased' THEN attempt.lease_token ELSE NULL END,
+          lease_token=NULL,lease_expires_at=NULL,version=version+1,updated_at=now()
+        FROM writing_practice.activity_session session
+        WHERE attempt.public_id=$1
+          AND attempt.session_id=session.id
+          AND attempt.status IN ('queued','leased')
+          AND ((attempt.status='queued' AND attempt.created_at<=now()-interval '45 minutes') OR (attempt.status='leased' AND attempt.lease_expires_at<=now()))
+        RETURNING attempt.id
+      )
+      UPDATE writing_practice.comment comment
+      SET status='technical_error',content=$2
+      FROM expired WHERE comment.attempt_id=expired.id`, [attemptRef, timeoutMessage]);
+
+      const result = await client.query(`SELECT attempt.public_id AS "attemptRef",attempt.section_key AS section,attempt.comment_number AS "commentNumber",
+        attempt.status,attempt.result_status AS "resultStatus",attempt.feedback,attempt.error_code AS "errorCode",attempt.retry_count AS "retryCount",attempt.version,attempt.updated_at AS "updatedAt",
+        attempt.result_artifacts AS artifacts,
+        state.fail_streak AS "attemptsWithoutPass",comment.public_id AS "commentRef",comment.status AS "commentStatus",comment.content AS "commentContent",comment.created_at AS "commentCreatedAt"
+        FROM writing_practice.check_attempt attempt
+        JOIN writing_practice.session_section state ON state.session_id=attempt.session_id AND state.section_key=attempt.section_key
+        JOIN writing_practice.comment comment ON comment.attempt_id=attempt.id
+        WHERE attempt.public_id=$1`, [attemptRef]);
+      if (!result.rowCount) throw new ApiError(404, 'ATTEMPT_NOT_FOUND', 'Không tìm thấy lượt kiểm tra.');
+      const row = result.rows[0];
+      const canRetry = row.status === 'failed' && row.retryCount < 3
+        && row.errorCode !== 'GRADING_TIMEOUT_RESULT_ADOPTED';
+      return { ...row, canRetry, supportWarning: row.resultStatus === 'needs_revision' && row.attemptsWithoutPass > 0 && row.attemptsWithoutPass % 3 === 0,
+        comment: { commentRef: row.commentRef, attemptRef: row.attemptRef, section: row.section, commentNumber: row.commentNumber, status: row.commentStatus, feedback: row.commentContent, artifacts: row.artifacts, createdAt: row.commentCreatedAt, canRetry } };
+    });
+  }
+  async function publishLive({ sessionRef }) {
+    const result = await pool.query(`UPDATE writing_practice.activity_session SET last_seen_at=now()
+      WHERE public_id=$1 RETURNING public_id`, [sessionRef]);
+    if (!result.rowCount) throw new ApiError(404, 'SESSION_NOT_FOUND', 'Không tìm thấy phiên làm bài.');
+    return { accepted: true };
+  }
+  async function claimJobs({ workerId, maxJobs, leaseSeconds, workerPool = 'task1' }) {
+    return withTransaction(pool, async client => {
+      const result = await client.query(`WITH picked AS (SELECT attempt.id FROM writing_practice.check_attempt attempt
+        JOIN writing_practice.activity_session session ON session.id=attempt.session_id
+        JOIN writing_practice.activity activity ON activity.id=session.activity_id
+        WHERE attempt.status='queued' AND attempt.retry_count<3
+          AND activity.grading_pool=$4
+        ORDER BY attempt.created_at FOR UPDATE OF attempt SKIP LOCKED
+        LIMIT $1::int)
+      UPDATE writing_practice.check_attempt a SET status='leased',worker_id=$2,lease_token=gen_random_uuid(),
+        grading_context=CASE WHEN $4='task2' THEN COALESCE(a.grading_context,
+          writing_practice.task2_grading_context(a.session_id,a.section_key)) ELSE a.grading_context END,
+        lease_expires_at=now()+((CASE WHEN a.section_key='draft' THEN ${draftLeaseSeconds} ELSE $3 END)::text||' seconds')::interval,
+        retry_count=retry_count+1,version=version+1,updated_at=now() FROM picked
+      WHERE a.id=picked.id RETURNING a.id,a.public_id,a.section_key,a.comment_number,a.snapshot,a.lease_token,a.lease_expires_at,a.session_id,a.grading_context`, [maxJobs, workerId, leaseSeconds, workerPool]);
+      const jobs=[]; for (const row of result.rows) {
+        if (workerPool==='task2' && row.grading_context) {
+          const context=row.grading_context;
+          jobs.push({jobRef:row.public_id,attemptRef:row.public_id,section:row.section_key,
+            commentNumber:row.comment_number,studentInput:row.snapshot,snapshot:row.snapshot,
+            contextArtifacts:context.contextArtifacts || {},leaseToken:row.lease_token,
+            leaseExpiresAt:row.lease_expires_at,activitySlug:context.activitySlug,
+            taskPrompt:context.taskPrompt,feedbackHistory:context.feedbackHistory || [],
+            promptRegistryKey:context.promptRegistryKey,promptRecordId:context.promptRecordId,
+            promptVersion:context.promptVersion,workerPool});
+          continue;
+        }
+        const context=await client.query(`SELECT activity.slug,activity.task_prompt,activity.prompt_registry_key,
+        COALESCE(definition.prompt_record_ref,activity.prompt_record_ref) prompt_record_ref,
+        COALESCE(definition.prompt_version,activity.prompt_version) prompt_version,
+        COALESCE(jsonb_agg(jsonb_build_object('commentNumber',comment.comment_number,'content',comment.content,'createdAt',comment.created_at)
+          ORDER BY comment.comment_number) FILTER(WHERE comment.id IS NOT NULL),'[]') history
+        FROM writing_practice.activity_session session
+        JOIN writing_practice.activity activity ON activity.id=session.activity_id
+        LEFT JOIN writing_practice.activity_section_definition definition
+          ON definition.activity_id=activity.id AND definition.section_key=$2
+        LEFT JOIN writing_practice.comment comment ON comment.session_id=session.id
+          AND comment.section_key=$2 AND comment.status='completed'
+        WHERE session.id=$1
+        GROUP BY activity.slug,activity.task_prompt,activity.prompt_registry_key,activity.prompt_record_ref,
+          activity.prompt_version,definition.prompt_record_ref,definition.prompt_version`,[row.session_id,row.section_key]);
+        const priorArtifacts = await client.query(`SELECT COALESCE(jsonb_object_agg(latest.section_key,latest.result_artifacts),'{}'::jsonb) AS artifacts
+          FROM (SELECT DISTINCT ON (attempt.section_key) attempt.section_key,attempt.result_artifacts
+            FROM writing_practice.check_attempt attempt
+            WHERE attempt.session_id=$1 AND attempt.section_key<>$2
+              AND attempt.status='completed' AND attempt.result_status='passed'
+              AND attempt.result_artifacts<>'{}'::jsonb
+            ORDER BY attempt.section_key,attempt.completed_at DESC NULLS LAST,attempt.id DESC) latest`,
+        [row.session_id,row.section_key]);
+        jobs.push({activitySlug:context.rows[0].slug,jobRef:row.public_id,attemptRef:row.public_id,section:row.section_key,commentNumber:row.comment_number,studentInput:row.snapshot,snapshot:row.snapshot,contextArtifacts:priorArtifacts.rows[0]?.artifacts||{},leaseToken:row.lease_token,leaseExpiresAt:row.lease_expires_at,taskPrompt:context.rows[0].task_prompt,feedbackHistory:context.rows[0].history,promptRegistryKey:context.rows[0].prompt_registry_key,promptRecordId:context.rows[0].prompt_record_ref,promptVersion:context.rows[0].prompt_version,workerPool}); }
+      return jobs;
+    });
+  }
+  async function completeJob({ jobRef, leaseToken, resultStatus, feedback, artifacts = {}, rawModelMeta = {} }) {
+    if (!rawModelMeta || typeof rawModelMeta!=='object' || Array.isArray(rawModelMeta)
+      || Buffer.byteLength(JSON.stringify(rawModelMeta),'utf8')>750_000) {
+      throw new ApiError(400,'INVALID_GRADING_METADATA','Thông tin lượt chấm không hợp lệ.');
+    }
+    const gradingMeta={...rawModelMeta};
+    if (typeof gradingMeta.renderedPrompt==='string') {
+      gradingMeta.renderedPromptSha256=crypto.createHash('sha256').update(gradingMeta.renderedPrompt).digest('hex');
+    }
+    const rawLmsUrl = artifacts?.lmsUrl;
+    const lmsUrl = rawLmsUrl ? normalizeLmsUrl(rawLmsUrl) : null;
+    if (rawLmsUrl && !lmsUrl) throw new ApiError(400, 'INVALID_LMS_URL', 'Link kết quả LMS không hợp lệ.');
+    const storedArtifacts = lmsUrl ? { ...artifacts, lmsUrl } : artifacts;
+    const storedFeedback = lmsUrl || feedback;
+    return withTransaction(pool, async client => {
+      let attempt = await client.query(`UPDATE writing_practice.check_attempt
+        SET status='completed',result_status=$3,feedback=$4,result_artifacts=$5::jsonb,grading_meta=$6::jsonb,
+          completed_at=now(),worker_id=NULL,lease_token=NULL,lease_expires_at=NULL,
+          version=version+1,updated_at=now()
+        WHERE public_id=$1 AND lease_token=$2 AND status='leased' AND lease_expires_at>now()
+        RETURNING id,public_id,session_id,section_key,version`,
+      [jobRef,leaseToken,resultStatus,storedFeedback,JSON.stringify(storedArtifacts),JSON.stringify(gradingMeta)]);
+      let adoptedLateResult = false;
+
+      if (!attempt.rowCount) {
+        const expired = await client.query(`SELECT attempt.id,attempt.session_id,attempt.section_key,
+            attempt.round_number,attempt.body_hash,attempt.created_at,attempt.grading_context
+          FROM writing_practice.check_attempt attempt
+          WHERE attempt.public_id=$1 AND attempt.late_callback_token=$2
+            AND attempt.status='failed' AND attempt.error_code='SHOPS_GRADING_TIMEOUT'
+          FOR UPDATE OF attempt`, [jobRef,leaseToken]);
+        if (!expired.rowCount) throw new ApiError(409,'LEASE_NOT_OWNED','Công việc không còn thuộc tác vụ này.');
+        const source = expired.rows[0];
+
+        attempt = await client.query(`UPDATE writing_practice.check_attempt replacement
+          SET status='completed',result_status=$6,feedback=$7,result_artifacts=$8::jsonb,grading_meta=$9::jsonb,
+            error_code=NULL,completed_at=now(),worker_id=NULL,lease_token=NULL,lease_expires_at=NULL,
+            version=replacement.version+1,updated_at=now()
+          WHERE replacement.id=(
+            SELECT active.id FROM writing_practice.check_attempt active
+            WHERE active.session_id=$1 AND active.section_key=$2 AND active.round_number=$3
+              AND active.body_hash=$4 AND active.created_at>$5
+              AND active.grading_context IS NOT DISTINCT FROM $10::jsonb
+              AND active.status IN ('queued','leased')
+            ORDER BY active.created_at DESC LIMIT 1 FOR UPDATE
+          )
+          RETURNING replacement.id,replacement.public_id,replacement.session_id,
+            replacement.section_key,replacement.version`,
+        [source.session_id,source.section_key,source.round_number,source.body_hash,source.created_at,
+          resultStatus,storedFeedback,JSON.stringify(storedArtifacts),
+          JSON.stringify({...gradingMeta,sourceAttemptRef:jobRef}),source.grading_context == null ? null : JSON.stringify(source.grading_context)]);
+        if (!attempt.rowCount) throw new ApiError(409,'LATE_RESULT_NOT_APPLICABLE','Kết quả cũ không còn phù hợp với lượt Check hiện tại.');
+
+        await client.query(`UPDATE writing_practice.check_attempt
+          SET late_callback_token=NULL,error_code='GRADING_TIMEOUT_RESULT_ADOPTED',
+            version=version+1,updated_at=now() WHERE id=$1`, [source.id]);
+        await client.query(`UPDATE writing_practice.comment
+          SET status='technical_error',content='Kết quả lượt chấm muộn đã được dùng cho lượt Check sau.'
+          WHERE attempt_id=$1`, [source.id]);
+        adoptedLateResult = true;
+      }
+
+      const row=attempt.rows[0];
+      if(row.section_key==='draft' && (resultStatus!=='passed' || !lmsUrl)) throw new ApiError(400,'DRAFT_LMS_RESULT_REQUIRED','Draft chỉ hoàn tất khi có link LMS hợp lệ.');
+      await client.query(`UPDATE writing_practice.comment SET status='completed',content=$2 WHERE attempt_id=$1`,[row.id,storedFeedback]);
+      if(resultStatus==='passed') await client.query(`UPDATE writing_practice.session_section SET locked=true,fail_streak=0,updated_at=now() WHERE session_id=$1 AND section_key=$2`,[row.session_id,row.section_key]);
+      else await client.query(`UPDATE writing_practice.session_section SET fail_streak=fail_streak+1,updated_at=now() WHERE session_id=$1 AND section_key=$2`,[row.session_id,row.section_key]);
+      const state=await client.query(`SELECT fail_streak FROM writing_practice.session_section WHERE session_id=$1 AND section_key=$2`,[row.session_id,row.section_key]);
+      return {attemptRef:row.public_id,sourceAttemptRef:jobRef,status:'completed',resultStatus,version:row.version,
+        adoptedLateResult,supportWarning:resultStatus==='needs_revision' && state.rows[0].fail_streak%3===0};
+    });
+  }
+  async function failJob({ jobRef,leaseToken,errorCode,retryable: _retryable }) {
+    return withTransaction(pool, async client => {
+      const r=await client.query(`UPDATE writing_practice.check_attempt attempt
+        SET status='failed',error_code=$3,worker_id=NULL,lease_token=NULL,lease_expires_at=NULL,
+          version=attempt.version+1,updated_at=now()
+        WHERE attempt.public_id=$1 AND attempt.lease_token=$2
+          AND attempt.status='leased' AND attempt.lease_expires_at>now()
+        RETURNING attempt.id,attempt.public_id,attempt.status,attempt.retry_count,attempt.version`,
+      [jobRef,leaseToken,errorCode]);
+      if (!r.rowCount) throw new ApiError(409,'LEASE_NOT_OWNED','Công việc không còn thuộc tác vụ này.');
+      const row = r.rows[0];
+      await client.query(`UPDATE writing_practice.comment SET status='technical_error',content=$2
+        WHERE attempt_id=$1`, [row.id,'Lượt chấm vừa rồi gặp lỗi. Em hãy bấm Check lại.']);
+      return { attemptRef: row.public_id,...row,canRetry: row.retry_count < 3 };
+    });
+  }
+  async function recoverJobs() { return withTransaction(pool, async client => { const r=await client.query(`UPDATE writing_practice.check_attempt SET status=CASE WHEN retry_count<3 THEN 'queued' ELSE 'failed' END,lease_token=NULL,lease_expires_at=NULL,version=version+1,updated_at=now() WHERE status='leased' AND lease_expires_at<=now() RETURNING id,public_id,status,retry_count`); await client.query(`UPDATE writing_practice.comment comment SET status='technical_error',content=CASE WHEN attempt.retry_count<3 THEN 'Tạm thời chưa thể chấm. Hãy nhấn Thử lại.' ELSE 'Hệ thống chưa thể chấm sau ba lần thử. Vui lòng báo giảng viên.' END FROM writing_practice.check_attempt attempt WHERE comment.attempt_id=attempt.id AND attempt.status='failed' AND comment.status='queued'`); return r.rows.map(x=>({attemptRef:x.public_id,status:x.status,canRetry:x.status==='failed'&&x.retry_count<3})); }); }
+  async function retryAttempt(attemptRef) {
+    return withTransaction(pool, async client => {
+      const prior = await client.query(`SELECT attempt.id,attempt.public_id,attempt.session_id,
+          attempt.section_key,attempt.round_number,attempt.comment_number,attempt.status,
+          attempt.retry_count,attempt.body_hash,attempt.snapshot,attempt.grading_context,state.locked
+        FROM writing_practice.check_attempt attempt
+        JOIN writing_practice.session_section state ON state.session_id=attempt.session_id
+          AND state.section_key=attempt.section_key
+        WHERE attempt.public_id=$1 FOR UPDATE OF attempt,state`, [attemptRef]);
+      if (!prior.rowCount) throw new ApiError(404,'ATTEMPT_NOT_FOUND','Không tìm thấy lượt chấm.');
+      const row = prior.rows[0];
+      if (['queued','leased'].includes(row.status)) return {attemptRef:row.public_id,section:row.section_key,
+        commentNumber:row.comment_number,status:row.status,idempotent:true};
+      if (row.status !== 'failed' || row.retry_count >= 3 || row.locked) {
+        throw new ApiError(409,'ATTEMPT_NOT_RETRYABLE','Lượt này không thể thử lại.');
+      }
+      const active = await client.query(`SELECT 1 FROM writing_practice.check_attempt
+        WHERE session_id=$1 AND section_key=$2 AND status IN ('queued','leased')`, [row.session_id,row.section_key]);
+      if (active.rowCount) throw new ApiError(409,'SECTION_ALREADY_QUEUED','Phần này đã có một lượt đang chấm.');
+      const sequence = await client.query(`SELECT COALESCE(max(comment_number),0)+1 AS next
+        FROM writing_practice.check_attempt WHERE session_id=$1 AND section_key=$2`, [row.session_id,row.section_key]);
+      const inserted = await client.query(`INSERT INTO writing_practice.check_attempt(
+          session_id,section_key,round_number,comment_number,request_id,body_hash,snapshot,grading_context)
+        VALUES($1,$2,$3,$4,gen_random_uuid(),$5,$6::jsonb,$7::jsonb)
+        RETURNING id,public_id,section_key,comment_number,status,version`,
+      [row.session_id,row.section_key,row.round_number,sequence.rows[0].next,row.body_hash,JSON.stringify(row.snapshot),row.grading_context == null ? null : JSON.stringify(row.grading_context)]);
+      const replacement = inserted.rows[0];
+      const comment = await client.query(`INSERT INTO writing_practice.comment(
+          attempt_id,session_id,section_key,comment_number,status,content)
+        VALUES($1,$2,$3,$4,'queued','Đang chấm') RETURNING public_id`,
+      [replacement.id,row.session_id,row.section_key,replacement.comment_number]);
+      return {attemptRef:replacement.public_id,commentRef:comment.rows[0].public_id,
+        section:replacement.section_key,commentNumber:replacement.comment_number,
+        status:replacement.status,version:replacement.version,idempotent:false};
+    });
+  }
+  async function reopenSection({sessionRef,section,actorRef,reason}) { return withTransaction(pool, async client => { const session=await client.query(`SELECT id FROM writing_practice.activity_session WHERE public_id=$1 FOR UPDATE`,[sessionRef]); if(!session.rowCount) throw new ApiError(404,'SESSION_NOT_FOUND','Không tìm thấy phiên làm bài.'); const state=await client.query(`UPDATE writing_practice.session_section SET locked=false,fail_streak=0,round_number=round_number+1,updated_at=now() WHERE session_id=$1 AND section_key=$2 AND locked=true RETURNING round_number`,[session.rows[0].id,section]); if(!state.rowCount) throw new ApiError(409,'SECTION_NOT_LOCKED','Phần này hiện không bị khóa.'); await client.query(`INSERT INTO writing_practice.admin_audit_event(session_id,section_key,action,actor_ref,reason) VALUES($1,$2,'reopen_section',$3,$4)`,[session.rows[0].id,section,actorRef,reason]); return sessionDetails(sessionRef,client); }); }
+  return {getRoster,openSession,sessionDetails,saveDraft,submitCheck,publishLive,getAttempt,claimJobs,completeJob,failJob,recoverJobs,retryAttempt,reopenSection};
+}

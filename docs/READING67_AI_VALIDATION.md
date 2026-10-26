@@ -4,6 +4,8 @@ Phạm vi: Materials Buổi 10; bật bằng `gradingValidation.enabled=true` tr
 
 Mỗi vòng kiểm cấu trúc, ID, đủ các ý, kiểu và dẫn chứng, quan hệ, độ cô đọng, mã lỗi và lời giải thích. Ý/nhận xét chưa đạt được gửi bổ sung đúng phạm vi; ô đã được kiểm nội dung giữ theo hash. Bản chấm chỉ hoàn tất khi mọi phần bắt buộc đã qua code và kiểm nội dung AI. Không dùng nhận xét dự phòng để vượt lỗi.
 
+Bản kiểm v2 yêu cầu hướng sửa `next_step` do AI bổ sung cho từng ô chưa đạt, dài 18–320 ký tự và bắt đầu `Lần sau,`; không lấy lời khuyên mẫu để vượt kiểm. Bước kiểm nội dung chỉ rõ trường cần sửa và giữ verdict/mã lỗi do luật tính. Kiểm cùng mẫu nhãn nội bộ của snapshot trên lời giải thích, hướng sửa và comment cuối. Hash nội dung được chuẩn hóa thứ tự khóa để không đổi khi PostgreSQL JSONB đọc/ghi lại. Job v1 đang chờ được chuyển tiếp v2, giữ audit/phản hồi gốc/lịch sử vòng, xóa xác nhận cũ để kiểm lại theo quy tắc mới.
+
 Worker thực hiện một lời gọi AI mỗi lượt nhận job, lưu intent/response/checkpoint theo job và call ID. Vòng chưa đạt quay hàng chờ với thời gian tăng dần, không có ngưỡng bỏ bài sau ba lần. Mỗi lần gọi nằm trong lease 15 phút; request timeout 650 giây. Hàng chờ ưu tiên thời điểm sẵn sàng để bài bổ sung không chiếm liên tục bài mới. Các vòng và lượng token được lưu ở bảng riêng.
 
 HTTP 429/5xx đã có phản hồi được xếp thử lại, giữ nguyên danh sách lỗi và phạm vi khóa. Mạng/timeout không rõ kết quả hoặc crash sau intent trước response giữ needs_review; phải đối soát trước gọi mới. Crash sau khi lưu response phát lại chính response đó, không gọi AI lần nữa. Khi hoàn tất checkpoint trước ghi result, tiếp tục lưu result từ dữ liệu đã qua kiểm.
@@ -11,6 +13,8 @@ HTTP 429/5xx đã có phản hồi được xếp thử lại, giữ nguyên dan
 Áp dụng migration bổ sung `docs/migrations/2026-10-26-reading67-validation.sql` bằng tài khoản phù hợp chỉ trên database Materials. Migration chỉ tạo ba bảng mới. Giữ nguyên web_attempt, nháp, archive, kết quả và cấu hình các sản phẩm khác.
 
 `backend/scripts/recover-reading67-validation.mjs` nhận đường dẫn config và ID bản nộp. Mặc định chỉ xem trước; `--apply` giữ toàn bộ job lỗi gốc trong sự kiện recovery_started, kiểm fingerprint bài/hash bộ chấm/bài/version/lớp, rồi đưa đúng job failed về hàng chờ. Không tạo attempt, không đổi hash/nháp/bản nộp hoặc gọi AI ngay từ script. Chạy lại trả already_requested. Giao diện bản chấm ghi rõ đã phục hồi.
+
+Homework hoàn tất dùng khóa riêng theo job/version/complete, giữ nguyên sự kiện thông báo lỗi trước đó. Chạy lại lệnh phục hồi với `--apply` khi job đã xong chỉ bảo đảm có sự kiện Homework này; không chấm lại hoặc ghi trùng Docs. Thời gian nghỉ dựa trên số vòng không tiến triển, không phạt các vòng đã bổ sung được nội dung mới.
 
 Quay lui: tắt cờ, quay đúng image và cấu hình trước phát hành; không restore database hoặc xóa ba bảng lịch sử mới. Đợi/đối soát lời gọi đang chạy trước chuyển container. Lượt đã có result không được chạy lại để quay code.
 

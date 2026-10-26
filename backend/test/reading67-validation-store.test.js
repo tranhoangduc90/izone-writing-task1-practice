@@ -5,7 +5,7 @@ import {reading67AnswerFingerprint} from '../src/reading-listening67/web-grader.
 const ids=Array.from({length:20},(_,i)=>`target-${i}`);
 const grader={validationVersion:'test-v1',pins:{sha256:'fixture'},profile:{expected_target_ids:ids},inspectWeb:answers=>({parsed:{targets:ids.map(id=>({target_id:id,source_text:answers[id]||'',source_text_original:answers[id]||'',observed_state:'answered'}))},completeness:{eligible_for_grading:true,filled_cells:20}})};
 const scope={ownerId:'owner-A',courseId:'1293',code:'fixture',version:'v1'},body={answers:Object.fromEntries(ids.map(id=>[id,'Nội dung giả.'])),notes:'',flags:[],annotations:[]};
-async function setup(t){const db=new PGlite();for(const file of ['2026-10-22-reading67-web.sql','2026-10-26-reading67-validation.sql'])await db.exec(await fs.readFile(new URL('../../docs/migrations/'+file,import.meta.url),'utf8'));t.after(()=>db.close());const store=createReading67WebStore({db,grader});await store.save(scope,{baseRevision:0,mutationId:randomUUID(),body});const sent=await store.submit(scope,{revision:1,requestId:randomUUID()});return {db,store,sent};}
+async function setup(t,homework){const db=new PGlite();for(const file of ['2026-10-22-reading67-web.sql','2026-10-26-reading67-validation.sql'])await db.exec(await fs.readFile(new URL('../../docs/migrations/'+file,import.meta.url),'utf8'));t.after(()=>db.close());const store=createReading67WebStore({db,grader,homework});await store.save(scope,{baseRevision:0,mutationId:randomUUID(),body});const sent=await store.submit(scope,{revision:1,requestId:randomUUID()});return {db,store,sent};}
 test('Checkpoint/round giữ đúng lease; bổ sung chưa đạt giữ bản nộp và có lịch tiếp tục',async t=>{
  const {db,store,sent}=await setup(t),job=await store.claim(),callId=randomUUID();
  await store.validation.round(job,{callId,phase:'repair',round:1,status:'calling',promptHash:'hash',validationVersion:'test-v1'});
@@ -44,4 +44,10 @@ test('Bài mới được phục vụ trước job bổ sung được xếp lạ
  const state={version:'test-v1',phase:'repair',round:1,issues:[]};await store.validation.checkpoint(original,state);await store.validation.defer(original,{details:{state}});
  await db.query("UPDATE reading_listening67.web_validation SET next_attempt_at=now()-interval '1 millisecond' WHERE job_id=$1",[original.jobId]);
  assert.equal((await store.claim()).attemptId,sent.attemptId);
+});
+test('Kết quả phục hồi có sự kiện Homework mới, không dùng lại thông báo lỗi cũ',async t=>{
+ const events=[];const homework={start:async()=>{},submitted:async()=>{},outcome:async(_tx,_scope,key)=>events.push(key)};
+ const {store}=await setup(t,homework),job=await store.claim();await store.validation.checkpoint(job,{version:'test-v1',phase:'complete',reviewedHash:'reviewed'});
+ await store.finish(job,{pins:grader.pins,context:{operationId:job.jobId,sourceDigest:job.inputHash},grading:{validation:{version:'test-v1',reviewedHash:'reviewed'},target_results:ids.map(target_id=>({target_id,verdict:'correct'}))}});
+ assert.deepEqual(events,[job.jobId+':test-v1:complete']);assert.notEqual(events[0],job.jobId);
 });

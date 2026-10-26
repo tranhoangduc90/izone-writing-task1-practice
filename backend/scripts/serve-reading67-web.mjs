@@ -51,9 +51,10 @@ await fs.mkdir(config.dataDir,{recursive:true});
 const db=config.database?.kind==='postgres'?createReading67Postgres({connectionString:(await fs.readFile(config.database.connectionFile,'utf8')).trim()}):new (await import('@electric-sql/pglite')).PGlite(path.join(config.dataDir,'postgres'));
 if(https&&config.database?.kind!=='postgres')throw Error('HTTPS_TEST_REQUIRES_OWN_POSTGRES');
 if(config.database?.kind!=='postgres')for(const name of ['web','identity',...(config.homework?.enabled?['homework']:[])])await db.exec(await fs.readFile(new URL(`../../docs/migrations/2026-10-22-reading67-${name}.sql`,import.meta.url),'utf8'));
-else{const role=(await db.query('SELECT current_database() AS db,current_user AS role,rolsuper FROM pg_roles WHERE rolname=current_user')).rows[0];if(role.db!==(classroom?'reading67_materials_ic2304':'reading67_preview_stage3')||role.role!==(classroom?'reading67_materials_app':'reading67_preview_app')||role.rolsuper)throw Error('TEST_DATABASE_ROLE_REQUIRED');await db.query('SELECT 1 FROM reading_listening67.web_student_session LIMIT 1');}
+if(config.database?.kind!=='postgres'&&config.gradingValidation?.enabled)await db.exec(await fs.readFile(new URL('../../docs/migrations/2026-10-26-reading67-validation.sql',import.meta.url),'utf8'));
+if(config.database?.kind==='postgres'){const role=(await db.query('SELECT current_database() AS db,current_user AS role,rolsuper FROM pg_roles WHERE rolname=current_user')).rows[0];if(role.db!==(classroom?'reading67_materials_ic2304':'reading67_preview_stage3')||role.role!==(classroom?'reading67_materials_app':'reading67_preview_app')||role.rolsuper)throw Error('TEST_DATABASE_ROLE_REQUIRED');await db.query('SELECT 1 FROM reading_listening67.web_student_session LIMIT 1');}
 const content=JSON.parse(await fs.readFile(config.contentPath,'utf8'));
-const grader=await loadReading67WebGrader({snapshotPath:config.graderPath,expectedSha256:config.graderSha256});
+const grader=await loadReading67WebGrader({snapshotPath:config.graderPath,expectedSha256:config.graderSha256,validation:config.gradingValidation?.enabled===true});
 const allowedClassIds=config.allowedClassIds||initial.classes.map(c=>c.erp_course_class_id);
 const ownerSource=config.homework?.owner?.kind==='http'?createReading67OwnerSource({context,allowedClassIds,url:config.homework.owner.url,key:(await fs.readFile(config.homework.owner.keyFile,'utf8')).trim()}):null;
 const identity=createReading67WebIdentity({db,context,allowedClassIds,verifyGoogle,ownerSource,cookiePath:publicPath+'/api/reading-skills67'});

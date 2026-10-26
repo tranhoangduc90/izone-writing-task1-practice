@@ -2,6 +2,7 @@
 import fs from 'node:fs/promises';import {randomUUID} from 'node:crypto';
 import {loadReading67WebGrader,reading67AnswerFingerprint} from '../src/reading-listening67/web-grader.js';
 import {createReading67Postgres} from '../src/reading-listening67/web-postgres.js';
+import {createReading67Homework} from '../src/reading-listening67/web-homework.js';
 const [configPath,attemptId,...flags]=process.argv.slice(2);
 if(!configPath||!/^[0-9a-f-]{36}$/.test(attemptId||''))throw Error('RECOVERY_ARGUMENTS_REQUIRED');
 const config=JSON.parse(await fs.readFile(configPath,'utf8'));
@@ -16,7 +17,13 @@ try{
   if(row.assignment_code!==content.code||row.content_version!==content.version||!config.allowedClassIds.includes(row.course_id)||row.grader_hash!==grader.pins.sha256)throw Error('RECOVERY_IDENTITY_MISMATCH');
   if(reading67AnswerFingerprint(grader.parseWeb(row.snapshot.answers))!==row.input_hash)throw Error('RECOVERY_INPUT_HASH_MISMATCH');
   const already=(await tx.query("SELECT id FROM reading_listening67.web_validation_event WHERE job_id=$1 AND kind='recovery_started' LIMIT 1",[row.job.id])).rows[0];
-  if(already)return {outcome:'already_requested',attemptId,status:row.job.status};
+  if(already){
+   if(flags.includes('--apply')&&row.job.status==='done'&&config.homework?.enabled){
+    const homework=createReading67Homework({db,metadata:content,pageBase:config.homework.pageBase});
+    await homework.outcome(tx,{ownerId:row.owner_id,courseId:row.course_id,code:row.assignment_code,version:row.content_version},row.job.id+':'+grader.validationVersion+':complete');
+   }
+   return {outcome:'already_requested',attemptId,status:row.job.status};
+  }
   if(row.job.status!=='failed'||row.job.error_code!=='GRADING_VALIDATION_FAILED'||!row.job.provider_response)throw Error('RECOVERY_NOT_ELIGIBLE');
   if((await tx.query('SELECT 1 FROM reading_listening67.web_result WHERE attempt_id=$1',[attemptId])).rows.length)throw Error('RESULT_ALREADY_EXISTS');
   if(!flags.includes('--apply'))return {outcome:'preview',attemptId,status:row.job.status,inputHash:row.input_hash,graderHash:row.grader_hash};

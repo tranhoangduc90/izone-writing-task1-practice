@@ -10,6 +10,8 @@ export function createValidationStore({db,assertOwner}){
     return {state,unfinished,received};
   });}
   async function checkpoint(job,state){return owned(job,async tx=>{
+    const previous=(await tx.query('SELECT state FROM reading_listening67.web_validation WHERE job_id=$1',[job.jobId])).rows[0]?.state;
+    if(previous?.version&&previous.version!==state.version)await tx.query('INSERT INTO reading_listening67.web_validation_event(id,job_id,kind,data) VALUES($1,$2,$3,$4::jsonb)',[randomUUID(),job.jobId,'validation_version_updated',JSON.stringify({previousVersion:previous.version,version:state.version,previousPhase:previous.phase,round:previous.round})]);
     await tx.query('INSERT INTO reading_listening67.web_validation(job_id,state) VALUES($1,$2::jsonb) ON CONFLICT(job_id) DO UPDATE SET state=$2::jsonb,updated_at=now()',[job.jobId,JSON.stringify(state)]);
     if(state.lastCallId)await tx.query("UPDATE reading_listening67.web_validation_round SET status='applied' WHERE call_id=$1 AND job_id=$2 AND status='received'",[state.lastCallId,job.jobId]);
   });}
@@ -19,7 +21,7 @@ export function createValidationStore({db,assertOwner}){
   });}
   async function defer(job,error){return owned(job,async tx=>{
     const state=error.details.state;
-    const seconds=Math.min(3600,state.round>3?30*2**Math.min(7,state.round-4):1);
+    const stalled=state.stalledRounds??state.round;const seconds=Math.min(3600,stalled>2?30*2**Math.min(7,stalled-3):1);
     await tx.query('UPDATE reading_listening67.web_validation SET next_attempt_at=now()+($2::int*interval \'1 second\'),updated_at=now() WHERE job_id=$1',[job.jobId,seconds]);
     await tx.query("UPDATE reading_listening67.web_job SET status='queued',error_code=NULL,lease_until=NULL,lease_token=NULL WHERE id=$1",[job.jobId]);
     await tx.query('INSERT INTO reading_listening67.web_validation_event(id,job_id,kind,data) VALUES($1,$2,$3,$4::jsonb)',[randomUUID(),job.jobId,'validation_pending',JSON.stringify({phase:state.phase,round:state.round,issues:state.issues,nextInSeconds:seconds})]);

@@ -1,11 +1,11 @@
 /** Kiểm đủ audit và nhận xét; trả danh sách lỗi để AI sửa đúng ô, không tạo lời giải thay AI. */
-export const VALIDATION_VERSION = 'materials-validation-20261026-v1';
+export const VALIDATION_VERSION = 'materials-validation-20261026-v2';
 const copy=value=>JSON.parse(JSON.stringify(value));
 const text=value=>String(value??'').normalize('NFKC').replace(/[\u200B-\u200D\u2060\uFEFF]/g,'').replace(/\s+/g,' ').trim();
 const evidence=value=>text(value).toLocaleLowerCase('vi').replace(/[^\p{L}\p{N}]+/gu,' ').trim();
 const keys=(value,wanted)=>value&&typeof value==='object'&&!Array.isArray(value)&&JSON.stringify(Object.keys(value).sort())===JSON.stringify([...wanted].sort());
 const resultKeys=['target_id','unit_audit','relation_status','economy_status','critical_failure','primary_issue_unit_id','proposed_error_code','why_student_wrong'];
-export function validateAudit(value,targets,profile,chooseIssue,feedbackStatesProblem=value=>/(chưa|thiếu|nhầm|sai|không|quá)/iu.test(value)) {
+export function validateAudit(value,targets,profile,chooseIssue,feedbackStatesProblem=value=>/(chưa|thiếu|nhầm|sai|không|quá)/iu.test(value),publicTextAllowed=()=>true) {
   const issues=[],decisions={},accepted={};
   const add=(targetId,field,code,message,scope='audit')=>issues.push({targetId,field,code,message,scope});
   if(!keys(value,['schema_version','lesson_id','prompt_version','oracle_version','results']))return {issues:[{targetId:null,field:'response',code:'AI_SCHEMA_INVALID',message:'Phản hồi thiếu/thừa trường hoặc không phải JSON object.',scope:'response'}],accepted,decisions};
@@ -43,13 +43,13 @@ export function validateAudit(value,targets,profile,chooseIssue,feedbackStatesPr
     const unitIds=[...units.map(u=>u.id),oracle.required_relation.id,...oracle.critical_failures.map(f=>f.id),'economy'];
     if(raw.primary_issue_unit_id!==null&&!unitIds.includes(raw.primary_issue_unit_id))add(id,'primary_issue_unit_id','AI_ISSUE_INVALID','Ý lỗi không có trong tiêu chí.');
     if(raw.proposed_error_code!==null&&!profile.error_codes.includes(raw.proposed_error_code))add(id,'proposed_error_code','AI_ERROR_CODE_INVALID','Mã lỗi ngoài danh sách.');
-    if(issues.length>start)continue;
+    if(issues.slice(start).some(issue=>issue.scope==='audit'))continue;
     const normalized=copy(raw);normalized.unit_audit=units.map(u=>normalized.unit_audit.find(row=>row.unit_id===u.id));
     const decision=chooseIssue(normalized,oracle);decisions[id]=decision;accepted[id]=normalized;
     if(decision.verdict!=='correct'){
       const explanation=text(raw.why_student_wrong);
       if(explanation.length<18||explanation.length>520)add(id,'why_student_wrong','AI_EXPLANATION_LENGTH','Viết giải thích cụ thể dài 18–520 ký tự.','feedback');
-      else if(/semantic unit|proposition|verdict|error[_ -]?code|primary_issue|critical_failure|economy_status|relation_status/i.test(explanation)||(explanation.match(/→|=>|\//g)||[]).length>1)add(id,'why_student_wrong','AI_EXPLANATION_LANGUAGE','Viết tiếng Việt dễ hiểu, bỏ thuật ngữ nội bộ và chuỗi ký hiệu.','feedback');
+      else if(!publicTextAllowed(explanation)||/semantic unit|proposition|verdict|error[_ -]?code|primary_issue|critical_failure|economy_status|relation_status/i.test(explanation)||(explanation.match(/→|=>|\//g)||[]).length>1)add(id,'why_student_wrong','AI_EXPLANATION_LANGUAGE','Viết tiếng Việt dễ hiểu, bỏ thuật ngữ nội bộ và chuỗi ký hiệu.','feedback');
       else if(!feedbackStatesProblem(explanation))add(id,'why_student_wrong','AI_EXPLANATION_UNSPECIFIC','Chỉ rõ bài làm đang thiếu hoặc sai điều gì; dùng cách nói Em còn thiếu…, Em chưa nêu… hoặc Em đang nhầm….','feedback');
     }
   }

@@ -106,7 +106,7 @@ export function createReading67WebStore({db,grader,homework}) {
     const {providerResponse:_private,...data}=result;
     await tx.query('INSERT INTO reading_listening67.web_result(attempt_id,data) VALUES($1,$2::jsonb)',[job.attemptId,JSON.stringify(data)]);
     await tx.query("UPDATE reading_listening67.web_job SET status='done',finished_at=now(),lease_until=NULL WHERE id=$1",[job.jobId]);
-    if(homework)await homework.outcome(tx,{ownerId:job.ownerId,courseId:owned.course_id,code:owned.assignment_code,version:owned.content_version},job.jobId);
+    if(homework)await homework.outcome(tx,{ownerId:job.ownerId,courseId:owned.course_id,code:owned.assignment_code,version:owned.content_version},validation?job.jobId+':'+grader.validationVersion+':complete':job.jobId);
   });}
   async function fail(job,error){return db.transaction(async tx=>{const owned=await assertOwner(tx,job);const code=String(error.code||'GRADING_VALIDATION_FAILED').slice(0,100);const status=code==='AI_OUTCOME_UNKNOWN'?'needs_review':'failed';await tx.query('UPDATE reading_listening67.web_job SET status=$2,error_code=$3,finished_at=now(),lease_until=NULL WHERE id=$1',[job.jobId,status,code]);if(homework)await homework.outcome(tx,{ownerId:job.ownerId,courseId:owned.course_id,code:owned.assignment_code,version:owned.content_version},job.jobId);});}
   async function recoverExpired(){return db.transaction(async tx=>{

@@ -1,6 +1,6 @@
 FROM node:24-alpine
 WORKDIR /app
-COPY backend/package*.json ./
+COPY backend/ops/listening-homework67/package*.json ./
 RUN npm ci --omit=dev
 COPY backend/src/reading-listening67 ./src/reading-listening67
 COPY backend/src/listening-homework67 ./src/listening-homework67

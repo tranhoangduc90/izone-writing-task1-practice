@@ -11,6 +11,8 @@ const saveInput=z.object({baseRevision:z.number().int().nonnegative(),mutationId
 const submitInput=z.object({revision:z.number().int().positive(),requestId:z.uuid()}).strict();
 const id=z.uuid();
 export function createReading67WebRouter({store,content,grader,authenticate,identity,config={},homework,registerCta,adminKey}){
+  const questionNumbers=content.questions?.map(q=>q.number)||[1,2,3,4];
+  const lessonSaveInput=saveInput.extend({body:saveInput.shape.body.extend({flags:z.array(z.number().int().refine(n=>questionNumbers.includes(n))).max(questionNumbers.length)})});
   const router=express.Router();router.use(express.json({limit:'250kb',strict:true}));
   const route=fn=>(q,r,next)=>Promise.resolve(fn(q,r)).catch(next);
   const parse=(schema,value)=>{const result=schema.safeParse(value);if(!result.success)throw new WebGradingError('WEB_INVALID_INPUT',400);return result.data;};
@@ -28,7 +30,7 @@ export function createReading67WebRouter({store,content,grader,authenticate,iden
     }));
   }
   if(identity){
-    router.get('/config',(_q,r)=>r.json({ok:true,version:4,autoRole:true,title:content.title,code:content.code,...config}));
+    router.get('/config',(_q,r)=>r.json({ok:true,version:4,autoRole:true,title:content.title,code:content.code,lesson:content.lesson||10,type:content.type||'materials',...config}));
     router.get('/classes',route(async(_q,r)=>r.json({ok:true,classes:await identity.classes()})));
     router.get('/classes/:classId/students',route(async(q,r)=>r.json({ok:true,students:await identity.roster(q.params.classId)})));
     const identityInput=z.object({studentRef:z.uuid().optional(),identity:z.object({authority:z.literal('erp-contact'),id:z.string().regex(/^[1-9]\d{0,18}$/)}).strict().optional(),classCode:z.string().regex(/^[A-Z0-9._-]{2,32}$/).optional()}).strict().refine(v=>!!v.studentRef!==!!v.identity);
@@ -47,7 +49,7 @@ export function createReading67WebRouter({store,content,grader,authenticate,iden
   router.get('/lesson',route(async(q,r)=>r.json({ok:true,content,identity:q.webIdentity,grader:{hash:grader.pins.sha256,version:grader.pins.workflowVersion},mode:'local_test_real_grading'})));
   router.get('/draft',route(async(q,r)=>r.json({ok:true,...await store.draft(scope(q))})));
   router.get('/homework',route(async(q,r)=>r.json({ok:true,...(homework?await homework.status(scope(q)):{status:'not_applicable'})})));
-  router.put('/draft',route(async(q,r)=>r.json({ok:true,...await store.save(scope(q),parse(saveInput,q.body))})));
+  router.put('/draft',route(async(q,r)=>r.json({ok:true,...await store.save(scope(q),parse(lessonSaveInput,q.body))})));
   router.post('/submit',route(async(q,r)=>r.status(202).json({ok:true,...await store.submit(scope(q),parse(submitInput,q.body))})));
   router.get('/attempts',route(async(q,r)=>r.json({ok:true,attempts:await store.history(scope(q)),archives:await store.archives(scope(q)),firstCompleted:await store.firstCompleted(scope(q))})));
   router.post('/reset',route(async(q,r)=>r.json({ok:true,...await store.reset(scope(q),parse(z.object({baseRevision:z.number().int().nonnegative(),mutationId:z.uuid()}).strict(),q.body))})));

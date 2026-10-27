@@ -11,10 +11,13 @@ const denied=(code='ACCESS_DENIED',status=403)=>{throw new WebGradingError(code,
 const bearer=q=>/^Bearer ([\w-]{43})$/.exec(q.headers.authorization||'')?.[1];
 const cookie=q=>/(?:^|;\s*)reading67_teacher=([\w-]{43})(?:;|$)/.exec(q.headers.cookie||'')?.[1];
 
-export function createReading67WebIdentity({db,context,allowedClassIds,verifyGoogle,ownerSource,clock=Date.now,cookiePath='/api/reading-skills67'}){
+export function createReading67WebIdentity({db,context,allowedClassIds,verifyGoogle,ownerSource,clock=Date.now,cookiePath='/api/reading-skills67',includeEmptyClasses=false}){
  const allowed=new Set(allowedClassIds.map(String));
  const courseAllowed=id=>{if(!allowed.has(String(id)))denied();};
- async function classes(){return (await context.classes()).filter(c=>allowed.has(c.id));}
+ async function classes(){
+  if(includeEmptyClasses)return (await context.snapshot()).classes.filter(c=>allowed.has(c.erp_course_class_id)).map(c=>({id:c.erp_course_class_id,classCode:c.erp_class_name_snapshot})).sort((a,b)=>a.classCode.localeCompare(b.classCode,'vi'));
+  return (await context.classes()).filter(c=>allowed.has(c.id));
+ }
  async function roster(classId){courseAllowed(classId);return (await (ownerSource?ownerSource.roster(classId):context.roster(classId))).map(s=>({studentRef:s.studentRef,name:s.name}));}
  async function member(classId,studentRef){
   courseAllowed(classId);

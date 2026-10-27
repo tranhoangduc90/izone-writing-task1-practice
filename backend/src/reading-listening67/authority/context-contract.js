@@ -17,7 +17,7 @@ const name = z.string().min(1).max(500);
 const rows = shape => z.array(z.object(shape).strict()).max(10000);
 const payloadSchema = z.object({
   apiVersion: z.literal(1), productId: z.literal(CONTEXT_PRODUCT),
-  classes: rows({ erp_course_class_id: id, erp_class_name_snapshot: name }),
+  classes: rows({ erp_course_class_id: id, erp_class_name_snapshot: name, erp_course_id:id.nullable().optional() }),
   students: rows({ public_id: z.uuid(), erp_course_class_id: id,
     erp_student_contact_id: id, erp_student_name_snapshot: name,
     status: z.enum(['approved', 'rejected', 'pending_review', 'superseded']) }),
@@ -34,7 +34,7 @@ export class ContextError extends Error {
 function unique(values) {
   if (new Set(values).size !== values.length) throw new ContextError('CONTEXT_DUPLICATE');
 }
-function checkedPayload(input) {
+function checkedPayload(input, {allowDiscoveredClasses=false}={}) {
   const parsed = payloadSchema.safeParse(input);
   if (!parsed.success) throw new ContextError('CONTEXT_INVALID_PAYLOAD');
   const p = parsed.data;
@@ -45,7 +45,8 @@ function checkedPayload(input) {
   unique(p.accounts.filter(row => row.google_subject !== null).map(row => row.google_subject));
   unique(p.access.map(row => `${row.reviewer_email}:${row.erp_course_class_id}`));
   const classes = new Set(p.classes.map(row => row.erp_course_class_id));
-  if (p.classes.some(row => !CONTEXT_CLASS_IDS.includes(row.erp_course_class_id))) throw new ContextError('CONTEXT_OUTSIDE_SCOPE');
+  // Nguồn K67 hiện có mọi lớp ERP; quyền sản phẩm vẫn do allowedClassIds của identity quyết định.
+  if (!allowDiscoveredClasses&&p.classes.some(row => !CONTEXT_CLASS_IDS.includes(row.erp_course_class_id))) throw new ContextError('CONTEXT_OUTSIDE_SCOPE');
   const accounts = new Set(p.accounts.map(row => row.email));
   for (const row of [...p.students, ...p.memberships, ...p.access]) {
     if (!classes.has(row.erp_course_class_id)) throw new ContextError('CONTEXT_OUTSIDE_SCOPE');
@@ -56,14 +57,14 @@ function checkedPayload(input) {
 function revision(payload) {
   return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
 }
-export function createContextSnapshot(input, now = Date.now()) {
-  const payload = checkedPayload(input);
+export function createContextSnapshot(input, now = Date.now(), options) {
+  const payload = checkedPayload(input,options);
   return { ...payload, capturedAt: new Date(now).toISOString(), sourceRevision: revision(payload) };
 }
-export function parseContextSnapshot(input, now = Date.now()) {
+export function parseContextSnapshot(input, now = Date.now(), options) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new ContextError('CONTEXT_INVALID_PAYLOAD');
   const { capturedAt, sourceRevision, ...rest } = input;
-  const payload = checkedPayload(rest);
+  const payload = checkedPayload(rest,options);
   const captured = Date.parse(capturedAt);
   if (typeof capturedAt !== 'string' || !Number.isFinite(captured)
       || new Date(captured).toISOString() !== capturedAt

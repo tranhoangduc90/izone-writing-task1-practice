@@ -2,7 +2,7 @@ import {hash,fail} from './domain.js';
 import {parseContextSnapshot} from './context-contract.js';
 
 // Đọc bản chụp đã phiên bản hóa; không ghi hay truy vấn kho dữ liệu của sản phẩm khác.
-export function createContext({url,key,fetcher=fetch,clock=Date.now}){
+export function createContext({url,key,fetcher=fetch,clock=Date.now,allowDiscoveredClasses=false}){
  let cache,pending;
  async function snapshot(){
   if(cache&&clock()-cache.loadedAt<30000&&clock()-Date.parse(cache.value.capturedAt)<120000)return cache.value;
@@ -23,7 +23,7 @@ export function createContext({url,key,fetcher=fetch,clock=Date.now}){
   if(value.apiVersion!==1||value.productId!=='PRODUCT-TERM-MINI-K67'||!Number.isFinite(age)||age < -5000||age>120000
    ||hash(JSON.stringify(payload))!==sourceRevision||!['classes','students','memberships','accounts','access'].every(k=>Array.isArray(value[k])))
    fail('CONTEXT_INVALID','Bản chụp quyền đã cũ hoặc không đúng hợp đồng.',503);
-  try{value=parseContextSnapshot(value,clock());}catch{fail('CONTEXT_INVALID','Cấu trúc hoặc định danh nguồn quyền không hợp lệ.',503);}
+  try{value=parseContextSnapshot(value,clock(),{allowDiscoveredClasses});}catch{fail('CONTEXT_INVALID','Cấu trúc hoặc định danh nguồn quyền không hợp lệ.',503);}
   cache={value,loadedAt:clock()};return value;
  }
  async function roster(classId){

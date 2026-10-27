@@ -12,7 +12,7 @@ const values=s=>[s.ownerId,s.courseId,s.code,s.version];
 const where='owner_id=$1 AND course_id=$2 AND assignment_code=$3 AND content_version=$4';
 const canonical=value=>JSON.stringify(value,(_k,v)=>v&&typeof v==='object'&&!Array.isArray(v)?Object.fromEntries(Object.entries(v).sort(([a],[b])=>a.localeCompare(b))):v);
 
-export function createReading67WebStore({db,grader,homework}) {
+export function createReading67WebStore({db,grader,homework,resultSummary=reading67ResultSummary}) {
   const validation=grader.validationVersion?createValidationStore({db,assertOwner}):null;
   const gateFor=body=>grader.inspectWeb(body.answers||{});
   function draftView(row){const body=row?.body||emptyBody();return {body,runNo:row?.run_no||1,revision:row?.revision||0,savedAt:row?.saved_at||null,completeness:gateFor(body).completeness};}
@@ -67,10 +67,10 @@ export function createReading67WebStore({db,grader,homework}) {
     if(!row)throw new WebGradingError('ATTEMPT_NOT_FOUND',404);
     const validationProgress=validation?(await executor.query("SELECT state->>'phase' AS phase,state->>'round' AS round,state->'serviceError' AS service_error,jsonb_array_length(COALESCE(state->'issues','[]'::jsonb)) AS pending FROM reading_listening67.web_validation WHERE job_id=$1",[row.job_id])).rows[0]||null:null;
     const recovery=validation?(await executor.query("SELECT data->'previous'->>'error_code' AS error_code,data->'previous'->>'finished_at' AS failed_at,created_at AS started_at FROM reading_listening67.web_validation_event WHERE job_id=$1 AND kind='recovery_started' ORDER BY created_at LIMIT 1",[row.job_id])).rows[0]||null:null;
-    return {attemptId:row.id,jobId:row.job_id,status:row.status,errorCode:row.error_code,createdAt:row.created_at,finishedAt:row.finished_at,runNo:row.run_no,draftRevision:row.draft_revision,snapshot:row.snapshot,completeness:row.completeness,result:row.status==='done'?row.result:null,progress:row.status==='done'?reading67ResultSummary(row.result):null,validationProgress,recovery,graderHash:row.grader_hash,fromCache};
+    return {attemptId:row.id,jobId:row.job_id,status:row.status,errorCode:row.error_code,createdAt:row.created_at,finishedAt:row.finished_at,runNo:row.run_no,draftRevision:row.draft_revision,snapshot:row.snapshot,completeness:row.completeness,result:row.status==='done'?row.result:null,progress:row.status==='done'?resultSummary(row.result):null,validationProgress,recovery,graderHash:row.grader_hash,fromCache};
   }
   async function attempt(scope,id){return attemptView(db,scope,id);}
-  async function history(scope){return (await db.query(`SELECT a.id AS "attemptId",a.run_no AS "runNo",a.draft_revision AS "draftRevision",a.created_at AS "createdAt",j.finished_at AS "finishedAt",j.status,j.error_code AS "errorCode",r.data->'grading'->'summary' AS summary,r.data AS result FROM reading_listening67.web_attempt a JOIN reading_listening67.web_job j ON j.attempt_id=a.id LEFT JOIN reading_listening67.web_result r ON r.attempt_id=a.id WHERE a.owner_id=$1 AND a.course_id=$2 AND a.assignment_code=$3 AND a.content_version=$4 ORDER BY a.created_at DESC LIMIT 40`,values(scope))).rows.map(({result,...item})=>({...item,progress:item.status==='done'?reading67ResultSummary(result):null}));}
+  async function history(scope){return (await db.query(`SELECT a.id AS "attemptId",a.run_no AS "runNo",a.draft_revision AS "draftRevision",a.created_at AS "createdAt",j.finished_at AS "finishedAt",j.status,j.error_code AS "errorCode",r.data->'grading'->'summary' AS summary,r.data AS result FROM reading_listening67.web_attempt a JOIN reading_listening67.web_job j ON j.attempt_id=a.id LEFT JOIN reading_listening67.web_result r ON r.attempt_id=a.id WHERE a.owner_id=$1 AND a.course_id=$2 AND a.assignment_code=$3 AND a.content_version=$4 ORDER BY a.created_at DESC LIMIT 40`,values(scope))).rows.map(({result,...item})=>({...item,progress:item.status==='done'?resultSummary(result):null}));}
   // Reset lưu nguyên nháp cũ rồi mới mở lượt mới, cùng giao dịch và ID chống lặp.
   async function reset(scope,{baseRevision,mutationId}){return db.transaction(async tx=>{
     const args=values(scope),requestHash=sha256(canonical({operation:'reset',baseRevision}));
@@ -102,13 +102,14 @@ export function createReading67WebStore({db,grader,homework}) {
     const owned=await assertOwner(tx,job);
     if(validation){const state=(await tx.query('SELECT state FROM reading_listening67.web_validation WHERE job_id=$1',[job.jobId])).rows[0]?.state;if(state?.phase!=='complete'||state.version!==grader.validationVersion||result.grading?.validation?.version!==state.version||result.grading?.validation?.reviewedHash!==state.reviewedHash)throw new WebGradingError('RESULT_VALIDATION_REQUIRED',409);}
     const ids=result.grading?.target_results?.map(t=>t.target_id)||[];
-    if(result.context?.operationId!==job.jobId||result.context?.sourceDigest!==job.inputHash||result.pins?.sha256!==job.graderHash||ids.length!==20||new Set(ids).size!==20||grader.profile.expected_target_ids.some(id=>!ids.includes(id)))throw new WebGradingError('RESULT_IDENTITY_MISMATCH',409);
+    const expected=grader.profile.expected_target_ids;
+    if(result.context?.operationId!==job.jobId||result.context?.sourceDigest!==job.inputHash||result.pins?.sha256!==job.graderHash||ids.length!==expected.length||new Set(ids).size!==expected.length||expected.some(id=>!ids.includes(id)))throw new WebGradingError('RESULT_IDENTITY_MISMATCH',409);
     const {providerResponse:_private,...data}=result;
     await tx.query('INSERT INTO reading_listening67.web_result(attempt_id,data) VALUES($1,$2::jsonb)',[job.attemptId,JSON.stringify(data)]);
     await tx.query("UPDATE reading_listening67.web_job SET status='done',finished_at=now(),lease_until=NULL WHERE id=$1",[job.jobId]);
     if(homework)await homework.outcome(tx,{ownerId:job.ownerId,courseId:owned.course_id,code:owned.assignment_code,version:owned.content_version},validation?job.jobId+':'+grader.validationVersion+':complete':job.jobId);
   });}
-  async function fail(job,error){return db.transaction(async tx=>{const owned=await assertOwner(tx,job);const code=String(error.code||'GRADING_VALIDATION_FAILED').slice(0,100);const status=code==='AI_OUTCOME_UNKNOWN'?'needs_review':'failed';await tx.query('UPDATE reading_listening67.web_job SET status=$2,error_code=$3,finished_at=now(),lease_until=NULL WHERE id=$1',[job.jobId,status,code]);if(homework)await homework.outcome(tx,{ownerId:job.ownerId,courseId:owned.course_id,code:owned.assignment_code,version:owned.content_version},job.jobId);});}
+  async function fail(job,error){return db.transaction(async tx=>{const owned=await assertOwner(tx,job);const code=String(error.code||'GRADING_VALIDATION_FAILED').slice(0,100);const status=['AI_OUTCOME_UNKNOWN','AI_VALIDATION_NEEDS_REVIEW'].includes(code)?'needs_review':'failed';await tx.query('UPDATE reading_listening67.web_job SET status=$2,error_code=$3,finished_at=now(),lease_until=NULL WHERE id=$1',[job.jobId,status,code]);if(homework)await homework.outcome(tx,{ownerId:job.ownerId,courseId:owned.course_id,code:owned.assignment_code,version:owned.content_version},job.jobId);});}
   async function recoverExpired(){return db.transaction(async tx=>{
     if(validation){
       const expired=(await tx.query("SELECT j.id FROM reading_listening67.web_job j WHERE j.status='processing' AND j.lease_until<=now() FOR UPDATE OF j SKIP LOCKED")).rows;

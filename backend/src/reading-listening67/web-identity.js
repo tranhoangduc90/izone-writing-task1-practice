@@ -9,9 +9,11 @@ const DAY=86400000;
 const secret=()=>randomBytes(32).toString('base64url');
 const denied=(code='ACCESS_DENIED',status=403)=>{throw new WebGradingError(code,status);};
 const bearer=q=>/^Bearer ([\w-]{43})$/.exec(q.headers.authorization||'')?.[1];
-const cookie=q=>/(?:^|;\s*)reading67_teacher=([\w-]{43})(?:;|$)/.exec(q.headers.cookie||'')?.[1];
 
-export function createReading67WebIdentity({db,context,allowedClassIds,verifyGoogle,ownerSource,clock=Date.now,cookiePath='/api/reading-skills67'}){
+
+export function createReading67WebIdentity({db,context,allowedClassIds,verifyGoogle,ownerSource,clock=Date.now,cookiePath='/api/reading-skills67',cookieName='reading67_teacher'}){
+ if(!/^[a-z0-9_]+$/.test(cookieName))throw Error('COOKIE_NAME_INVALID');
+ const cookie=q=>new RegExp('(?:^|;\\s*)'+cookieName+'=([\\w-]{43})(?:;|$)').exec(q.headers.cookie||'')?.[1];
  const allowed=new Set(allowedClassIds.map(String));
  const courseAllowed=id=>{if(!allowed.has(String(id)))denied();};
  async function classes(){return (await context.classes()).filter(c=>allowed.has(c.id));}
@@ -55,7 +57,7 @@ export function createReading67WebIdentity({db,context,allowedClassIds,verifyGoo
  }
  async function logoutStudent(q){const token=bearer(q);if(token)await db.query('DELETE FROM reading_listening67.web_student_session WHERE token_hash=$1',[sha256(token)]);}
  function writeCookie(q,r,token,row){
-  r.cookie('reading67_teacher',token,{path:cookiePath,httpOnly:true,secure:q.secure,sameSite:q.secure?'none':'lax',partitioned:q.secure,...(!token?{maxAge:0}:row?.remembered?{maxAge:Math.max(0,Date.parse(row.expires_at)-clock())}:{})});
+  r.cookie(cookieName,token,{path:cookiePath,httpOnly:true,secure:q.secure,sameSite:q.secure?'none':'lax',partitioned:q.secure,...(!token?{maxAge:0}:row?.remembered?{maxAge:Math.max(0,Date.parse(row.expires_at)-clock())}:{})});
  }
  async function loginTeacher(q,r,{credential,remember=true}){
   let p;try{p=await verifyGoogle(credential);}catch{denied('GOOGLE_IDENTITY_INVALID',401);}

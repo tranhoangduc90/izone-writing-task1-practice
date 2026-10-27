@@ -12,7 +12,7 @@ const clause='owner_id=$1 AND course_id=$2 AND assignment_code=$3 AND content_ve
 const fail=(code,status=409)=>{throw new WebGradingError(code,status);};
 const scopeFor=b=>({ownerId:b.owner_id,courseId:b.course_id,code:b.assignment_code,version:b.content_version});
 
-export function createReading67Homework({db,metadata,pageBase,owner,docs,clock=Date.now}){
+export function createReading67Homework({db,metadata,pageBase,owner,docs,clock=Date.now,planWrite=planReading67HomeworkWrite,resultSummary=reading67ResultSummary,progressText=reading67ProgressText,completionText}){
  const page=new URL(pageBase);if(page.protocol!=='https:')throw Error('HTTPS_PAGE_BASE_REQUIRED');
  page.searchParams.set('server','1');page.searchParams.set('assignmentCode',metadata.code);
  const entryUrl=page.href;
@@ -41,7 +41,9 @@ export function createReading67Homework({db,metadata,pageBase,owner,docs,clock=D
   if(attempt?.status==='done'){
    text=no===1?'Đã hoàn thành ngay từ lần đầu.':first&&first!==no?`Đã hoàn thành lượt luyện lại số ${no} (tổng ${no-1} lần reset). Lần hoàn thành đầu tiên: lượt ${first}.`:`Đã hoàn thành sau ${no-1} lần reset (lần làm bài số ${no}).`;
    const saved=(await tx.query('SELECT data FROM reading_listening67.web_result WHERE attempt_id=$1',[attempt.id])).rows[0];
-   text+=reading67ProgressText(reading67ResultSummary(saved?.data));
+   const progress=resultSummary(saved?.data);
+   if(completionText)text=completionText({runNo:no,firstRunNo:first,progress});
+   text+=progressText(progress);
    text+=' Giảng viên nhấn vào đây để xem kết quả.';
   }else if(attempt){
    text=['queued','processing'].includes(attempt.status)?`Đã nộp bài lần ${no}, đang chờ chấm. Giảng viên nhấn vào đây để xem bài đã nộp.`:`Bài lần ${no} đã được lưu, chưa có kết quả chấm. Giảng viên nhấn vào đây để xem bài đã nộp.`;
@@ -65,7 +67,7 @@ export function createReading67Homework({db,metadata,pageBase,owner,docs,clock=D
  async function register(s,target){
   if(target.classId!==s.courseId||target.studentRef!==s.ownerId||target.code!==s.code||target.version!==s.version)fail('DOC_IDENTITY_MISMATCH');
   const verified=await owner.verify(target);
-  const ctaPlan=planReading67HomeworkWrite(await docs.read(verified.documentId),{document_id:verified.documentId,tab_id:verified.tabId,code:s.code},{kind:'cta',payload:{url:entryUrl}});
+  const ctaPlan=planWrite(await docs.read(verified.documentId),{document_id:verified.documentId,tab_id:verified.tabId,code:s.code},{kind:'cta',payload:{url:entryUrl}});
   await db.transaction(async tx=>{
    const b=await ensure(tx,s);
    if(b.target&&['classId','studentRef','code','version','courseId','courseWorkId','submissionId','documentId','tabId'].some(k=>b.target[k]!==verified[k]))fail('DOC_TARGET_CHANGED');
@@ -99,8 +101,8 @@ export function createReading67Homework({db,metadata,pageBase,owner,docs,clock=D
    if(b.target&&['courseId','courseWorkId','submissionId','documentId','tabId'].some(k=>b.target[k]!==target[k]))fail('DOC_TARGET_CHANGED');
    await db.query('UPDATE reading_listening67.web_homework_binding SET target=$2::jsonb WHERE id=$1',[b.id,JSON.stringify(target)]);
    const effective={...b,document_id:target.documentId,tab_id:target.tabId,code:s.code};
-   let plan=planReading67HomeworkWrite(await docs.read(target.documentId),effective,job);
-   if(!plan.verified){await docs.write(target.documentId,plan);plan=planReading67HomeworkWrite(await docs.read(target.documentId),{...effective,last_doc_text:job.kind==='status'?job.payload.text:b.last_doc_text},job);}
+   let plan=planWrite(await docs.read(target.documentId),effective,job);
+   if(!plan.verified){await docs.write(target.documentId,plan);plan=planWrite(await docs.read(target.documentId),{...effective,last_doc_text:job.kind==='status'?job.payload.text:b.last_doc_text},job);}
    if(!plan.verified)fail('DOC_READBACK_FAILED');
    await db.transaction(async tx=>{
     const row=(await tx.query("UPDATE reading_listening67.web_homework_job SET status='verified',verified_at=now(),error_code=NULL,lease_until=NULL WHERE id=$1 AND lease_id=$2 AND status='processing' AND lease_until>now() RETURNING id",[job.id,job.leaseId])).rows[0];

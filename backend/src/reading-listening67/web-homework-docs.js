@@ -13,17 +13,17 @@ const fail=code=>{throw new WebGradingError(code,409);};
 const allTabs=tabs=>(tabs||[]).flatMap(tab=>[tab,...allTabs(tab.childTabs)]);
 const runs=content=>(content||[]).flatMap(e=>e.paragraph?.elements||[]).filter(e=>e.textRun).map(e=>({start:e.startIndex,end:e.startIndex+e.textRun.content.length,text:e.textRun.content,style:e.textRun.textStyle||{}}));
 const cellText=cell=>runs(cell?.content).map(r=>r.text).join('').replace(/\n$/,'');
-function scan(content,parents=[],found={paragraphs:[],statuses:[]}){
+function scan(content,parents=[],found={paragraphs:[],statuses:[]},statusLabel=HOMEWORK_STATUS){
  for(const e of content||[]){
   if(e.paragraph){const rs=runs([e]);found.paragraphs.push({text:rs.map(r=>r.text).join(''),runs:rs,parents});}
   if(!e.table)continue;
   const rows=e.table.tableRows||[];
   for(let i=0;i<rows.length-1;i++)for(let col=0;col<(rows[i].tableCells||[]).length;col++){
-   if(cellText(rows[i].tableCells[col]).trim()===HOMEWORK_STATUS&&rows[i+1].tableCells?.[col]){
+   if(cellText(rows[i].tableCells[col]).trim()===statusLabel&&rows[i+1].tableCells?.[col]){
     found.statuses.push({cell:rows[i+1].tableCells[col],parents:[...parents,e]});
    }
   }
-  for(const row of rows)for(const cell of row.tableCells||[])scan(cell.content,[...parents,e],found);
+  for(const row of rows)for(const cell of row.tableCells||[])scan(cell.content,[...parents,e],found,statusLabel);
  }
  return found;
 }
@@ -42,18 +42,19 @@ function linked(rs,start,end,url){return charsBetween(rs,start,end).every(c=>c.s
 
 // Hai bài Reading có thể cùng tab: CTA phải đứng ngay trước mã, ô trạng thái
 // lấy trong bảng gần nhất bao quanh mã. Thiếu ranh giới chắc chắn thì không đoán.
-export function locateReading67Homework(document,binding){
+export function locateReading67Homework(document,binding,contract={}){
  if(document.documentId!==binding.document_id||!document.revisionId)fail('DOC_IDENTITY_MISMATCH');
  if(!binding.code)fail('DOC_CODE_MISMATCH');
  const tab=allTabs(document.tabs).find(t=>t.tabProperties?.tabId===binding.tab_id);
  if(!tab)fail('DOC_TAB_NOT_FOUND');
- const found=scan(tab.documentTab?.body?.content),paragraphs=found.paragraphs.filter(p=>p.text.trim());
+ const found=scan(tab.documentTab?.body?.content,[],{paragraphs:[],statuses:[]},contract.status||HOMEWORK_STATUS),paragraphs=found.paragraphs.filter(p=>p.text.trim());
  const mentions=paragraphs.filter(p=>p.text.includes(binding.code));
  if(mentions.length!==1||mentions[0].text.trim()!==binding.code)fail('DOC_CODE_MISMATCH');
+ const ctaLabel=contract.cta||HOMEWORK_CTA;
  const code=mentions[0],at=paragraphs.indexOf(code),cta=paragraphs[at-1];
- if(!cta||cta.text.trim()!==HOMEWORK_CTA)fail('DOC_CTA_PAIR_INVALID');
- const offset=cta.text.indexOf(HOMEWORK_CTA),start=indexAt(cta.runs,offset);
- charsBetween(cta.runs,start,start+HOMEWORK_CTA.length);
+ if(!cta||cta.text.trim()!==ctaLabel)fail('DOC_CTA_PAIR_INVALID');
+ const offset=cta.text.indexOf(ctaLabel),start=indexAt(cta.runs,offset);
+ charsBetween(cta.runs,start,start+ctaLabel.length);
  let candidates=[];
  for(const parent of [...code.parents].reverse()){
   // Ô trạng thái phải thuộc chính bảng bao mã, không lấy từ bảng bài bên cạnh.
@@ -61,11 +62,11 @@ export function locateReading67Homework(document,binding){
   if(scoped.length){candidates=scoped;break;}
  }
  if(candidates.length!==1)fail('DOC_STATUS_AMBIGUOUS');
- return {tabId:binding.tab_id,cta:{...cta,start,end:start+HOMEWORK_CTA.length},cell:candidates[0].cell};
+ return {tabId:binding.tab_id,cta:{...cta,start,end:start+ctaLabel.length},cell:candidates[0].cell};
 }
 
-export function planReading67HomeworkWrite(document,binding,job){
- const scope=locateReading67Homework(document,binding),tabId=scope.tabId;
+export function planReading67HomeworkWrite(document,binding,job,contract={}){
+ const scope=locateReading67Homework(document,binding,contract),tabId=scope.tabId;
  if(job.kind==='cta'){
   if(!/^https:\/\//.test(job.payload.url||''))fail('DOC_LINK_INVALID');
   const {cta}=scope,correct=charsBetween(cta.runs,cta.start,cta.end).every(({style})=>{
@@ -75,11 +76,11 @@ export function planReading67HomeworkWrite(document,binding,job){
   return {revisionId:document.revisionId,verified:correct,requests:correct?[]:[{updateTextStyle:{range:{startIndex:cta.start,endIndex:cta.end,tabId},textStyle:{link:{url:job.payload.url},underline:false,foregroundColor:{color:{rgbColor:{red:1,green:1,blue:1}}}},fields:'link,underline,foregroundColor'}}]};
  }
  if(job.kind!=='status'||typeof job.payload.text!=='string'||/[\r\n]/.test(job.payload.text))fail('DOC_STATUS_INVALID');
- const rs=runs(scope.cell.content),existing=cellText(scope.cell),target=HOMEWORK_PREFIX+job.payload.text;
- const managed=existing.split('\n').filter(line=>line.startsWith(HOMEWORK_PREFIX));
+ const rs=runs(scope.cell.content),existing=cellText(scope.cell),prefixLabel=contract.prefix||HOMEWORK_PREFIX,target=prefixLabel+job.payload.text;
+ const managed=existing.split('\n').filter(line=>line.startsWith(prefixLabel));
  if(managed.length>1)fail('DOC_STATUS_AMBIGUOUS');
  const old=managed[0];
- if((!old&&binding.last_doc_text)||(old&&old!==HOMEWORK_PREFIX+binding.last_doc_text&&old!==target))fail('DOC_MANUAL_CONFLICT');
+ if((!old&&binding.last_doc_text)||(old&&old!==prefixLabel+binding.last_doc_text&&old!==target))fail('DOC_MANUAL_CONFLICT');
  const offset=old?existing.indexOf(old):existing.length,start=indexAt(rs,offset);
  const labelOffset=target.indexOf(LINK);
  if(job.payload.link&&(!/^https:\/\//.test(job.payload.link)||labelOffset<0))fail('DOC_LINK_INVALID');

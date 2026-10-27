@@ -7,10 +7,11 @@ import express from 'express';
 import {z} from 'zod';
 import {timingSafeEqual} from 'node:crypto';
 import {WebGradingError} from './web-grader.js';
-const saveInput=z.object({baseRevision:z.number().int().nonnegative(),mutationId:z.uuid(),body:z.object({answers:z.record(z.string(),z.string().max(12000)),annotations:z.array(z.record(z.string(),z.unknown())).max(300),notes:z.string().max(16000),flags:z.array(z.number().int().min(1).max(4)).max(4)}).strict()}).strict();
+const makeSaveInput=(flagCount=4)=>z.object({baseRevision:z.number().int().nonnegative(),mutationId:z.uuid(),body:z.object({answers:z.record(z.string(),z.string().max(12000)),annotations:z.array(z.record(z.string(),z.unknown())).max(300),notes:z.string().max(16000),flags:z.array(z.number().int().min(1).max(flagCount)).max(flagCount)}).strict()}).strict();
 const submitInput=z.object({revision:z.number().int().positive(),requestId:z.uuid()}).strict();
 const id=z.uuid();
 export function createReading67WebRouter({store,content,grader,authenticate,identity,config={},homework,registerCta,adminKey}){
+  const saveInput=makeSaveInput(config.flagCount||4);
   const router=express.Router();router.use(express.json({limit:'250kb',strict:true}));
   const route=fn=>(q,r,next)=>Promise.resolve(fn(q,r)).catch(next);
   const parse=(schema,value)=>{const result=schema.safeParse(value);if(!result.success)throw new WebGradingError('WEB_INVALID_INPUT',400);return result.data;};

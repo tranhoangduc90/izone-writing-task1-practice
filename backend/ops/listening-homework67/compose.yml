@@ -1,0 +1,41 @@
+name: listening-homework67
+services:
+  db:
+    container_name: listening-homework67-db
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: listening_homework67
+      POSTGRES_USER: listening_homework67_owner
+      POSTGRES_PASSWORD_FILE: /run/secrets/db-owner-password
+    volumes:
+      - ./private/database/owner-password:/run/secrets/db-owner-password:ro
+      - ./private/database/init.sql:/docker-entrypoint-initdb.d/10-listening-homework.sql:ro
+      - ./data/postgres:/var/lib/postgresql/data
+    networks: [private]
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U listening_homework67_owner -d listening_homework67]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  api:
+    container_name: listening-homework67-api
+    image: ${LISTENING_HOMEWORK_IMAGE:?Provide exact candidate image}
+    read_only: true
+    tmpfs: [/tmp]
+    volumes:
+      - ./private/api:/run/listening-homework:ro
+    ports: [127.0.0.1:8963:8963]
+    networks: [private, authority]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    cpus: 1
+    mem_limit: 512m
+networks:
+  private:
+    name: listening-homework67-private
+  authority:
+    external: true
+    name: n8n-net

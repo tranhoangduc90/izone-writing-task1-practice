@@ -8,13 +8,14 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {OAuth2Client} from 'google-auth-library';
 import {WebGradingError} from './web-grader.js';
-import {createReading67GoogleDocs,locateReading67Homework} from './web-homework-docs.js';
+import {createReading67GoogleDocs,locateReading67Homework,planReading67HomeworkWrite} from './web-homework-docs.js';
 import {createReading67HomeworkOwner} from './web-homework-owner.js';
 import {createReading67Homework} from './web-homework.js';
 import {createReading67CtaRegistrar} from './web-homework-cta.js';
 const run=promisify(execFile);
 const fail=code=>{throw new WebGradingError(code,403);};
-export async function createReading67HomeworkRuntime({config,db,content,identity,ownerSource}){
+export async function createReading67HomeworkRuntime({config,db,content,identity,ownerSource,contract,resultSummary,progressText,completionText}){
+ const locate=(d,b)=>locateReading67Homework(d,b,contract),planWrite=(d,b,j)=>planReading67HomeworkWrite(d,b,j,contract);
  const metadata={code:content.code,version:content.version,homeworkLesson:config.homeworkLesson};
  let auth;
  if(config.googleAuth.kind==='command'){
@@ -34,7 +35,7 @@ export async function createReading67HomeworkRuntime({config,db,content,identity
   async function verify(target){
    const expected=targets.find(t=>t.classId===target.classId&&t.studentRef===target.studentRef);
    if(!expected||Object.keys(expected).filter(k=>k!=='googleUserId').some(k=>target[k]!==expected[k])||(target.googleUserId&&target.googleUserId!==expected.googleUserId))fail('DOC_IDENTITY_MISMATCH');
-   const doc=await docs.read(expected.documentId);locateReading67Homework(doc,{document_id:expected.documentId,tab_id:expected.tabId,code:content.code});
+   const doc=await docs.read(expected.documentId);locate(doc,{document_id:expected.documentId,tab_id:expected.tabId,code:content.code});
    return {...expected,sourceMode:'explicit_test_fixture'};
   }
   owner={verify,async resolve(scope,cached){
@@ -45,11 +46,11 @@ export async function createReading67HomeworkRuntime({config,db,content,identity
    const matching=targets.filter(t=>t.courseId===input.courseId&&t.googleUserId===input.googleUserId);
    if(matching.length!==1)fail('OWNER_MISMATCH');return matching[0];
   }};
- }else if(config.owner.kind==='http')owner=createReading67HomeworkOwner({url:config.owner.url,key:(await fs.readFile(config.owner.keyFile,'utf8')).trim(),auth,docs,metadata,ownerSource});
+ }else if(config.owner.kind==='http')owner=createReading67HomeworkOwner({url:config.owner.url,key:(await fs.readFile(config.owner.keyFile,'utf8')).trim(),auth,docs,metadata,ownerSource,locate});
  else throw Error('DOC_OWNER_CONFIG_REQUIRED');
- const homework=createReading67Homework({db,metadata,pageBase:config.pageBase,owner,docs});
+ const homework=createReading67Homework({db,metadata,pageBase:config.pageBase,owner,docs,planWrite,resultSummary,progressText,completionText});
  const adminKey=(await fs.readFile(config.adminKeyFile,'utf8')).trim();if(adminKey.length<32)throw Error('CTA_ADMIN_KEY_REQUIRED');
  let stopped=false,running=null,timer;
  async function tick(){if(stopped)return;running=homework.once();try{await running;}catch(error){console.error(JSON.stringify({event:'reading67_homework_error',code:error.code||'DOC_RETRY'}));}finally{running=null;if(!stopped)timer=setTimeout(tick,500);}}
- return {homework,docs,owner,adminKey,registerCta:createReading67CtaRegistrar({homework,owner,docs,identity,metadata}),start(){tick();},async close(){stopped=true;clearTimeout(timer);await running;},mode:config.owner.kind};
+ return {homework,docs,owner,adminKey,registerCta:createReading67CtaRegistrar({homework,owner,docs,identity,metadata,locate,planWrite}),start(){tick();},async close(){stopped=true;clearTimeout(timer);await running;},mode:config.owner.kind};
 }

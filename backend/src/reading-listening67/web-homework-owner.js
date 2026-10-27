@@ -11,7 +11,7 @@ const allTabs=tabs=>(tabs||[]).flatMap(t=>[t,...allTabs(t.childTabs)]);
 const tabText=content=>(content||[]).map(e=>(e.paragraph?.elements||[]).map(p=>p.textRun?.content||'').join('')+(e.table?.tableRows||[]).map(r=>(r.tableCells||[]).map(c=>tabText(c.content)).join('')).join('')).join('');
 const sourceSchema=z.object({apiVersion:z.literal(1),classId:z.string(),studentRef:z.uuid(),courseId:z.string().min(1),googleUserId:z.string().min(1),capturedAt:z.iso.datetime(),sourceRevision:z.string().regex(/^[a-f0-9]{64}$/)}).strict();
 
-export function createReading67HomeworkOwner({url,key,headerName='x-reading-owner-key',auth,docs,metadata,ownerSource,fetcher=fetch,clock=Date.now}){
+export function createReading67HomeworkOwner({url,key,headerName='x-reading-owner-key',auth,docs,metadata,ownerSource,fetcher=fetch,clock=Date.now,locate=locateReading67Homework}){
  if(!Number.isInteger(metadata.homeworkLesson)||metadata.homeworkLesson<1||metadata.homeworkLesson>99)throw Error('HOMEWORK_LESSON_REQUIRED');
  const titleMatch=new RegExp('\\b(?:lesson|buổi)\\s*0?'+metadata.homeworkLesson+'\\b','i');
  async function mapping(input,reverse=false){
@@ -59,7 +59,7 @@ export function createReading67HomeworkOwner({url,key,headerName='x-reading-owne
   const s=await classroom(base+'/studentSubmissions/'+encodeURIComponent(target.submissionId));checkSubmission(s,source,work.id);
   const files=(s.assignmentSubmission?.attachments||[]).filter(a=>a.driveFile?.id===target.documentId);
   if(s.id!==target.submissionId||files.length!==1)fail('DOCUMENT_OWNER_MISMATCH',403);
-  locateReading67Homework(await docs.read(target.documentId),{document_id:target.documentId,tab_id:target.tabId,code:metadata.code});
+  locate(await docs.read(target.documentId),{document_id:target.documentId,tab_id:target.tabId,code:metadata.code});
   return {...target,googleUserId:source.googleUserId,sourceRevision:source.sourceRevision,verifiedAt:new Date(clock()).toISOString()};
  }
  async function resolve(scope,cached){

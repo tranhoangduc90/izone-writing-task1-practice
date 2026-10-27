@@ -5,6 +5,7 @@
 ## Ranh giới và cấu hình
 
 - Image/process riêng `listening-homework67-api`, PostgreSQL riêng `listening-homework67-db`, database `listening_homework67`, role ứng dụng `listening_homework67_app`. Khởi động kiểm database/role và không chạy migration production.
+- `package.json`/lock riêng ở thư mục release này; Docker không lấy lock Writing. Giữ cùng major API đã kiểm, cập nhật các phụ thuộc có cảnh báo rồi chạy lại orchestration/native PG. Gói ngày27/10 có `npm audit --omit=dev` báo 0 lỗi; đây là mốc kiểm, không phải cam kết mọi phiên bản tương lai.
 - Tái dùng các module transaction/identity/Docs `reading-listening67/web-*` qua tham số có mặc định giữ Reading. Namespace SQL thư viện nằm trong database riêng; không đọc bảng bài làm hoặc chạy server entrypoint sản phẩm khác.
 - `private/api` chỉ mount lesson, asset metadata, app DB URL, khóa đọc nguồn quyền/owner, Docs OAuth và khóa CTA. `private/database`/`private/operator` không mount vào API. Credential và init SQL có password chỉ nằm trong kho private.
 - Context là API chỉ đọc; admission kiểm UUID approved + ERP/membership/lớp. Mapping Classroom/Google owner được kiểm riêng trước mỗi ghi Docs, không dùng việc thiếu bản giao Homework để từ chối học viên hợp lệ vào bài.

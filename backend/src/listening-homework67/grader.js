@@ -11,6 +11,7 @@ const canonical=v=>JSON.stringify(v,(_k,x)=>x&&typeof x==='object'&&!Array.isArr
 const normalize=s=>s.normalize('NFKC').toLowerCase().replace(/[“”‘’"'.,!?;:()[\]{}]/g,' ').replace(/\s+/g,' ').trim();
 const copy=x=>structuredClone(x);
 const parseJson=text=>JSON.parse(text.trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/i,'$1'));
+const TARGETS_PER_CALL=8;
 export function listeningSummary(result){
  const rows=result?.grading?.target_results,ids=result?.grading?.expectedIds;
  if(!Array.isArray(rows)||!Array.isArray(ids)||rows.length!==ids.length||new Set(rows.map(r=>r.target_id)).size!==ids.length||ids.some(id=>!rows.some(r=>r.target_id===id))||rows.some(r=>!['correct','partial','incorrect','missing'].includes(r.verdict)))return null;
@@ -20,7 +21,7 @@ export function listeningSummary(result){
 export function createListeningGrader({lesson,provider,model='gemini-3.5-flash',maxRounds=12}){
  const ids=lesson.items.map(i=>i.id);
  if(!ids.length||ids.length!==new Set(ids).size||lesson.items.some(i=>!i.units?.length||!i.core||!i.answer))throw Error('LESSON_RUBRIC_INVALID');
- const pins={sha256:sha256(canonical({lesson,model,validation:VALIDATION_VERSION})),workflowVersion:lesson.version,model,gradingContract:VALIDATION_VERSION};
+ const pins={sha256:sha256(canonical({lesson,model,validation:VALIDATION_VERSION,targetsPerCall:TARGETS_PER_CALL})),workflowVersion:lesson.version,model,gradingContract:VALIDATION_VERSION};
  const profile={expected_target_ids:ids};
  function inspectWeb(answers){
   if(!answers||Array.isArray(answers)||Object.keys(answers).some(id=>!ids.includes(id)))throw new WebGradingError('TARGET_UNKNOWN');
@@ -56,15 +57,19 @@ export function createListeningGrader({lesson,provider,model='gemini-3.5-flash',
   const pending=async()=>{await checkpoint(state);throw new WebGradingError('AI_REPAIR_PENDING',202,{state});};
   if(state.phase!=='complete'&&prepared.pending.length){
    if(state.round>=maxRounds)throw new WebGradingError('AI_VALIDATION_NEEDS_REVIEW',503);
-   const targets=prepared.pending.filter(i=>state.phase==='review'?state.approved[i.id]!==sha256(canonical(state.rows[i.id])):!state.rows[i.id]||state.issues.some(e=>e.targetId===i.id));
+   // Bound each model request, keeping all 22 IDs in the same persisted job.
+   // Repair a rejected row before admitting more new rows.
+   const repair=prepared.pending.filter(i=>state.issues.some(e=>e.targetId===i.id));
+   const targets=(state.phase==='review'?prepared.pending.filter(i=>state.rows[i.id]&&state.approved[i.id]!==sha256(canonical(state.rows[i.id]))):[...repair,...prepared.pending.filter(i=>!state.rows[i.id]&&!repair.includes(i))]).slice(0,TARGETS_PER_CALL);
    const payload={version:lesson.version,targets:targets.map(i=>({...i,examples:undefined,...(state.phase==='review'?{candidate:state.rows[i.id]}:{issues:state.issues.filter(e=>e.targetId===i.id)})}))};
    const prompt=state.phase==='review'?instructions+meaningInstructions+'\nĐây là lượt kiểm nội dung độc lập. Trả {"reviews":[{"target_id":"...","accepted":true|false,"problems":[],"expected_verdict":"correct|partial|incorrect","expected_met_units":0,"meaning_errors":[]}]}. accepted=true thì problems rỗng.\n'+JSON.stringify(payload):instructions+meaningInstructions+'\n'+JSON.stringify(payload);
    const phase=state.phase,callId=options.recoveredRound?.call_id||randomUUID();let response;
    if(!options.recoveredRound)await roundEvent({callId,phase,status:'calling',round:state.round+1,promptHash:sha256(prompt),validationVersion:VALIDATION_VERSION});
    try{response=options.recoveredRound?.response??await provider({prompt,model,operationId:callId});}
-   catch(error){const retry=/^AI_HTTP_(429|5\d\d)$/.test(error.code||'');await roundEvent({callId,phase,status:retry?'failed':'unknown',errorCode:error.code||'AI_CONNECTION_FAILED'});if(retry){state.round++;return pending();}throw new WebGradingError('AI_OUTCOME_UNKNOWN',503);}
+   catch(error){const retry=/^AI_HTTP_(429|5\d\d)$/.test(error.code||'');await roundEvent({callId,phase,status:retry?'failed':'unknown',errorCode:error.code||'AI_CONNECTION_FAILED'});if(retry){state.round++;state.stalledRounds=(state.stalledRounds||0)+1;return pending();}throw new WebGradingError('AI_OUTCOME_UNKNOWN',503);}
    if(!options.recoveredRound)await roundEvent({callId,phase,status:'received',response});
    state.round++;state.lastCallId=callId;
+   let progressed=false;
    try{
     let value=response;
     if(response.candidates){const text=response.candidates.filter(c=>c.finishReason==='STOP').flatMap(c=>c.content?.parts||[]).filter(p=>!p.thought).map(p=>p.text||'').join('');value=parseJson(text);}
@@ -81,15 +86,19 @@ export function createListeningGrader({lesson,provider,model='gemini-3.5-flash',
       // contradiction rule (including a partial-looking answer with a false claim).
       const reviewVerdict=row.meaning_errors.length?'incorrect':row.expected_verdict;
       const candidate=state.rows[item.id],consistent=reviewVerdict===verdictOf(candidate)&&row.expected_met_units===candidate.units.filter(u=>u.status==='present').length&&Boolean(row.meaning_errors.length)===Boolean(candidate.meaning_errors.length);
-      if(row.accepted&&consistent)state.approved[item.id]=sha256(canonical(candidate));else state.issues.push({targetId:item.id,message:[...row.problems,...(!consistent?[`Review yêu cầu ${row.expected_verdict}, ${row.expected_met_units}/${item.units.length} ý. Kiểm và sửa phân loại lỗi nghĩa; meaning_errors từ review: ${JSON.stringify(row.meaning_errors)}`]:[])].join(' ')});
+      if(row.accepted&&consistent){state.approved[item.id]=sha256(canonical(candidate));progressed=true;}else state.issues.push({targetId:item.id,message:[...row.problems,...(!consistent?[`Review yêu cầu ${row.expected_verdict}, ${row.expected_met_units}/${item.units.length} ý. Kiểm và sửa phân loại lỗi nghĩa; meaning_errors từ review: ${JSON.stringify(row.meaning_errors)}`]:[])].join(' ')});
      }else{
       // Canonicalize only the transport shape of writing notes; never alter an
       // evidence span, status, student answer or approved meaning.
       if(typeof row.writing_notes==='string')row.writing_notes=row.writing_notes.trim()?[row.writing_notes]:[];
-      const problem=checkRow(row,item,item.response);if(problem)state.issues.push({targetId:item.id,message:problem});else{state.rows[item.id]=row;delete state.approved[item.id];}}
+      const problem=checkRow(row,item,item.response);if(problem)state.issues.push({targetId:item.id,message:problem});else{state.rows[item.id]=row;delete state.approved[item.id];progressed=true;}}
     }
-    state.phase=state.issues.length?'audit':phase==='review'?'complete':'review';
+    const complete=prepared.pending.every(i=>state.rows[i.id]&&state.approved[i.id]===sha256(canonical(state.rows[i.id])));
+    state.phase=state.issues.length?'audit':complete?'complete':phase==='audit'?'review':prepared.pending.some(i=>!state.rows[i.id])?'audit':'review';
    }catch(error){state.issues=targets.map(i=>({targetId:i.id,message:error.message}));state.phase=phase;}
+   // Normal progress through several chunks is not a stalled repair; keep the
+   // existing service backoff for genuine failures without delaying each chunk.
+   state.stalledRounds=progressed?0:(state.stalledRounds||0)+1;
    if(state.phase!=='complete')return pending();
   }
   state.phase='complete';state.reviewedHash=digest();await checkpoint(state);

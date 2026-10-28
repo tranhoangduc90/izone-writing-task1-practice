@@ -10,8 +10,8 @@ export function publicLesson(lesson){
  const {code,version,title,homeworkLesson,minimumCompletion,audioId,groups,questions}=lesson;
  return {code,version,title,homeworkLesson,minimumCompletion,audioId,groups,questions,items:lesson.items.map(({id,group,question})=>({id,group,question}))};
 }
-export function createListeningHomeworkApp({db,lesson,provider,identity,homeworkRuntime,audio,origins,studentsOpen=false,googleClientId='',fixture=false,ssoBridge}){
- const content=publicLesson(lesson),grader=createListeningGrader({lesson,provider});
+export function createListeningHomeworkApp({db,lesson,provider,model='gemini-3.5-flash',identity,homeworkRuntime,audio,origins,studentsOpen=false,googleClientId='',fixture=false,ssoBridge}){
+ const content=publicLesson(lesson),grader=createListeningGrader({lesson,provider,model});
  const store=createReading67WebStore({db,grader,homework:homeworkRuntime?.homework,resultSummary:listeningSummary});
  const worker=createReading67WebWorker({store,grader,onError:e=>console.error(JSON.stringify({event:'listening_homework_worker',code:e.code||'FAILED'}))});
  const app=express();app.disable('x-powered-by');app.set('trust proxy',1);

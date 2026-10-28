@@ -1,0 +1,7 @@
+# Overlay only the grader onto the verified running product image.
+# The caller must pass its inspected immutable image ID, preserving runtime patches.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+COPY backend/src/listening-homework67/grader.js /app/src/listening-homework67/grader.js
+COPY backend/src/listening-homework67/meaning-contract.js /app/src/listening-homework67/meaning-contract.js
+COPY backend/src/listening-homework67/answer-content.js /app/src/listening-homework67/answer-content.js

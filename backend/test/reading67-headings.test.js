@@ -97,6 +97,22 @@ sourceTest('Nộp Reading yêu cầu Share accepted; bản gửi giữ 15 ô đ�
  const sent=await store.submit(a,{revision:draft.revision,requestId:randomUUID()});assert.equal(Object.keys(sent.snapshot.answers).length,15);assert.equal(sent.snapshot.notes,'Giữ nguyên');await assert.rejects(()=>store.attempt(b,sent.attemptId),{code:'ATTEMPT_NOT_FOUND'});
  await service.save(a,{url:url(b.ownerId),requestId:randomUUID()});assert.equal((await service.status(a)).url,url(b.ownerId));assert.equal((await service.status(a,sent.attemptId)).url,url(a.ownerId));await assert.rejects(()=>service.status(b,sent.attemptId),{code:'PRACTICE_SNAPSHOT_NOT_FOUND'});
 });
+sourceTest('Khóa lưu/reset trước Share accepted; giữ nháp cũ, cách ly người và mở ngay sau xác nhận',async t=>{
+ const db=await database(t);await db.exec(await fs.readFile(new URL('../../docs/migrations/2026-10-22-reading67-web.sql',import.meta.url),'utf8'));
+ const g=await grader(),service=createReadingSharePractice({db,content:{code:a.code,version:a.version}}),legacy=createReading67WebStore({db,grader:g});
+ const body={answers:answers(g),notes:'Nháp có trước khi bật khóa ChatGPT',annotations:[],flags:[5]};const old=await legacy.save(a,{baseRevision:0,mutationId:randomUUID(),body});
+ const factory=process.env.READING_GATE_BASE_STORE?(await import(process.env.READING_GATE_BASE_STORE)).createReading67WebStore:createReading67WebStore;
+ const store=factory({db,grader:g,beforeWrite:service.requireAccepted,beforeSubmit:service.requireAccepted,afterSubmit:service.attachAttempt});
+ const changed={...body,notes:'Không được lưu khi chưa xác nhận'};
+ for(const status of [null,'queued','processing','rejected','retry','needs_review']){
+  if(status){await service.save(a,{url:url(a.ownerId),requestId:randomUUID()});await db.query('UPDATE reading_listening67.web_share_practice SET status=$1',[status]);}
+  await assert.rejects(()=>store.save(a,{baseRevision:old.revision,mutationId:randomUUID(),body:changed}),{code:'PRACTICE_NOT_ACCEPTED'});
+  await assert.rejects(()=>store.reset(a,{baseRevision:old.revision,mutationId:randomUUID()}),{code:'PRACTICE_NOT_ACCEPTED'});assert.deepEqual((await store.draft(a)).body,body);
+ }
+ await db.query("UPDATE reading_listening67.web_share_practice SET status='accepted'");
+ await assert.rejects(()=>store.save(b,{baseRevision:0,mutationId:randomUUID(),body:changed}),{code:'PRACTICE_NOT_ACCEPTED'});
+ const next=await store.save(a,{baseRevision:old.revision,mutationId:randomUUID(),body:changed});assert.equal(next.revision,old.revision+1);assert.equal((await db.query('SELECT count(*)::int n FROM reading_listening67.web_draft_archive')).rows[0].n,0);
+});
 test('Tổng kết Headings từ kết quả đủ ID: 5 Heading + 10 nén, không dùng tổng Materials',()=>{
  const ids=['C','D','E','F','G'].flatMap(p=>['H','L1','L2'].map(k=>'L3.'+k+'.'+p)),grading={structure:{targetIds:ids,headingIds:ids.filter(id=>id.includes('.H.'))},target_results:ids.map(target_id=>({target_id,verdict:'correct'}))};
  assert.equal(reading67HeadingsSummary(grading).matchingTotal,5);assert.equal(reading67HeadingsSummary(grading).compressionTotal,10);grading.target_results.pop();assert.equal(reading67HeadingsSummary(grading),null);

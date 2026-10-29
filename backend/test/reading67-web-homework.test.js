@@ -35,18 +35,26 @@ function memoryDocs(){
   state.revision++;if(loseAck){loseAck=false;throw Error('Mất ACK sau khi Google đã ghi');}
  }};
 }
-async function fixture(t){
+async function fixture(t,{managedCodes=[]}={}){
  const db=new PGlite();t.after(()=>db.close());for(const name of ['web','identity','homework'])await db.exec(await fs.readFile(new URL('../../docs/migrations/2026-10-22-reading67-'+name+'.sql',import.meta.url),'utf8'));
  const docs=memoryDocs(),control={missing:false,wrong:false,failQueue:false};
  const target=s=>({classId:s.courseId,studentRef:s.ownerId,code:s.code,version:s.version,courseId:'classroom',courseWorkId:'work78',submissionId:'sub-'+s.ownerId,documentId:'doc-'+s.ownerId,tabId:'child'});
  const owner={verify:async t=>t,resolve:async s=>{if(control.missing)throw Object.assign(Error('Chưa giao'),{code:'HOMEWORK_NOT_FOUND'});const value=target(s);return control.wrong?{...value,studentRef:B}:value;}};
- const homework=createReading67Homework({db,docs,owner,metadata:{code,version,homeworkLesson:78},pageBase:'https://page.test/reading-skills67/'});
+ const homework=createReading67Homework({db,docs,owner,managedCodes,metadata:{code,version,homeworkLesson:78},pageBase:'https://page.test/reading-skills67/'});
  const store=createReading67WebStore({db,grader,homework});
  const jobs=async()=> (await db.query('SELECT * FROM reading_listening67.web_homework_job ORDER BY sequence')).rows;
  const due=()=>db.query('UPDATE reading_listening67.web_homework_job SET available_at=now()');
  const drain=async()=>{for(let i=0;i<30;i++)if(!await homework.once())return;throw Error('Queue did not drain');};
  return {db,docs,control,homework,store,target,jobs,due,drain};
 }
+test('Docs thêm mã thứ hai sau đăng ký, trước worker: giữ job blocked và không ghi',async t=>{
+ const other='new-homework-code',f=await fixture(t,{managedCodes:[code,other]});
+ await f.homework.register(scope,f.target(scope));
+ const read=f.docs.read;f.docs.read=async id=>{const doc=await read(id);doc.tabs[0].documentTab.body.content.push({paragraph:{elements:[{startIndex:6000,textRun:{content:other+'\n'}}]}});return doc;};
+ await f.homework.once();assert.equal(f.docs.calls.write,0);
+ const jobs=await f.jobs();assert.equal(jobs[0].status,'blocked');assert.equal(jobs[0].error_code,'DOC_CODE_MISMATCH');
+});
+
 test('Vòng sửa: 4/4 nhưng nén còn sai, nộp lại đạt 20/20, Docs/link đúng bản mới và lịch sử nguyên vẹn',async t=>{
  const f=await fixture(t);await f.store.save(scope,{baseRevision:0,mutationId:randomUUID(),body});
  const first=await f.store.submit(scope,{revision:1,requestId:randomUUID()}),job=await f.store.claim(),partial=result(job);

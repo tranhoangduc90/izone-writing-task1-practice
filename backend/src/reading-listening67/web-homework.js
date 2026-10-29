@@ -7,12 +7,14 @@ import {randomUUID} from 'node:crypto';
 import {WebGradingError} from './web-grader.js';
 import {planReading67HomeworkWrite} from './web-homework-docs.js';
 import {reading67ResultSummary,reading67ProgressText} from './web-result-summary.js';
+import {guardReading67HomeworkDocs} from './web-homework-code-guard.js';
 const args=s=>[s.ownerId,s.courseId,s.code,s.version];
 const clause='owner_id=$1 AND course_id=$2 AND assignment_code=$3 AND content_version=$4';
 const fail=(code,status=409)=>{throw new WebGradingError(code,status);};
 const scopeFor=b=>({ownerId:b.owner_id,courseId:b.course_id,code:b.assignment_code,version:b.content_version});
 
-export function createReading67Homework({db,metadata,pageBase,owner,docs,clock=Date.now,planWrite=planReading67HomeworkWrite,resultSummary=reading67ResultSummary,progressText=reading67ProgressText,completionText}){
+export function createReading67Homework({db,metadata,pageBase,owner,docs,managedCodes=[],clock=Date.now,planWrite=planReading67HomeworkWrite,resultSummary=reading67ResultSummary,progressText=reading67ProgressText,completionText}){
+ docs=guardReading67HomeworkDocs(docs,managedCodes);
  const page=new URL(pageBase);if(page.protocol!=='https:')throw Error('HTTPS_PAGE_BASE_REQUIRED');
  page.searchParams.set('server','1');page.searchParams.set('assignmentCode',metadata.code);
  const entryUrl=page.href;
@@ -64,10 +66,11 @@ export function createReading67Homework({db,metadata,pageBase,owner,docs,clock=D
   return append(tx,b,'submitted:'+draft.run_no+':'+attemptId,'status',await state(tx,s,b));
  }
  async function outcome(tx,s,jobId){const b=await ensure(tx,s);return append(tx,b,'outcome:'+jobId,'status',await state(tx,s,b));}
- async function register(s,target){
+ async function register(s,target,{documentGuard}={}){
   if(target.classId!==s.courseId||target.studentRef!==s.ownerId||target.code!==s.code||target.version!==s.version)fail('DOC_IDENTITY_MISMATCH');
   const verified=await owner.verify(target);
-  const ctaPlan=planWrite(await docs.read(verified.documentId),{document_id:verified.documentId,tab_id:verified.tabId,code:s.code},{kind:'cta',payload:{url:entryUrl}});
+  const document=await docs.read(verified.documentId);documentGuard?.(document);
+  const ctaPlan=planWrite(document,{document_id:verified.documentId,tab_id:verified.tabId,code:s.code},{kind:'cta',payload:{url:entryUrl}});
   await db.transaction(async tx=>{
    const b=await ensure(tx,s);
    if(b.target&&['classId','studentRef','code','version','courseId','courseWorkId','submissionId','documentId','tabId'].some(k=>b.target[k]!==verified[k]))fail('DOC_TARGET_CHANGED');
@@ -88,7 +91,7 @@ export function createReading67Homework({db,metadata,pageBase,owner,docs,clock=D
  }
  async function once(){
   const job=await db.transaction(async tx=>{
-   const j=(await tx.query("SELECT j.* FROM reading_listening67.web_homework_job j WHERE ((j.status='pending' AND j.available_at<=now()) OR (j.status='processing' AND j.lease_until<now())) AND NOT EXISTS(SELECT 1 FROM reading_listening67.web_homework_job old WHERE old.binding_id=j.binding_id AND old.sequence<j.sequence AND old.status<>'verified') ORDER BY j.created_at,j.sequence FOR UPDATE OF j SKIP LOCKED LIMIT 1")).rows[0];
+   const j=(await tx.query("SELECT j.* FROM reading_listening67.web_homework_job j JOIN reading_listening67.web_homework_binding lesson_binding ON lesson_binding.id=j.binding_id WHERE lesson_binding.assignment_code=$1 AND lesson_binding.content_version=$2 AND ((j.status='pending' AND j.available_at<=now()) OR (j.status='processing' AND j.lease_until<now())) AND NOT EXISTS(SELECT 1 FROM reading_listening67.web_homework_job old WHERE old.binding_id=j.binding_id AND old.sequence<j.sequence AND old.status<>'verified') ORDER BY j.created_at,j.sequence FOR UPDATE OF j SKIP LOCKED LIMIT 1",[metadata.code,metadata.version])).rows[0];
    if(!j)return null;const leaseId=randomUUID();
    await tx.query("UPDATE reading_listening67.web_homework_job SET status='processing',lease_id=$2,lease_until=now()+interval '180 seconds',attempts=attempts+1 WHERE id=$1",[j.id,leaseId]);
    return {...j,leaseId,attempts:j.attempts+1};

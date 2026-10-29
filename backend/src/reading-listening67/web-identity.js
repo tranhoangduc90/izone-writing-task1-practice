@@ -10,13 +10,15 @@ const secret=()=>randomBytes(32).toString('base64url');
 const denied=(code='ACCESS_DENIED',status=403)=>{throw new WebGradingError(code,status);};
 const bearer=q=>/^Bearer ([\w-]{43})$/.exec(q.headers.authorization||'')?.[1];
 
-
-export function createReading67WebIdentity({db,context,allowedClassIds,verifyGoogle,ownerSource,clock=Date.now,cookiePath='/api/reading-skills67',cookieName='reading67_teacher'}){
+export function createReading67WebIdentity({db,context,allowedClassIds,verifyGoogle,ownerSource,clock=Date.now,cookiePath='/api/reading-skills67',cookieName='reading67_teacher',includeEmptyClasses=false}){
  if(!/^[a-z0-9_]+$/.test(cookieName))throw Error('COOKIE_NAME_INVALID');
  const cookie=q=>new RegExp('(?:^|;\\s*)'+cookieName+'=([\\w-]{43})(?:;|$)').exec(q.headers.cookie||'')?.[1];
  const allowed=new Set(allowedClassIds.map(String));
  const courseAllowed=id=>{if(!allowed.has(String(id)))denied();};
- async function classes(){return (await context.classes()).filter(c=>allowed.has(c.id));}
+ async function classes(){
+  if(includeEmptyClasses)return (await context.snapshot()).classes.filter(c=>allowed.has(c.erp_course_class_id)).map(c=>({id:c.erp_course_class_id,classCode:c.erp_class_name_snapshot})).sort((a,b)=>a.classCode.localeCompare(b.classCode,'vi'));
+  return (await context.classes()).filter(c=>allowed.has(c.id));
+ }
  async function roster(classId){courseAllowed(classId);return (await (ownerSource?ownerSource.roster(classId):context.roster(classId))).map(s=>({studentRef:s.studentRef,name:s.name}));}
  async function member(classId,studentRef){
   courseAllowed(classId);

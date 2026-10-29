@@ -51,3 +51,17 @@ test('Kết quả phục hồi có sự kiện Homework mới, không dùng lạ
  await store.finish(job,{pins:grader.pins,context:{operationId:job.jobId,sourceDigest:job.inputHash},grading:{validation:{version:'test-v1',reviewedHash:'reviewed'},target_results:ids.map(target_id=>({target_id,verdict:'correct'}))}});
  assert.deepEqual(events,[job.jobId+':test-v1:complete']);assert.notEqual(events[0],job.jobId);
 });
+
+test('Hai bộ chấm chung DB chỉ nhận job đúng mã và version; phục hồi lease không chạm bài khác',async t=>{
+ const {db,sent}=await setup(t);
+ const legacy=createReading67WebStore({db,grader,jobScope:{code:scope.code,version:scope.version}});
+ const nextScope={...scope,code:'new-lesson',version:'v2'};
+ const next=createReading67WebStore({db,grader,jobScope:{code:nextScope.code,version:nextScope.version}});
+ await next.save(nextScope,{baseRevision:0,mutationId:randomUUID(),body});
+ const nextSent=await next.submit(nextScope,{revision:1,requestId:randomUUID()});
+ const nextJob=await next.claim();assert.equal(nextJob.attemptId,nextSent.attemptId);assert.equal(await next.claim(),null);
+ const oldJob=await legacy.claim();assert.equal(oldJob.attemptId,sent.attemptId);
+ await db.query("UPDATE reading_listening67.web_job SET lease_until=now()-interval '1 second' WHERE id=$1",[nextJob.jobId]);
+ await legacy.recoverExpired();assert.equal((await next.attempt(nextScope,nextSent.attemptId)).status,'processing');
+ await next.recoverExpired();assert.equal((await next.attempt(nextScope,nextSent.attemptId)).status,'queued');
+});

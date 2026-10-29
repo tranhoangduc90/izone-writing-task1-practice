@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import express from 'express';
 import request from 'supertest';
 import {createReading67WebRouter} from '../src/reading-listening67/web-routes.js';
-import {createReading67CtaRegistrar} from '../src/reading-listening67/web-homework-cta.js';
+import {createReading67CtaRegistrar,createReading67CtaDispatcher} from '../src/reading-listening67/web-homework-cta.js';
 import {HOMEWORK_CTA,HOMEWORK_STATUS} from '../src/reading-listening67/web-homework-docs.js';
 const code='67-reading-materials-beyond-concrete-matching-information-nen-cap-1',version='fixture-v1',A='11111111-1111-4111-8111-111111111111';
 const event={doc_id:'document-fixture-1234567890',classroom_course_id:'course-A',coursework_id:'work78',submission_id:'sub-A',student_id:'google-A',class_name:'TESTA'};
@@ -17,7 +17,7 @@ function fixture(){
  const owner={resolveClassroom:async input=>{assert.deepEqual(input,{courseId:'course-A',googleUserId:'google-A'});if(state.wrongOwner)throw Object.assign(Error(),{code:'OWNER_MISMATCH'});return {classId:'1124',studentRef:A};}};
  const docs={read:async()=>{state.read++;return document;}};
  const registrar=createReading67CtaRegistrar({homework,owner,docs,identity:{member:async()=>({className:state.className})},metadata:{code,version},waitMs:0});
- return {state,document,registrar};
+ return {state,document,registrar,docs};
 }
 test('CTA verified chỉ sau đăng ký đúng event/mapping và đọc lại link đúng mã; retry giữ cùng đích',async()=>{
  const f=fixture();for(let i=0;i<2;i++)assert.equal((await f.registrar(event)).status,'verified');
@@ -25,6 +25,12 @@ test('CTA verified chỉ sau đăng ký đúng event/mapping và đọc lại li
  assert.deepEqual(f.state.registered[0],f.state.registered[1]);
  assert.deepEqual(f.state.registered[0].scope,{ownerId:A,courseId:'1124',code,version});
  assert.equal(f.state.registered[0].target.submissionId,event.submission_id);
+});
+test('Docs thêm mã bài khác giữa dispatcher và registrar: dừng trước đăng ký',async()=>{
+ const f=fixture(),other='new-reading-homework-code',read=f.docs.read;
+ f.docs.read=async()=>{const doc=await read();if(f.state.read===2)doc.tabs[0].documentTab.body.content.push(paragraph(900,other));return doc;};
+ const run=createReading67CtaDispatcher({docs:f.docs,registrars:[{code,registerCta:f.registrar},{code:other,registerCta:async()=>assert.fail('Must not select another code')} ]});
+ await assert.rejects(run(event),e=>e.code==='DOC_CODE_MISMATCH');assert.equal(f.state.registered.length,0);
 });
 test('CTA pending/blocked không báo thành công; sai lớp hoặc mapping chặn trước đăng ký',async()=>{
  for(const status of ['pending','blocked']){const f=fixture();f.state.status=status;await assert.rejects(f.registrar(event),e=>e.code===(status==='pending'?'CTA_PENDING':'CTA_WRITE_BLOCKED'));}

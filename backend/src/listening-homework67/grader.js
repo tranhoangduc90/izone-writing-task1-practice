@@ -11,14 +11,14 @@ const canonical=v=>JSON.stringify(v,(_k,x)=>x&&typeof x==='object'&&!Array.isArr
 const normalize=s=>s.normalize('NFKC').toLowerCase().replace(/[“”‘’"'.,!?;:()[\]{}]/g,' ').replace(/\s+/g,' ').trim();
 const copy=x=>structuredClone(x);
 const parseJson=text=>JSON.parse(text.trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/i,'$1'));
-const TARGETS_PER_CALL=8;
+const TARGETS_PER_CALL=4;
 export function listeningSummary(result){
  const rows=result?.grading?.target_results,ids=result?.grading?.expectedIds;
  if(!Array.isArray(rows)||!Array.isArray(ids)||rows.length!==ids.length||new Set(rows.map(r=>r.target_id)).size!==ids.length||ids.some(id=>!rows.some(r=>r.target_id===id))||rows.some(r=>!['correct','partial','incorrect','missing'].includes(r.verdict)))return null;
  const correctCount=rows.filter(r=>r.verdict==='correct').length;
  return {version:1,total:ids.length,correctCount,remainingCount:ids.length-correctCount,allCorrect:correctCount===ids.length,needsRepair:rows.filter(r=>r.verdict!=='correct').map(r=>r.target_id)};
 }
-export function createListeningGrader({lesson,provider,model='gemini-3.5-flash',maxRounds=12}){
+export function createListeningGrader({lesson,provider,model='gemini-3.5-flash',maxRounds=18}){
  const ids=lesson.items.map(i=>i.id);
  if(!ids.length||ids.length!==new Set(ids).size||lesson.items.some(i=>!i.units?.length||!i.core||!i.answer))throw Error('LESSON_RUBRIC_INVALID');
  const pins={sha256:sha256(canonical({lesson,model,validation:VALIDATION_VERSION,targetsPerCall:TARGETS_PER_CALL})),workflowVersion:lesson.version,model,gradingContract:VALIDATION_VERSION};

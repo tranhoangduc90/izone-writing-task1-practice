@@ -12,8 +12,10 @@ const values=s=>[s.ownerId,s.courseId,s.code,s.version];
 const where='owner_id=$1 AND course_id=$2 AND assignment_code=$3 AND content_version=$4';
 const canonical=value=>JSON.stringify(value,(_k,v)=>v&&typeof v==='object'&&!Array.isArray(v)?Object.fromEntries(Object.entries(v).sort(([a],[b])=>a.localeCompare(b))):v);
 
-export function createReading67WebStore({db,grader,homework,resultSummary=reading67ResultSummary,beforeSubmit,afterSubmit}) {
+export function createReading67WebStore({db,grader,homework,resultSummary=reading67ResultSummary,jobScope,beforeSubmit,afterSubmit}) {
   const validation=grader.validationVersion?createValidationStore({db,assertOwner}):null;
+  const jobArgs=jobScope?[jobScope.code,jobScope.version]:[];
+  const jobFilter=jobScope?' AND EXISTS(SELECT 1 FROM reading_listening67.web_attempt scope_attempt WHERE scope_attempt.id=j.attempt_id AND scope_attempt.assignment_code=$1 AND scope_attempt.content_version=$2)':'';
   const gateFor=body=>grader.inspectWeb(body.answers||{});
   function draftView(row){const body=row?.body||emptyBody();return {body,runNo:row?.run_no||1,revision:row?.revision||0,savedAt:row?.saved_at||null,completeness:gateFor(body).completeness};}
   async function draft(scope){const r=await db.query(`SELECT * FROM reading_listening67.web_draft WHERE ${where}`,values(scope));return draftView(r.rows[0]);}
@@ -91,7 +93,8 @@ export function createReading67WebStore({db,grader,homework,resultSummary=readin
   async function archives(scope){return (await db.query(`SELECT id,run_no AS "runNo",revision,body,saved_at AS "savedAt",archived_at AS "archivedAt" FROM reading_listening67.web_draft_archive WHERE ${where} ORDER BY archived_at DESC LIMIT 40`,values(scope))).rows;}
   async function firstCompleted(scope){return (await db.query(`SELECT a.id AS "attemptId",a.run_no AS "runNo",j.finished_at AS "finishedAt" FROM reading_listening67.web_attempt a JOIN reading_listening67.web_job j ON j.attempt_id=a.id WHERE a.owner_id=$1 AND a.course_id=$2 AND a.assignment_code=$3 AND a.content_version=$4 AND j.status='done' ORDER BY j.finished_at,a.id LIMIT 1`,values(scope))).rows[0]||null;}
   async function claim(){return db.transaction(async tx=>{
-    const job=(await tx.query(validation?"SELECT j.* FROM reading_listening67.web_job j LEFT JOIN reading_listening67.web_validation v ON v.job_id=j.id WHERE j.status='queued' AND (v.next_attempt_at IS NULL OR v.next_attempt_at<=now()) ORDER BY COALESCE(v.next_attempt_at,j.created_at),j.id FOR UPDATE OF j SKIP LOCKED LIMIT 1":"SELECT * FROM reading_listening67.web_job WHERE status='queued' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1")).rows[0];
+    const query=validation?"SELECT j.* FROM reading_listening67.web_job j LEFT JOIN reading_listening67.web_validation v ON v.job_id=j.id WHERE j.status='queued' AND (v.next_attempt_at IS NULL OR v.next_attempt_at<=now())"+jobFilter+" ORDER BY COALESCE(v.next_attempt_at,j.created_at),j.id FOR UPDATE OF j SKIP LOCKED LIMIT 1":"SELECT j.* FROM reading_listening67.web_job j WHERE j.status='queued'"+jobFilter+" ORDER BY j.created_at FOR UPDATE OF j SKIP LOCKED LIMIT 1";
+    const job=(await tx.query(query,jobArgs)).rows[0];
     if(!job)return null;
     const token=randomUUID();
     await tx.query("UPDATE reading_listening67.web_job SET status='processing',lease_token=$2,lease_until=now()+interval '15 minutes' WHERE id=$1",[job.id,token]);
@@ -114,14 +117,14 @@ export function createReading67WebStore({db,grader,homework,resultSummary=readin
   async function fail(job,error){return db.transaction(async tx=>{const owned=await assertOwner(tx,job);const code=String(error.code||'GRADING_VALIDATION_FAILED').slice(0,100);const status=['AI_OUTCOME_UNKNOWN','AI_VALIDATION_NEEDS_REVIEW'].includes(code)?'needs_review':'failed';await tx.query('UPDATE reading_listening67.web_job SET status=$2,error_code=$3,finished_at=now(),lease_until=NULL WHERE id=$1',[job.jobId,status,code]);if(homework)await homework.outcome(tx,{ownerId:job.ownerId,courseId:owned.course_id,code:owned.assignment_code,version:owned.content_version},job.jobId);});}
   async function recoverExpired(){return db.transaction(async tx=>{
     if(validation){
-      const expired=(await tx.query("SELECT j.id FROM reading_listening67.web_job j WHERE j.status='processing' AND j.lease_until<=now() FOR UPDATE OF j SKIP LOCKED")).rows;
+      const expired=(await tx.query("SELECT j.id FROM reading_listening67.web_job j WHERE j.status='processing' AND j.lease_until<=now()"+jobFilter+" FOR UPDATE OF j SKIP LOCKED",jobArgs)).rows;
       for(const row of expired){
         const unresolved=(await tx.query("SELECT 1 FROM reading_listening67.web_validation_round WHERE job_id=$1 AND status IN ('calling','unknown') LIMIT 1",[row.id])).rows.length;
         await tx.query("UPDATE reading_listening67.web_job SET status=$2,error_code=$3,lease_token=NULL,lease_until=NULL WHERE id=$1",[row.id,unresolved?'needs_review':'queued',unresolved?'AI_OUTCOME_UNKNOWN':null]);
       }
       return expired;
     }
-    const recovered=await tx.query("UPDATE reading_listening67.web_job SET status='needs_review',error_code='WORKER_LEASE_EXPIRED',finished_at=now() WHERE status='processing' AND lease_until<=now() RETURNING id,attempt_id");
+    const recovered=await tx.query("UPDATE reading_listening67.web_job j SET status='needs_review',error_code='WORKER_LEASE_EXPIRED',finished_at=now() WHERE j.status='processing' AND j.lease_until<=now()"+jobFilter+" RETURNING j.id,j.attempt_id",jobArgs);
     if(homework)for(const job of recovered.rows){const a=(await tx.query('SELECT * FROM reading_listening67.web_attempt WHERE id=$1',[job.attempt_id])).rows[0];await homework.outcome(tx,{ownerId:a.owner_id,courseId:a.course_id,code:a.assignment_code,version:a.content_version},job.id);}
     return recovered;
   });}

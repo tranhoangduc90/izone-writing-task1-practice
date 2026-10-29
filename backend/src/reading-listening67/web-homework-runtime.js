@@ -14,7 +14,7 @@ import {createReading67Homework} from './web-homework.js';
 import {createReading67CtaRegistrar} from './web-homework-cta.js';
 const run=promisify(execFile);
 const fail=code=>{throw new WebGradingError(code,403);};
-export async function createReading67HomeworkRuntime({config,db,content,identity,ownerSource,contract,resultSummary,progressText,completionText}){
+export async function createReading67HomeworkRuntime({config,db,content,identity,ownerSource,contract,resultSummary,progressText,completionText,managedCodes=[]}){
  const locate=(d,b)=>locateReading67Homework(d,b,contract),planWrite=(d,b,j)=>planReading67HomeworkWrite(d,b,j,contract);
  const metadata={code:content.code,version:content.version,homeworkLesson:config.homeworkLesson,...(content.practice?{practiceRequired:true}:{})};
  let auth;
@@ -48,7 +48,7 @@ export async function createReading67HomeworkRuntime({config,db,content,identity
   }};
  }else if(config.owner.kind==='http')owner=createReading67HomeworkOwner({url:config.owner.url,key:(await fs.readFile(config.owner.keyFile,'utf8')).trim(),auth,docs,metadata,ownerSource,locate});
  else throw Error('DOC_OWNER_CONFIG_REQUIRED');
- const homework=createReading67Homework({db,metadata,pageBase:config.pageBase,owner,docs,planWrite,resultSummary,progressText,completionText});
+ const homework=createReading67Homework({db,metadata,pageBase:config.pageBase,owner,docs,planWrite,resultSummary,progressText,completionText,managedCodes});
  const adminKey=(await fs.readFile(config.adminKeyFile,'utf8')).trim();if(adminKey.length<32)throw Error('CTA_ADMIN_KEY_REQUIRED');
  let stopped=false,running=null,timer;
  async function tick(){if(stopped)return;running=homework.once();try{await running;}catch(error){console.error(JSON.stringify({event:'reading67_homework_error',code:error.code||'DOC_RETRY'}));}finally{running=null;if(!stopped)timer=setTimeout(tick,500);}}

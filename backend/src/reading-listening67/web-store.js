@@ -12,7 +12,7 @@ const values=s=>[s.ownerId,s.courseId,s.code,s.version];
 const where='owner_id=$1 AND course_id=$2 AND assignment_code=$3 AND content_version=$4';
 const canonical=value=>JSON.stringify(value,(_k,v)=>v&&typeof v==='object'&&!Array.isArray(v)?Object.fromEntries(Object.entries(v).sort(([a],[b])=>a.localeCompare(b))):v);
 
-export function createReading67WebStore({db,grader,homework,resultSummary=reading67ResultSummary,jobScope}) {
+export function createReading67WebStore({db,grader,homework,resultSummary=reading67ResultSummary,jobScope,beforeSubmit,afterSubmit}) {
   const validation=grader.validationVersion?createValidationStore({db,assertOwner}):null;
   const jobArgs=jobScope?[jobScope.code,jobScope.version]:[];
   const jobFilter=jobScope?' AND EXISTS(SELECT 1 FROM reading_listening67.web_attempt scope_attempt WHERE scope_attempt.id=j.attempt_id AND scope_attempt.assignment_code=$1 AND scope_attempt.content_version=$2)':'';
@@ -47,6 +47,7 @@ export function createReading67WebStore({db,grader,homework,resultSummary=readin
       const replay=(await tx.query(`SELECT * FROM reading_listening67.web_request WHERE ${where} AND request_id=$5`,[...args,requestId])).rows[0];
       if(replay){if(replay.request_hash!==requestHash)throw new WebGradingError('REQUEST_ID_REUSED',409);return attemptView(tx,scope,replay.attempt_id,true);}
       if(!row||row.revision!==revision)throw new WebGradingError('DRAFT_REVISION_CONFLICT',409,{serverRevision:row?.revision||0});
+      if(beforeSubmit)await beforeSubmit(tx,scope);
       const gate=gateFor(row.body);
       if(!gate.completeness.eligible_for_grading)throw new WebGradingError('BELOW_COMPLETION_THRESHOLD',422,gate.completeness);
       const inputHash=reading67AnswerFingerprint(gate.parsed);
@@ -60,6 +61,7 @@ export function createReading67WebStore({db,grader,homework,resultSummary=readin
         await tx.query("INSERT INTO reading_listening67.web_job(id,attempt_id,status) VALUES($1,$2,'queued')",[randomUUID(),attemptId]);
       }
       await tx.query('INSERT INTO reading_listening67.web_request(owner_id,course_id,assignment_code,content_version,request_id,request_hash,attempt_id) VALUES($1,$2,$3,$4,$5,$6,$7)',[...args,requestId,requestHash,attemptId]);
+      if(afterSubmit)await afterSubmit(tx,scope,attemptId);
       if(homework)await homework.submitted(tx,scope,attemptId);
       return attemptView(tx,scope,attemptId,!!cached);
     });

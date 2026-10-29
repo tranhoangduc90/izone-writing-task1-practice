@@ -16,7 +16,7 @@ const run=promisify(execFile);
 const fail=code=>{throw new WebGradingError(code,403);};
 export async function createReading67HomeworkRuntime({config,db,content,identity,ownerSource,contract,resultSummary,progressText,completionText,managedCodes=[]}){
  const locate=(d,b)=>locateReading67Homework(d,b,contract),planWrite=(d,b,j)=>planReading67HomeworkWrite(d,b,j,contract);
- const metadata={code:content.code,version:content.version,homeworkLesson:config.homeworkLesson};
+ const metadata={code:content.code,version:content.version,homeworkLesson:config.homeworkLesson,...(content.practice?{practiceRequired:true}:{})};
  let auth;
  if(config.googleAuth.kind==='command'){
   let cached,until=0;

@@ -1,0 +1,107 @@
+--- src/reading-listening67/web-additional-lessons.js
++++ src/reading-listening67/web-additional-lessons.js
+@@ -2,0 +3 @@
++import {createReading67HeadingsLesson} from './web-headings-lesson.js';
+@@ -14,0 +16 @@
++  if(config.kind==='matching_headings'){runtimes.push(await createReading67HeadingsLesson({config,db,context,initial,verifyGoogle,cookiePath,googleClientId,demo,managedCodes}));continue;}
+--- src/reading-listening67/web-homework-runtime.js
++++ src/reading-listening67/web-homework-runtime.js
+@@ -11 +11 @@
+-import {createReading67GoogleDocs,locateReading67Homework} from './web-homework-docs.js';
++import {createReading67GoogleDocs,locateReading67Homework,planReading67HomeworkWrite} from './web-homework-docs.js';
+@@ -17,2 +17,3 @@
+-export async function createReading67HomeworkRuntime({config,db,content,identity,ownerSource,managedCodes=[]}){
+- const metadata={code:content.code,version:content.version,homeworkLesson:config.homeworkLesson};
++export async function createReading67HomeworkRuntime({config,db,content,identity,ownerSource,contract,resultSummary,progressText,completionText,managedCodes=[]}){
++ const locate=(d,b)=>locateReading67Homework(d,b,contract),planWrite=(d,b,j)=>planReading67HomeworkWrite(d,b,j,contract);
++ const metadata={code:content.code,version:content.version,homeworkLesson:config.homeworkLesson,...(content.practice?{practiceRequired:true}:{})};
+@@ -37 +38 @@
+-   const doc=await docs.read(expected.documentId);locateReading67Homework(doc,{document_id:expected.documentId,tab_id:expected.tabId,code:content.code});
++   const doc=await docs.read(expected.documentId);locate(doc,{document_id:expected.documentId,tab_id:expected.tabId,code:content.code});
+@@ -48 +49 @@
+- }else if(config.owner.kind==='http')owner=createReading67HomeworkOwner({url:config.owner.url,key:(await fs.readFile(config.owner.keyFile,'utf8')).trim(),auth,docs,metadata,ownerSource});
++ }else if(config.owner.kind==='http')owner=createReading67HomeworkOwner({url:config.owner.url,key:(await fs.readFile(config.owner.keyFile,'utf8')).trim(),auth,docs,metadata,ownerSource,locate});
+@@ -50 +51 @@
+- const homework=createReading67Homework({db,metadata,pageBase:config.pageBase,owner,docs,managedCodes});
++ const homework=createReading67Homework({db,metadata,pageBase:config.pageBase,owner,docs,planWrite,resultSummary,progressText,completionText,managedCodes});
+@@ -54 +55 @@
+- return {homework,docs,owner,adminKey,registerCta:createReading67CtaRegistrar({homework,owner,docs,identity,metadata}),start(){tick();},async close(){stopped=true;clearTimeout(timer);await running;},mode:config.owner.kind};
++ return {homework,docs,owner,adminKey,registerCta:createReading67CtaRegistrar({homework,owner,docs,identity,metadata,locate,planWrite}),start(){tick();},async close(){stopped=true;clearTimeout(timer);await running;},mode:config.owner.kind};
+--- src/reading-listening67/web-homework.js
++++ src/reading-listening67/web-homework.js
+@@ -16 +16 @@
+-export function createReading67Homework({db,metadata,pageBase,owner,docs,managedCodes=[],clock=Date.now}){
++export function createReading67Homework({db,metadata,pageBase,owner,docs,managedCodes=[],clock=Date.now,planWrite=planReading67HomeworkWrite,resultSummary=reading67ResultSummary,progressText=reading67ProgressText,completionText}){
+@@ -46 +46,3 @@
+-   text+=reading67ProgressText(reading67ResultSummary(saved?.data));
++   const progress=resultSummary(saved?.data);
++   if(completionText)text=completionText({runNo:no,firstRunNo:first,progress});
++   text+=progressText(progress);
+@@ -51 +53,5 @@
+-  return {text,link:attempt?teacherUrl(s,attempt.id):'',runNo:no,attemptId:attempt?.id||null,code:s.code,version:s.version};
++  if(metadata.practiceRequired){
++   const practice=(await tx.query('SELECT status FROM reading_listening67.web_share_practice WHERE '+clause,args(s))).rows[0];
++   text='Luyện ChatGPT: '+(practice?.status==='accepted'?'đã được công nhận. ':['queued','processing'].includes(practice?.status)?'đang kiểm tra link. ':'chưa hoàn thành. ')+text;
++  }
++  return {text,link:attempt?teacherUrl(s,attempt.id):metadata.practiceRequired?teacherUrl(s):'',runNo:no,attemptId:attempt?.id||null,code:s.code,version:s.version};
+@@ -71 +77 @@
+-  const ctaPlan=planReading67HomeworkWrite(document,{document_id:verified.documentId,tab_id:verified.tabId,code:s.code},{kind:'cta',payload:{url:entryUrl}});
++  const ctaPlan=planWrite(document,{document_id:verified.documentId,tab_id:verified.tabId,code:s.code},{kind:'cta',payload:{url:entryUrl}});
+@@ -105,2 +111,2 @@
+-   let plan=planReading67HomeworkWrite(await docs.read(target.documentId),effective,job);
+-   if(!plan.verified){await docs.write(target.documentId,plan);plan=planReading67HomeworkWrite(await docs.read(target.documentId),{...effective,last_doc_text:job.kind==='status'?job.payload.text:b.last_doc_text},job);}
++   let plan=planWrite(await docs.read(target.documentId),effective,job);
++   if(!plan.verified){await docs.write(target.documentId,plan);plan=planWrite(await docs.read(target.documentId),{...effective,last_doc_text:job.kind==='status'?job.payload.text:b.last_doc_text},job);}
+@@ -141 +147,2 @@
+- return {entryUrl,teacherUrl,start,submitted,outcome,register,status,once,previewStatus,refreshStatus};
++ async function practiceChanged(tx,s,id,outcome){const b=await ensure(tx,s);return append(tx,b,'practice:'+id+':'+outcome.status,'status',await state(tx,s,b));}
++ return {entryUrl,teacherUrl,start,submitted,outcome,register,status,once,previewStatus,refreshStatus,practiceChanged};
+--- src/reading-listening67/web-result-summary.js
++++ src/reading-listening67/web-result-summary.js
+@@ -3,0 +4 @@
++  if(result?.grading?.kind==='matching_headings')return reading67HeadingsSummary(result.grading);
+@@ -17,0 +19,7 @@
++}
++
++export function reading67HeadingsSummary(grading){
++ const rows=grading.target_results,ids=grading.structure?.targetIds,headings=grading.structure?.headingIds;
++ if(!Array.isArray(rows)||!Array.isArray(ids)||!Array.isArray(headings)||ids.length!==15||headings.length!==5||new Set(ids).size!==ids.length||rows.length!==ids.length||new Set(rows.map(r=>r.target_id)).size!==ids.length||headings.some(id=>!ids.includes(id))||rows.some(r=>!ids.includes(r.target_id)||!['correct','partial','incorrect','missing'].includes(r.verdict)))return null;
++ const matching=rows.filter(r=>headings.includes(r.target_id)),compression=rows.filter(r=>!headings.includes(r.target_id)),needsRepair=rows.filter(r=>r.verdict!=='correct').map(r=>r.target_id);
++ return {version:1,kind:'matching_headings',matchingCorrect:matching.filter(r=>r.verdict==='correct').length,matchingTotal:5,compressionCorrect:compression.filter(r=>r.verdict==='correct').length,compressionTotal:10,total:15,correctCount:15-needsRepair.length,remainingCount:needsRepair.length,needsRepair,allCorrect:needsRepair.length===0};
+--- src/reading-listening67/web-routes.js
++++ src/reading-listening67/web-routes.js
+@@ -10 +10 @@
+-const saveInput=z.object({baseRevision:z.number().int().nonnegative(),mutationId:z.uuid(),body:z.object({answers:z.record(z.string(),z.string().max(12000)),annotations:z.array(z.record(z.string(),z.unknown())).max(300),notes:z.string().max(16000),flags:z.array(z.number().int().min(1).max(4)).max(4)}).strict()}).strict();
++const makeSaveInput=(flagCount=4)=>z.object({baseRevision:z.number().int().nonnegative(),mutationId:z.uuid(),body:z.object({answers:z.record(z.string(),z.string().max(12000)),annotations:z.array(z.record(z.string(),z.unknown())).max(300),notes:z.string().max(16000),flags:z.array(z.number().int().min(1).max(flagCount)).max(flagCount)}).strict()}).strict();
+@@ -13 +13,2 @@
+-export function createReading67WebRouter({store,content,grader,authenticate,identity,config={},homework,registerCta,adminKey}){
++export function createReading67WebRouter({store,content,grader,authenticate,identity,config={},homework,registerCta,adminKey,practice}){
++  const saveInput=makeSaveInput(config.flagCount||4);
+@@ -15 +16 @@
+-  const lessonSaveInput=saveInput.extend({body:saveInput.shape.body.extend({flags:z.array(z.number().int().refine(n=>questionNumbers.includes(n))).max(questionNumbers.length)})});
++  const lessonSaveInput=content.type==='tfng'||content.type==='green-roofs'?saveInput.extend({body:saveInput.shape.body.extend({flags:z.array(z.number().int().refine(n=>questionNumbers.includes(n))).max(questionNumbers.length)})}):saveInput;
+@@ -46,0 +48 @@
++    if(practice)router.get('/teacher/work/:classId/:studentRef/practice',route(async(q,r)=>{const p=await teacherScope(q,r);r.json(await practice.status(p.scope,q.query.attemptId?parse(id,q.query.attemptId):undefined));}));
+@@ -50,0 +53,4 @@
++  if(practice){
++    router.get('/practice',route(async(q,r)=>r.json(await practice.status(scope(q),q.query.attemptId?parse(id,q.query.attemptId):undefined))));
++    router.post('/practice',route(async(q,r)=>r.status(202).json(await practice.save(scope(q),parse(z.object({url:z.string().min(1).max(500),requestId:z.uuid()}).strict(),q.body)))));
++  }
+--- src/reading-listening67/web-store.js
++++ src/reading-listening67/web-store.js
+@@ -15 +15 @@
+-export function createReading67WebStore({db,grader,homework,jobScope}) {
++export function createReading67WebStore({db,grader,homework,resultSummary=reading67ResultSummary,jobScope,beforeSubmit,afterSubmit}) {
+@@ -49,0 +50 @@
++      if(beforeSubmit)await beforeSubmit(tx,scope);
+@@ -62,0 +64 @@
++      if(afterSubmit)await afterSubmit(tx,scope,attemptId);
+@@ -72 +74 @@
+-    return {attemptId:row.id,jobId:row.job_id,status:row.status,errorCode:row.error_code,createdAt:row.created_at,finishedAt:row.finished_at,runNo:row.run_no,draftRevision:row.draft_revision,snapshot:row.snapshot,completeness:row.completeness,result:row.status==='done'?row.result:null,progress:row.status==='done'?reading67ResultSummary(row.result):null,validationProgress,recovery,graderHash:row.grader_hash,fromCache};
++    return {attemptId:row.id,jobId:row.job_id,status:row.status,errorCode:row.error_code,createdAt:row.created_at,finishedAt:row.finished_at,runNo:row.run_no,draftRevision:row.draft_revision,snapshot:row.snapshot,completeness:row.completeness,result:row.status==='done'?row.result:null,progress:row.status==='done'?resultSummary(row.result):null,validationProgress,recovery,graderHash:row.grader_hash,fromCache};
+@@ -75 +77 @@
+-  async function history(scope){return (await db.query(`SELECT a.id AS "attemptId",a.run_no AS "runNo",a.draft_revision AS "draftRevision",a.created_at AS "createdAt",j.finished_at AS "finishedAt",j.status,j.error_code AS "errorCode",r.data->'grading'->'summary' AS summary,r.data AS result FROM reading_listening67.web_attempt a JOIN reading_listening67.web_job j ON j.attempt_id=a.id LEFT JOIN reading_listening67.web_result r ON r.attempt_id=a.id WHERE a.owner_id=$1 AND a.course_id=$2 AND a.assignment_code=$3 AND a.content_version=$4 ORDER BY a.created_at DESC LIMIT 40`,values(scope))).rows.map(({result,...item})=>({...item,progress:item.status==='done'?reading67ResultSummary(result):null}));}
++  async function history(scope){return (await db.query(`SELECT a.id AS "attemptId",a.run_no AS "runNo",a.draft_revision AS "draftRevision",a.created_at AS "createdAt",j.finished_at AS "finishedAt",j.status,j.error_code AS "errorCode",r.data->'grading'->'summary' AS summary,r.data AS result FROM reading_listening67.web_attempt a JOIN reading_listening67.web_job j ON j.attempt_id=a.id LEFT JOIN reading_listening67.web_result r ON r.attempt_id=a.id WHERE a.owner_id=$1 AND a.course_id=$2 AND a.assignment_code=$3 AND a.content_version=$4 ORDER BY a.created_at DESC LIMIT 40`,values(scope))).rows.map(({result,...item})=>({...item,progress:item.status==='done'?resultSummary(result):null}));}
+@@ -115 +117 @@
+-  async function fail(job,error){return db.transaction(async tx=>{const owned=await assertOwner(tx,job);const code=String(error.code||'GRADING_VALIDATION_FAILED').slice(0,100);const status=code==='AI_OUTCOME_UNKNOWN'?'needs_review':'failed';await tx.query('UPDATE reading_listening67.web_job SET status=$2,error_code=$3,finished_at=now(),lease_until=NULL WHERE id=$1',[job.jobId,status,code]);if(homework)await homework.outcome(tx,{ownerId:job.ownerId,courseId:owned.course_id,code:owned.assignment_code,version:owned.content_version},job.jobId);});}
++  async function fail(job,error){return db.transaction(async tx=>{const owned=await assertOwner(tx,job);const code=String(error.code||'GRADING_VALIDATION_FAILED').slice(0,100);const status=['AI_OUTCOME_UNKNOWN','AI_VALIDATION_NEEDS_REVIEW'].includes(code)?'needs_review':'failed';await tx.query('UPDATE reading_listening67.web_job SET status=$2,error_code=$3,finished_at=now(),lease_until=NULL WHERE id=$1',[job.jobId,status,code]);if(homework)await homework.outcome(tx,{ownerId:job.ownerId,courseId:owned.course_id,code:owned.assignment_code,version:owned.content_version},job.jobId);});}

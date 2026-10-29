@@ -18,7 +18,7 @@ const review=(verdict='correct',met=2,errors=[])=>({target_id:'U1',accepted:true
 async function finish(grader,prepared){let state;for(let n=0;n<12;n++){try{return await grader.finish(prepared,{validationState:state,onCheckpoint:async s=>{state=structuredClone(s);}});}catch(e){if(e.code!=='AI_REPAIR_PENDING')throw e;}}throw Error('Fixture did not complete');}
 
 test('Configured Listening model pins match both semantic audit and review; default remains 3.5',async()=>{
- const calls=[];const provider=async({model,prompt})=>{calls.push(model);return prompt.includes('lượt kiểm nội dung độc lập')?{reviews:[{target_id:'U1',accepted:true,problems:[]}]}:{results:[row('U1','variant')]};};
+ const calls=[];const provider=async({model,prompt})=>{calls.push(model);return prompt.includes('lượt kiểm nội dung độc lập')?{reviews:[review()]}:{results:[row('U1','variant')]};};
  const g=createListeningHomeworkApp({db:{},lesson,identity:{},origins:[],model:'gemini-3.8-flash',provider}).grader;
  const old=createListeningHomeworkApp({db:{},lesson,identity:{},origins:[],provider}).grader;
  const result=await finish(g,g.prepareWeb({...answers(),U1:'variant'}));

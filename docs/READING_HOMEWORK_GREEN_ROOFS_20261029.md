@@ -17,7 +17,7 @@ hoàn tất; checkpoint, lease, nháp, lịch sử và Docs vẫn theo mã/versi
 
 Runtime dùng cơ chế additional lessons của Reading Homework đã phát hành với
 TFNG. Main còn thiếu gói nguồn đó nên nhánh này tích hợp nguồn phụ thuộc và giữ
-các điểm mở rộng Listening mới hơn khi giải quyết xung đột. Phát hành dự kiến
+các điểm mở rộng Listening mới hơn khi giải quyết xung đột. Đã phát hành bằng cách
 chỉ overlay ba module trên image live, thêm cấu hình bài và mount private. Không
 build toàn bộ main hoặc chạy migration của sản phẩm khác.
 
@@ -41,5 +41,30 @@ config, audit, bản đóng gói, kiểm, checkpoint AI và Docs thử. Trước
 đọc lại image/config/source live để giữ bài được task khác thêm đồng thời.
 Quay code/config đúng gói; không restore database hoặc chấm lại bài cũ.
 
-Trạng thái hiện tại: chuẩn bị xong, chưa phát hành backend hoặc cập nhật CTA
-production. Git, phát hành và mở bài được báo riêng khi thực sự hoàn tất.
+Đã phát hành backend và CTA production theo xác nhận của Đức ngày 29/10/2026.
+URL học viên: https://tranhoangduc90.github.io/izone-ai-team-pages/reading-skills67/green-roofs/?server=1
+URL giảng viên: https://tranhoangduc90.github.io/izone-ai-team-pages/reading-skills67/green-roofs/teacher.html
+Image đang chạy `izone-reading-homework:green-roofs-20261029-v1`; ba module
+khớp byte với gói phát hành và khớp nội dung Git sau chuẩn hóa CRLF/LF.
+Backup code/config/database tại `/opt/izone-reading-green-roofs-20261029`;
+container cũ giữ tên `izone-reading67-materials-ic2304-before-green-roofs-20261029`.
+Fingerprint bài làm/kết quả hiện có được giữ nguyên trong lúc chuyển.
+
+CTA vẫn active, giữ trigger/settings/connections; bộ chấm gốc không đổi.
+Execution thử cách ly `3082276` chạy node nhận diện thật thành công với dữ liệu
+giả, trả đúng mã và không ghi ra ngoài. Lần đầu fixture thử sai cú pháp đã được
+sửa, biên dịch lại trước cập nhật và chạy lại. Workflow thử `GywXgIWrxV9gizkY`
+inactive, có tag Codex tạo/Tạm thời, owner reading-green-roofs-20261029,
+hạn giữ 30/10/2026 07:00 UTC, chờ quyền archive; không có lịch tự chạy.
+
+Đã mở CTA từ Docs thử trong trình duyệt tới đúng bài. Planner đọc lại verified,
+0 request khi chạy lại. Phiên GV thật được khôi phục qua broker materials,
+config và teacher/classes đều HTTP200; thêm 27 test SSO/phiên đạt. Cửa vào HV
+được kiểm trong context sạch, chưa chọn danh tính hoặc tạo lượt học viên thật.
+API liệt kê đủ 13 lớp; IC2340, IC2363 và IC2376 hiện có roster rỗng. Không coi
+kiểm này là đã giao Classroom hoặc kiểm bài nộp của học viên thật.
+
+Nguồn đã nhập main: Pages PR358/PR359, backend PR69, repo điều phối PR261.
+Main local của cả ba repo đã fast-forward và đối chiếu origin/main; file riêng
+của task khác giữ nguyên. Bằng chứng cuối nằm tại `final-api.private.json`,
+`final-runtime.private.json`, `final-workflow-check.json` trong kho riêng nêu trên.

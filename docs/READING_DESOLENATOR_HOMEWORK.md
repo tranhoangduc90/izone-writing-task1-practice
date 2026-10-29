@@ -34,9 +34,9 @@ từ nguồn K67 hiện hành khi phát hành, gồm lớp roster rỗng.
 
 ## Baseline và kiểm
 
-Live Reading có overlay TFNG/SSO/queue chưa nằm hết trong main. Gói
+Live Reading hiện dùng image Green roofs/TFNG/SSO/queue ngày 29/10. Gói
 `backend/ops/releases/reading-desolenator-20261029/live-compat.patch` áp
-đúng baseline đã đọc; không lấy toàn main đè image đang chạy. Kiểm hash và
+đúng baseline đã đọc lại sau khi Green roofs phát hành; không lấy toàn main đè image đang chạy. Kiểm hash và
 đối chiếu lại nếu chat khác đã thêm bài. Quay lui code/config riêng; không
 restore database hoặc xóa bảng/lịch sử.
 
@@ -54,3 +54,12 @@ Không đưa kho này vào Pages hoặc commit snapshot có credential.
 Trạng thái trước duyệt phát hành: local đã chạy; chưa phát hành production,
 chưa kiểm AI/Google/Docs thật hoặc Classroom cho bài mới. Registry CTA có
 candidate chỉ bổ sung mã theo tiêu đề; bộ chấm CTA cũ không thay đổi.
+
+Kết quả ghép với main mới: Desolenator UI 12/12, Green roofs UI 12/12;
+native Materials/GV 46/46; Grader Green roofs 6/6; bộ backend bị tác động
+46/46 và một vòng API/SQL local đạt. Suite backend trước ghép đạt 480,
+8 skip, 0 lỗi; không coi các fixture này là đã gọi AI/Google thật.
+Một ca Green roofs đọc vị trí trước requestAnimationFrame của điều hướng;
+chờ điều hướng xong rồi đo vẫn giữ DOM/cuộn qua ba nhịp polling, không sửa
+hành vi sản phẩm để làm test đạt. Snapshot SSH được truyền base64 để giữ
+nguyên byte trước khi đối chiếu hash; không chuẩn hóa ngầm bản chấm ghim.

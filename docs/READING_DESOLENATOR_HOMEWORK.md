@@ -63,3 +63,36 @@ Một ca Green roofs đọc vị trí trước requestAnimationFrame của đi�
 chờ điều hướng xong rồi đo vẫn giữ DOM/cuộn qua ba nhịp polling, không sửa
 hành vi sản phẩm để làm test đạt. Snapshot SSH được truyền base64 để giữ
 nguyên byte trước khi đối chiếu hash; không chuẩn hóa ngầm bản chấm ghim.
+
+## Phát hành 29/10/2026
+
+Đức đã duyệt Git và production trong chat. Pages PR360, backend PR71 và
+repo điều phối PR262 đã nhập main. URL học viên:
+https://tranhoangduc90.github.io/izone-ai-team-pages/reading-skills67/the-desolenator/?server=1
+URL GV cùng thư mục, file `teacher.html`. Mở đủ 13 lớp đang học/chờ mở
+theo ERP qua Metabase lúc 08:07 UTC, gồm lớp roster rỗng; không mở lớp đã
+hoàn thành chỉ vì còn trong danh sách quyền cũ.
+
+Image hiện hành `izone-reading-homework:desolenator-20261029-v2`; module
+và config đã đối chiếu byte. Backup tại `/opt/izone-reading-desolenator-20261029`
+và thư mục `-v2`; container trước chuyển được giữ, dữ liệu nháp/lượt/kết quả
+cũ nguyên vẹn. Ba bảng mới được cấp đúng quyền cho app, không restore DB.
+
+AI thật đạt 15/15 trên đáp án chuẩn giả lập. Lần đầu bước review trả khung
+Markdown/thiếu trường; lỗi không được đưa ngược vào prompt nên lặp lại.
+PR72 bổ sung hướng dẫn JSON thuần/đủ mảng và phản hồi lỗi cụ thể, giữ
+parser nghiêm. Ca hồi quy RED/GREEN, 12/12 Headings/Share và 27/27 test
+backend bị tác động đạt; checkpoint cũ hoàn tất mà không gọi lại bước đầu.
+Bộ đọc Share thật đọc được hai tin của link mẫu, recognizer thật chấp nhận
+hội thoại hoàn tất giả lập. Không tạo/nộp/chấm lượt học viên thật.
+
+CTA vẫn active, settings/trigger/connection/node khác giữ nguyên. Execution
+canary 3082537 chạy node native trả đúng mã, externalWrites=0. Workflow thử
+URVr5yKjDUakeOXE inactive, tag Codex tạo/Tạm thời, owner reading-desolenator-20261029,
+hạn giữ 30/10/2026 08:00 UTC; archive còn chờ quyền riêng, không tự chạy.
+
+Docs nguồn đã đổi mã/CTA, bổ sung ô trạng thái READING; planner đọc lại
+verified, 0 request. Docs thử cũng ghi/readback và lặp lại 0 request. Phiên
+GV thật được khôi phục bằng broker materials và thấy đủ 13 lớp; cửa HV
+kiểm trong context sạch. Đây không phải xác nhận đã giao Classroom hay
+đã thử một bản nộp của học viên thật.

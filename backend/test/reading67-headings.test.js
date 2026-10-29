@@ -32,6 +32,17 @@ sourceTest('Thiếu nhận xét → bổ sung đúng trường → kiểm nội 
  assert.equal(next.result.grading.target_results.length,15);assert.equal(next.result.feedback[id].status,'partial');assert.equal(calls,3);
  const completeState=next.result.audit.validation;const resumed=await g.finish(prepared,{validationState:JSON.parse(JSON.stringify(completeState))});assert.equal(calls,3);assert.equal(resumed.grading.validation.reviewedHash,next.result.grading.validation.reviewedHash);
 });
+sourceTest('Review sai JSON gửi rõ lỗi cho vòng kế tiếp, giữ checkpoint và các verdict ban đầu',async()=>{
+ const prompts=[];let responses=[];const g=await grader(async p=>{prompts.push(p.prompt);return responses.shift();}),prepared=g.prepareWeb(answers(g),'review-format-recovery'),initial=ai(g,prepared);
+ const review={results:initial.results.map(r=>({target_id:r.target_id,accepted:true,fields:[],problems:[]}))};
+ responses.push(envelope(initial),envelope('unused'));
+ let next=await checkpoint(()=>g.finish(prepared));
+ responses[0]={...envelope(review),candidates:[{finishReason:'STOP',content:{parts:[{text:'```json\n'+JSON.stringify(review)+'\n```'}]}}]};
+ next=await checkpoint(()=>g.finish(prepared,{validationState:next.state}));assert.equal(next.state.phase,'review');assert.match(next.state.lastRepairError.message,/JSON object thuần/);
+ responses.push(envelope(review));
+ const result=await g.finish(prepared,{validationState:next.state});
+ assert.notEqual(prompts[1],prompts[2]);assert.match(prompts[2],/JSON object thuần/);assert.match(prompts[2],/problems/);assert.equal(result.grading.target_results.length,15);assert.deepEqual(result.audit.validation.value,initial);
+});
 sourceTest('Bổ sung không được đổi verdict đã khóa; ID lạ không được ghép theo vị trí',async()=>{
  let responses=[];const g=await grader(async()=>envelope(responses.shift())),p=g.prepareWeb(answers(g)),v=ai(g,p),id=v.results[0].target_id;
  v.results[0]={target_id:id,verdict:'partial',error_code:'T-ABS',feedback:'',next_step:'Lần sau, hãy giữ đầy đủ quan hệ giữa các ý.'};responses.push(v);

@@ -1,0 +1,125 @@
+--- src/reading-listening67/web-additional-lessons.js
++++ src/reading-listening67/web-additional-lessons.js
+@@ -1,4 +1,5 @@
+ /** Thêm bài vào cùng sản phẩm Homework; mỗi hàng chấm/Docs được giới hạn theo mã và phiên bản. */
++import {createReading67HeadingsLesson} from './web-headings-lesson.js';
+ import {readFile} from 'node:fs/promises';
+ import {loadReading67TfngGrader} from './web-tfng-grader.js';
+ import {createReading67WebIdentity} from './web-identity.js';
+@@ -11,6 +12,7 @@
+  const runtimes=[];
+  for(const config of configs){
+   if(!/^\/[a-z0-9-]+$/.test(config.route)||typeof config.studentsOpen!=='boolean'||demo&&config.homework?.enabled)throw Error('ADDITIONAL_LESSON_CONFIG_INVALID');
++  if(config.kind==='matching_headings'){runtimes.push(await createReading67HeadingsLesson({config,db,context,initial,verifyGoogle,cookiePath,googleClientId,demo,managedCodes}));continue;}
+   const content=JSON.parse(await readFile(config.contentPath,'utf8'));
+   const grader=await loadReading67TfngGrader({snapshotPath:config.graderPath,expectedSha256:config.graderSha256});
+   if(content.type!=='tfng'||content.code!==grader.config.code||content.version!==grader.config.version||content.targets.length!==grader.profile.expected_target_ids.length||content.targets.some(t=>!grader.profile.expected_target_ids.includes(t.id)))throw Error('LESSON_DEFINITION_MISMATCH');
+--- src/reading-listening67/web-homework-runtime.js
++++ src/reading-listening67/web-homework-runtime.js
+@@ -15,7 +15,7 @@
+ const run=promisify(execFile);
+ const fail=code=>{throw new WebGradingError(code,403);};
+ export async function createReading67HomeworkRuntime({config,db,content,identity,ownerSource,managedCodes=[]}){
+- const metadata={code:content.code,version:content.version,homeworkLesson:config.homeworkLesson};
++ const metadata={code:content.code,version:content.version,homeworkLesson:config.homeworkLesson,...(content.practice?{practiceRequired:true}:{})};
+  let auth;
+  if(config.googleAuth.kind==='command'){
+   let cached,until=0;
+--- src/reading-listening67/web-homework.js
++++ src/reading-listening67/web-homework.js
+@@ -48,7 +48,11 @@
+   }else if(attempt){
+    text=['queued','processing'].includes(attempt.status)?`Đã nộp bài lần ${no}, đang chờ chấm. Giảng viên nhấn vào đây để xem bài đã nộp.`:`Bài lần ${no} đã được lưu, chưa có kết quả chấm. Giảng viên nhấn vào đây để xem bài đã nộp.`;
+   }
+-  return {text,link:attempt?teacherUrl(s,attempt.id):'',runNo:no,attemptId:attempt?.id||null,code:s.code,version:s.version};
++  if(metadata.practiceRequired){
++   const practice=(await tx.query('SELECT status FROM reading_listening67.web_share_practice WHERE '+clause,args(s))).rows[0];
++   text='Luyện ChatGPT: '+(practice?.status==='accepted'?'đã được công nhận. ':['queued','processing'].includes(practice?.status)?'đang kiểm tra link. ':'chưa hoàn thành. ')+text;
++  }
++  return {text,link:attempt?teacherUrl(s,attempt.id):metadata.practiceRequired?teacherUrl(s):'',runNo:no,attemptId:attempt?.id||null,code:s.code,version:s.version};
+  }
+  async function start(tx,s){
+   const b=await ensure(tx,s),draft=(await tx.query('SELECT run_no FROM reading_listening67.web_draft WHERE '+clause,args(s))).rows[0];
+@@ -138,5 +142,6 @@
+    return append(tx,b,'progress-v1:'+b.sequence+':'+(payload.attemptId||payload.runNo),'status',payload);
+   });
+  }
+- return {entryUrl,teacherUrl,start,submitted,outcome,register,status,once,previewStatus,refreshStatus};
++ async function practiceChanged(tx,s,id,outcome){const b=await ensure(tx,s);return append(tx,b,'practice:'+id+':'+outcome.status,'status',await state(tx,s,b));}
++ return {entryUrl,teacherUrl,start,submitted,outcome,register,status,once,previewStatus,refreshStatus,practiceChanged};
+ }
+--- src/reading-listening67/web-result-summary.js
++++ src/reading-listening67/web-result-summary.js
+@@ -1,6 +1,7 @@
+ // Nhận kết quả đã lưu; chỉ đếm đủ 20 mục hợp lệ, không suy điểm từ phần đã điền.
+ // Thiếu/mâu thuẫn trả null để UI và Docs không thông báo đạt toàn bộ sai.
+ export function reading67ResultSummary(result) {
++  if(result?.grading?.kind==='matching_headings')return reading67HeadingsSummary(result.grading);
+   if(result?.grading?.kind==='tfng')return tfngSummary(result.grading);
+   const rows = result?.grading?.target_results;
+   if (!Array.isArray(rows) || rows.length !== 20 ||
+@@ -32,3 +33,10 @@
+  const correct=xs=>xs.filter(r=>r.verdict==='correct').length,needsRepair=rows.filter(r=>r.verdict!=='correct').map(r=>r.target_id);
+  return {version:1,kind:'tfng',evidenceCorrect:correct(evidence),evidenceTotal:evidence.length,labelCorrect:correct(labels),labelTotal:labels.length,conclusionCorrect:correct(conclusions),conclusionTotal:conclusions.length,total:rows.length,correctCount:rows.length-needsRepair.length,remainingCount:needsRepair.length,needsRepair,allCorrect:needsRepair.length===0};
+ }
++
++export function reading67HeadingsSummary(grading){
++ const rows=grading.target_results,ids=grading.structure?.targetIds,headings=grading.structure?.headingIds;
++ if(!Array.isArray(rows)||!Array.isArray(ids)||!Array.isArray(headings)||ids.length!==15||headings.length!==5||new Set(ids).size!==ids.length||rows.length!==ids.length||new Set(rows.map(r=>r.target_id)).size!==ids.length||headings.some(id=>!ids.includes(id))||rows.some(r=>!ids.includes(r.target_id)||!['correct','partial','incorrect','missing'].includes(r.verdict)))return null;
++ const matching=rows.filter(r=>headings.includes(r.target_id)),compression=rows.filter(r=>!headings.includes(r.target_id)),needsRepair=rows.filter(r=>r.verdict!=='correct').map(r=>r.target_id);
++ return {version:1,kind:'matching_headings',matchingCorrect:matching.filter(r=>r.verdict==='correct').length,matchingTotal:5,compressionCorrect:compression.filter(r=>r.verdict==='correct').length,compressionTotal:10,total:15,correctCount:15-needsRepair.length,remainingCount:needsRepair.length,needsRepair,allCorrect:needsRepair.length===0};
++}
+--- src/reading-listening67/web-routes.js
++++ src/reading-listening67/web-routes.js
+@@ -10,7 +10,7 @@
+ const saveInput=z.object({baseRevision:z.number().int().nonnegative(),mutationId:z.uuid(),body:z.object({answers:z.record(z.string(),z.string().max(12000)),annotations:z.array(z.record(z.string(),z.unknown())).max(300),notes:z.string().max(16000),flags:z.array(z.number().int().min(1).max(4)).max(4)}).strict()}).strict();
+ const submitInput=z.object({revision:z.number().int().positive(),requestId:z.uuid()}).strict();
+ const id=z.uuid();
+-export function createReading67WebRouter({store,content,grader,authenticate,identity,config={},homework,registerCta,adminKey}){
++export function createReading67WebRouter({store,content,grader,authenticate,identity,config={},homework,registerCta,adminKey,practice}){
+   const questionNumbers=content.questions?.map(q=>q.number)||[1,2,3,4];
+   const lessonSaveInput=saveInput.extend({body:saveInput.shape.body.extend({flags:z.array(z.number().int().refine(n=>questionNumbers.includes(n))).max(questionNumbers.length)})});
+   const router=express.Router();router.use(express.json({limit:'250kb',strict:true}));
+@@ -44,10 +44,15 @@
+     const teacherScope=async(q,r)=>{const p=parse(ref,{classId:q.params.classId,studentRef:q.params.studentRef});await identity.authorizeTeacher(q,r,p.classId);return {...p,scope:makeScope({ownerId:p.studentRef,courseId:p.classId})};};
+     router.get('/teacher/work/:classId/:studentRef',route(async(q,r)=>{const p=await teacherScope(q,r);const member=(await identity.roster(p.classId)).find(s=>s.studentRef===p.studentRef);r.json({ok:true,content,identity:{ownerId:p.studentRef,courseId:p.classId,name:member?.name||'Học viên không còn trong danh sách đang học',className:p.classId},draft:await store.draft(p.scope),attempts:await store.history(p.scope),archives:await store.archives(p.scope),firstCompleted:await store.firstCompleted(p.scope),readonly:true});}));
+     router.get('/teacher/work/:classId/:studentRef/attempts/:id',route(async(q,r)=>{const p=await teacherScope(q,r);r.json({ok:true,...await store.attempt(p.scope,parse(id,q.params.id))});}));
++    if(practice)router.get('/teacher/work/:classId/:studentRef/practice',route(async(q,r)=>{const p=await teacherScope(q,r);r.json(await practice.status(p.scope,q.query.attemptId?parse(id,q.query.attemptId):undefined));}));
+   }
+   router.use(async(q,r,next)=>{try{requireOpen();q.webIdentity=await authenticate(q);if(!q.webIdentity)throw new WebGradingError('WEB_UNAUTHORIZED',401);next();}catch(error){next(error);}});
+   router.get('/lesson',route(async(q,r)=>r.json({ok:true,content,identity:q.webIdentity,grader:{hash:grader.pins.sha256,version:grader.pins.workflowVersion},mode:'local_test_real_grading'})));
+   router.get('/draft',route(async(q,r)=>r.json({ok:true,...await store.draft(scope(q))})));
++  if(practice){
++    router.get('/practice',route(async(q,r)=>r.json(await practice.status(scope(q),q.query.attemptId?parse(id,q.query.attemptId):undefined))));
++    router.post('/practice',route(async(q,r)=>r.status(202).json(await practice.save(scope(q),parse(z.object({url:z.string().min(1).max(500),requestId:z.uuid()}).strict(),q.body)))));
++  }
+   router.get('/homework',route(async(q,r)=>r.json({ok:true,...(homework?await homework.status(scope(q)):{status:'not_applicable'})})));
+   router.put('/draft',route(async(q,r)=>r.json({ok:true,...await store.save(scope(q),parse(lessonSaveInput,q.body))})));
+   router.post('/submit',route(async(q,r)=>r.status(202).json({ok:true,...await store.submit(scope(q),parse(submitInput,q.body))})));
+--- src/reading-listening67/web-store.js
++++ src/reading-listening67/web-store.js
+@@ -12,7 +12,7 @@
+ const where='owner_id=$1 AND course_id=$2 AND assignment_code=$3 AND content_version=$4';
+ const canonical=value=>JSON.stringify(value,(_k,v)=>v&&typeof v==='object'&&!Array.isArray(v)?Object.fromEntries(Object.entries(v).sort(([a],[b])=>a.localeCompare(b))):v);
+ 
+-export function createReading67WebStore({db,grader,homework,jobScope}) {
++export function createReading67WebStore({db,grader,homework,jobScope,beforeSubmit,afterSubmit}) {
+   const validation=grader.validationVersion?createValidationStore({db,assertOwner}):null;
+   const jobArgs=jobScope?[jobScope.code,jobScope.version]:[];
+   const jobFilter=jobScope?' AND EXISTS(SELECT 1 FROM reading_listening67.web_attempt scope_attempt WHERE scope_attempt.id=j.attempt_id AND scope_attempt.assignment_code=$1 AND scope_attempt.content_version=$2)':'';
+@@ -47,6 +47,7 @@
+       const replay=(await tx.query(`SELECT * FROM reading_listening67.web_request WHERE ${where} AND request_id=$5`,[...args,requestId])).rows[0];
+       if(replay){if(replay.request_hash!==requestHash)throw new WebGradingError('REQUEST_ID_REUSED',409);return attemptView(tx,scope,replay.attempt_id,true);}
+       if(!row||row.revision!==revision)throw new WebGradingError('DRAFT_REVISION_CONFLICT',409,{serverRevision:row?.revision||0});
++      if(beforeSubmit)await beforeSubmit(tx,scope);
+       const gate=gateFor(row.body);
+       if(!gate.completeness.eligible_for_grading)throw new WebGradingError('BELOW_COMPLETION_THRESHOLD',422,gate.completeness);
+       const inputHash=reading67AnswerFingerprint(gate.parsed);
+@@ -60,6 +61,7 @@
+         await tx.query("INSERT INTO reading_listening67.web_job(id,attempt_id,status) VALUES($1,$2,'queued')",[randomUUID(),attemptId]);
+       }
+       await tx.query('INSERT INTO reading_listening67.web_request(owner_id,course_id,assignment_code,content_version,request_id,request_hash,attempt_id) VALUES($1,$2,$3,$4,$5,$6,$7)',[...args,requestId,requestHash,attemptId]);
++      if(afterSubmit)await afterSubmit(tx,scope,attemptId);
+       if(homework)await homework.submitted(tx,scope,attemptId);
+       return attemptView(tx,scope,attemptId,!!cached);
+     });

@@ -48,7 +48,11 @@ export function createReading67Homework({db,metadata,pageBase,owner,docs,clock=D
   }else if(attempt){
    text=['queued','processing'].includes(attempt.status)?`Đã nộp bài lần ${no}, đang chờ chấm. Giảng viên nhấn vào đây để xem bài đã nộp.`:`Bài lần ${no} đã được lưu, chưa có kết quả chấm. Giảng viên nhấn vào đây để xem bài đã nộp.`;
   }
-  return {text,link:attempt?teacherUrl(s,attempt.id):'',runNo:no,attemptId:attempt?.id||null,code:s.code,version:s.version};
+  if(metadata.practiceRequired){
+   const practice=(await tx.query('SELECT status FROM reading_listening67.web_share_practice WHERE '+clause,args(s))).rows[0];
+   text='Luyện ChatGPT: '+(practice?.status==='accepted'?'đã được công nhận. ':['queued','processing'].includes(practice?.status)?'đang kiểm tra link. ':'chưa hoàn thành. ')+text;
+  }
+  return {text,link:attempt?teacherUrl(s,attempt.id):metadata.practiceRequired?teacherUrl(s):'',runNo:no,attemptId:attempt?.id||null,code:s.code,version:s.version};
  }
  async function start(tx,s){
   const b=await ensure(tx,s),draft=(await tx.query('SELECT run_no FROM reading_listening67.web_draft WHERE '+clause,args(s))).rows[0];
@@ -137,5 +141,6 @@ export function createReading67Homework({db,metadata,pageBase,owner,docs,clock=D
    return append(tx,b,'progress-v1:'+b.sequence+':'+(payload.attemptId||payload.runNo),'status',payload);
   });
  }
- return {entryUrl,teacherUrl,start,submitted,outcome,register,status,once,previewStatus,refreshStatus};
+ async function practiceChanged(tx,s,id,outcome){const b=await ensure(tx,s);return append(tx,b,'practice:'+id+':'+outcome.status,'status',await state(tx,s,b));}
+ return {entryUrl,teacherUrl,start,submitted,outcome,register,status,once,previewStatus,refreshStatus,practiceChanged};
 }

@@ -10,7 +10,7 @@ import {WebGradingError} from './web-grader.js';
 const makeSaveInput=(flagCount=4)=>z.object({baseRevision:z.number().int().nonnegative(),mutationId:z.uuid(),body:z.object({answers:z.record(z.string(),z.string().max(12000)),annotations:z.array(z.record(z.string(),z.unknown())).max(300),notes:z.string().max(16000),flags:z.array(z.number().int().min(1).max(flagCount)).max(flagCount)}).strict()}).strict();
 const submitInput=z.object({revision:z.number().int().positive(),requestId:z.uuid()}).strict();
 const id=z.uuid();
-export function createReading67WebRouter({store,content,grader,authenticate,identity,config={},homework,registerCta,adminKey}){
+export function createReading67WebRouter({store,content,grader,authenticate,identity,config={},homework,registerCta,adminKey,practice}){
   const saveInput=makeSaveInput(config.flagCount||4);
   const router=express.Router();router.use(express.json({limit:'250kb',strict:true}));
   const route=fn=>(q,r,next)=>Promise.resolve(fn(q,r)).catch(next);
@@ -43,10 +43,15 @@ export function createReading67WebRouter({store,content,grader,authenticate,iden
     const teacherScope=async(q,r)=>{const p=parse(ref,{classId:q.params.classId,studentRef:q.params.studentRef});await identity.authorizeTeacher(q,r,p.classId);return {...p,scope:makeScope({ownerId:p.studentRef,courseId:p.classId})};};
     router.get('/teacher/work/:classId/:studentRef',route(async(q,r)=>{const p=await teacherScope(q,r);const member=(await identity.roster(p.classId)).find(s=>s.studentRef===p.studentRef);r.json({ok:true,content,identity:{ownerId:p.studentRef,courseId:p.classId,name:member?.name||'Học viên không còn trong danh sách đang học',className:p.classId},draft:await store.draft(p.scope),attempts:await store.history(p.scope),archives:await store.archives(p.scope),firstCompleted:await store.firstCompleted(p.scope),readonly:true});}));
     router.get('/teacher/work/:classId/:studentRef/attempts/:id',route(async(q,r)=>{const p=await teacherScope(q,r);r.json({ok:true,...await store.attempt(p.scope,parse(id,q.params.id))});}));
+    if(practice)router.get('/teacher/work/:classId/:studentRef/practice',route(async(q,r)=>{const p=await teacherScope(q,r);r.json(await practice.status(p.scope,q.query.attemptId?parse(id,q.query.attemptId):undefined));}));
   }
   router.use(async(q,r,next)=>{try{requireOpen();q.webIdentity=await authenticate(q);if(!q.webIdentity)throw new WebGradingError('WEB_UNAUTHORIZED',401);next();}catch(error){next(error);}});
   router.get('/lesson',route(async(q,r)=>r.json({ok:true,content,identity:q.webIdentity,grader:{hash:grader.pins.sha256,version:grader.pins.workflowVersion},mode:'local_test_real_grading'})));
   router.get('/draft',route(async(q,r)=>r.json({ok:true,...await store.draft(scope(q))})));
+  if(practice){
+    router.get('/practice',route(async(q,r)=>r.json(await practice.status(scope(q),q.query.attemptId?parse(id,q.query.attemptId):undefined))));
+    router.post('/practice',route(async(q,r)=>r.status(202).json(await practice.save(scope(q),parse(z.object({url:z.string().min(1).max(500),requestId:z.uuid()}).strict(),q.body)))));
+  }
   router.get('/homework',route(async(q,r)=>r.json({ok:true,...(homework?await homework.status(scope(q)):{status:'not_applicable'})})));
   router.put('/draft',route(async(q,r)=>r.json({ok:true,...await store.save(scope(q),parse(saveInput,q.body))})));
   router.post('/submit',route(async(q,r)=>r.status(202).json({ok:true,...await store.submit(scope(q),parse(submitInput,q.body))})));

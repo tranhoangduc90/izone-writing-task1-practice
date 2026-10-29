@@ -12,7 +12,7 @@ const values=s=>[s.ownerId,s.courseId,s.code,s.version];
 const where='owner_id=$1 AND course_id=$2 AND assignment_code=$3 AND content_version=$4';
 const canonical=value=>JSON.stringify(value,(_k,v)=>v&&typeof v==='object'&&!Array.isArray(v)?Object.fromEntries(Object.entries(v).sort(([a],[b])=>a.localeCompare(b))):v);
 
-export function createReading67WebStore({db,grader,homework,resultSummary=reading67ResultSummary,jobScope,beforeSubmit,afterSubmit}) {
+export function createReading67WebStore({db,grader,homework,resultSummary=reading67ResultSummary,jobScope,beforeWrite,beforeSubmit,afterSubmit}) {
   const validation=grader.validationVersion?createValidationStore({db,assertOwner}):null;
   const jobArgs=jobScope?[jobScope.code,jobScope.version]:[];
   const jobFilter=jobScope?' AND EXISTS(SELECT 1 FROM reading_listening67.web_attempt scope_attempt WHERE scope_attempt.id=j.attempt_id AND scope_attempt.assignment_code=$1 AND scope_attempt.content_version=$2)':'';
@@ -31,6 +31,7 @@ export function createReading67WebStore({db,grader,homework,resultSummary=readin
       const replay=(await tx.query(`SELECT * FROM reading_listening67.web_mutation WHERE ${where} AND mutation_id=$5`,[...args,mutationId])).rows[0];
       if(replay){if(replay.request_hash!==requestHash)throw new WebGradingError('MUTATION_ID_REUSED',409);return replay.response;}
       if(row.revision!==baseRevision)throw new WebGradingError('DRAFT_REVISION_CONFLICT',409,{serverRevision:row.revision});
+      if(beforeWrite)await beforeWrite(tx,scope);
       const saved=(await tx.query(`UPDATE reading_listening67.web_draft SET body=$5::jsonb,revision=revision+1,saved_at=now() WHERE ${where} RETURNING *`,[...args,JSON.stringify(body)])).rows[0];
       const response=draftView(saved);
       await tx.query('INSERT INTO reading_listening67.web_mutation(owner_id,course_id,assignment_code,content_version,mutation_id,request_hash,response) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)',[...args,mutationId,requestHash,JSON.stringify(response)]);
@@ -85,6 +86,7 @@ export function createReading67WebStore({db,grader,homework,resultSummary=readin
     const replay=(await tx.query(`SELECT * FROM reading_listening67.web_mutation WHERE ${where} AND mutation_id=$5`,[...args,mutationId])).rows[0];
     if(replay){if(replay.request_hash!==requestHash)throw new WebGradingError('MUTATION_ID_REUSED',409);return replay.response;}
     if(!row||row.revision!==baseRevision)throw new WebGradingError('DRAFT_REVISION_CONFLICT',409);
+    if(beforeWrite)await beforeWrite(tx,scope);
     await tx.query('INSERT INTO reading_listening67.web_draft_archive(id,owner_id,course_id,assignment_code,content_version,run_no,revision,body,saved_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)',[randomUUID(),...args,row.run_no,row.revision,JSON.stringify(row.body),row.saved_at]);
     const next=(await tx.query(`UPDATE reading_listening67.web_draft SET body=$5::jsonb,revision=revision+1,run_no=run_no+1,saved_at=now() WHERE ${where} RETURNING *`,[...args,JSON.stringify(emptyBody())])).rows[0];
     const response=draftView(next);await tx.query('INSERT INTO reading_listening67.web_mutation(owner_id,course_id,assignment_code,content_version,mutation_id,request_hash,response) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)',[...args,mutationId,requestHash,JSON.stringify(response)]);

@@ -16,7 +16,7 @@ export async function createReading67HeadingsLesson({config,db,context,initial,v
  const identity=createReading67WebIdentity({db,context,allowedClassIds:config.allowedClassIds,verifyGoogle,ownerSource,cookiePath,includeEmptyClasses:true});
  const homeworkRuntime=config.homework?.enabled?await createReading67HomeworkRuntime({config:config.homework,db,content,identity,ownerSource,managedCodes}):null;
  const practice=createReadingSharePractice({db,content,onProgress:(tx,scope,id,outcome)=>homeworkRuntime?.homework.practiceChanged(tx,scope,id,outcome)});
- const store=createReading67WebStore({db,grader,homework:homeworkRuntime?.homework,jobScope:{code:content.code,version:content.version},beforeSubmit:practice.requireAccepted,afterSubmit:practice.attachAttempt});
+ const store=createReading67WebStore({db,grader,homework:homeworkRuntime?.homework,jobScope:{code:content.code,version:content.version},beforeWrite:practice.requireAccepted,beforeSubmit:practice.requireAccepted,afterSubmit:practice.attachAttempt});
  await store.recoverExpired();
  const worker=createReading67WebWorker({store,grader,onError:error=>console.error(JSON.stringify({event:'reading_headings_error',code:error.code||'FAILED'}))});
  const router=createReading67WebRouter({store,content,grader,identity,authenticate:identity.authenticate,homework:homeworkRuntime?.homework,registerCta:homeworkRuntime?.registerCta,adminKey:homeworkRuntime?.adminKey,practice,config:{studentsOpen:config.studentsOpen,type:content.type,lesson:content.lesson,flagCount:5,homeworkEnabled:!!homeworkRuntime,homeworkMode:homeworkRuntime?.mode,demo,demoGoogle:demo,googleClientId,authority:demo?'fixture':'Reading context V1'}});

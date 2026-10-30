@@ -3,25 +3,30 @@ import {readFile} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import vm from 'node:vm';
 import {sha256,WebGradingError,reading67AnswerFingerprint} from './web-grader.js';
-const VERSION='reading-headings-validation-20261029-v1';
+const DEFAULT_VERSION='reading-headings-validation-20261029-v1';
 const clone=v=>JSON.parse(JSON.stringify(v));
 const canonical=v=>JSON.stringify(v,(_k,x)=>x&&typeof x==='object'&&!Array.isArray(x)?Object.fromEntries(Object.entries(x).sort(([a],[b])=>a.localeCompare(b))):x);
 const digest=v=>sha256(canonical(v));
 const fail=(code,status=503)=>{throw new WebGradingError(code,status);};
-export async function loadReading67HeadingsGrader({snapshotPath,expectedSha256,provider,fetchImpl=fetch}){
+export async function loadReading67HeadingsGrader(options){return loadReading67CtaGrader(options);}
+// Cùng cơ chế kiểm/bổ sung bền; mỗi adapter ghim hợp đồng của đúng CTA.
+export async function loadReading67CtaGrader({snapshotPath,expectedSha256,provider,fetchImpl=fetch,contract={workflowId:'x7BRN0424aMOSCs1',lessonId:'l3',layout:'desolenator_table_v1',expected:15,minimum:12,kind:'matching_headings'}}){
+ const VERSION=contract.validationVersion||DEFAULT_VERSION;
  const bytes=await readFile(snapshotPath,'utf8');if(sha256(bytes)!==expectedSha256)fail('GRADER_PIN_MISMATCH');
  const workflow=JSON.parse(bytes);
- if(workflow.id!=='x7BRN0424aMOSCs1')fail('GRADER_ID_MISMATCH');
+ if(workflow.id!==contract.workflowId)fail('GRADER_ID_MISMATCH');
  const reader=workflow.nodes.find(n=>n.name==='Đọc target qua source adapter')?.parameters?.jsCode;
  const end=reader?.lastIndexOf('const input = $input.first().json;');if(!end||end<0)fail('GRADER_SOURCE_CONTRACT_CHANGED');
  const h=new vm.Script(`(function(){${reader.slice(0,end)};return {CONFIG,normalizeSpace,isPlaceholder,canonicalizeTargetValue,exactNormalizer,stripGeneratedSuffix,validateParsed,evaluateCompleteness,deterministicGrade,buildSemanticPrompt,parseAiJson,mergeValidateCompose,cleanFeedback};})()`).runInNewContext({},{timeout:5000});
- const config=clone(h.CONFIG),layout='desolenator_table_v1',profile=config.layout_profiles[layout];
- if(config.lesson_id!=='l3'||profile?.expected_cells!==15||profile.minimum_required!==12)fail('GRADER_PROFILE_CHANGED');
+ const config=clone(h.CONFIG),layout=contract.layout,profile=config.layout_profiles[layout];
+ if(config.lesson_id!==contract.lessonId||profile?.expected_cells!==contract.expected||profile.minimum_required!==contract.minimum)fail('GRADER_PROFILE_CHANGED');
  const endpoint=workflow.nodes.find(n=>n.name.startsWith('AI chính'))?.parameters?.url;
  if(new URL(endpoint).origin!=='https://ducizone.ddns.net')fail('GRADER_PROVIDER_CHANGED');
  const pins={workflowId:workflow.id,workflowVersion:workflow.versionId,sha256:expectedSha256,model:config.model.name,thinking:config.model.thinking,gradingContract:config.grading_contract_version};
  function parseWeb(answers){
-  if(!answers||typeof answers!=='object'||Array.isArray(answers)||Object.keys(answers).some(id=>!profile.expected_target_ids.includes(id)))fail('TARGET_UNKNOWN',422);
+  const diagnostics=contract.kind==='sentence_completion'?profile.diagnostic_only_cells||[]:[];
+  if(!answers||typeof answers!=='object'||Array.isArray(answers)||Object.keys(answers).some(id=>![...profile.expected_target_ids,...diagnostics].includes(id)))fail('TARGET_UNKNOWN',422);
+  if(diagnostics.some(id=>answers[id]!==undefined&&(typeof answers[id]!=='string'||answers[id].length>12000)))fail('ANSWER_INVALID',422);
   const targets=profile.expected_target_ids.map((id,index)=>{
    const original=answers[id]??'';if(typeof original!=='string'||original.length>12000)fail('ANSWER_INVALID',422);
    const t=config.targets[id],raw=h.stripGeneratedSuffix(original),blank=h.isPlaceholder(raw,config),value=blank?'':h.canonicalizeTargetValue(raw,t);
@@ -114,7 +119,8 @@ export async function loadReading67HeadingsGrader({snapshotPath,expectedSha256,p
    state.phase='complete';state.reviewedHash=digest(state.value);await checkpoint();
   }
   const grading=clone(h.mergeValidateCompose(prepared.graded,prepared.prompt?state.value:null,config));
-  grading.kind='matching_headings';grading.structure={targetIds:profile.expected_target_ids,headingIds:profile.expected_target_ids.filter(id=>id.startsWith('L3.H.'))};grading.validation={version:VERSION,rounds:state.round,reviewedHash:state.reviewedHash};
+  grading.kind=contract.kind;
+  grading.structure=contract.kind==='sentence_completion'?{targetIds:profile.expected_target_ids,answerIds:profile.expected_target_ids.filter(id=>id.endsWith('.answer')),compressionIds:profile.expected_target_ids.filter(id=>/\.level[12]$/.test(id)),analysisIds:profile.expected_target_ids.filter(id=>!id.endsWith('.answer')&&!/\.level[12]$/.test(id))}:{targetIds:profile.expected_target_ids,headingIds:profile.expected_target_ids.filter(id=>id.startsWith('L3.H.'))};grading.validation={version:VERSION,rounds:state.round,reviewedHash:state.reviewedHash};
   const feedback=Object.fromEntries(grading.target_results.map(r=>[r.target_id,{status:r.verdict==='missing'?'blank':r.verdict,modelAnswer:r.correct_answer,reason:r.feedback||(r.verdict==='correct'?'Phần trả lời phù hợp với tiêu chí.':'Ô này chưa có câu trả lời.'),nextStep:r.next_step||'',raw:r}]));
   return {grading,feedback,completeness:prepared.gate.completeness,pins,providerResponse:state.originalResponse||null,audit:{validation:state},context:{operationId:prepared.operationId,sourceDigest}};
  }

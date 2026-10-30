@@ -13,7 +13,7 @@ const id=z.uuid();
 export function createReading67WebRouter({store,content,grader,authenticate,identity,config={},homework,registerCta,adminKey,practice}){
   const saveInput=makeSaveInput(config.flagCount||4);
   const questionNumbers=content.questions?.map(q=>q.number)||[1,2,3,4];
-  const lessonSaveInput=content.type==='tfng'||content.type==='green-roofs'?saveInput.extend({body:saveInput.shape.body.extend({flags:z.array(z.number().int().refine(n=>questionNumbers.includes(n))).max(questionNumbers.length)})}):saveInput;
+  const lessonSaveInput=['tfng','green-roofs','sentence_completion'].includes(content.type)?saveInput.extend({body:saveInput.shape.body.extend({flags:z.array(z.number().int().refine(n=>questionNumbers.includes(n))).max(questionNumbers.length)})}):saveInput;
   const router=express.Router();router.use(express.json({limit:'250kb',strict:true}));
   const route=fn=>(q,r,next)=>Promise.resolve(fn(q,r)).catch(next);
   const parse=(schema,value)=>{const result=schema.safeParse(value);if(!result.success)throw new WebGradingError('WEB_INVALID_INPUT',400);return result.data;};

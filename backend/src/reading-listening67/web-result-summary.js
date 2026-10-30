@@ -1,6 +1,7 @@
 // Nhận kết quả đã lưu; chỉ đếm đủ 20 mục hợp lệ, không suy điểm từ phần đã điền.
 // Thiếu/mâu thuẫn trả null để UI và Docs không thông báo đạt toàn bộ sai.
 export function reading67ResultSummary(result) {
+  if(result?.grading?.kind==='sentence_completion')return reading67SentenceSummary(result.grading);
   if(result?.grading?.kind==='matching_headings')return reading67HeadingsSummary(result.grading);
   if(result?.grading?.kind==='green-roofs')return greenRoofsSummary(result.grading);
   if(result?.grading?.kind==='tfng')return tfngSummary(result.grading);
@@ -27,9 +28,17 @@ export function reading67HeadingsSummary(grading){
 
 export function reading67ProgressText(progress) {
   if (!progress) return '';
+  if(progress.kind==='sentence_completion')return ` Kết quả: đáp án đúng ${progress.matchingCorrect}/4; phân tích từ khóa ${progress.analysisCorrect}/20; nén hai cấp ${progress.paragraphCorrect}/4 phần đạt.`+(progress.allCorrect?' Đã sửa đúng toàn bộ bài.':` Còn ${progress.remainingCount} phần cần sửa.`);
   if(progress.kind==='tfng')return ` Kết quả: kết luận toàn câu đúng ${progress.conclusionCorrect}/${progress.conclusionTotal}; T/F/NG theo mảnh đúng ${progress.labelCorrect}/${progress.labelTotal}; nội dung đối chiếu đạt ${progress.evidenceCorrect}/${progress.evidenceTotal}.`+(progress.allCorrect?' Đã sửa đúng toàn bộ bài.':` Còn ${progress.remainingCount} phần cần sửa.`);
   return ` Kết quả: đúng ${progress.matchingCorrect}/${progress.matchingTotal} câu. Phần nén: ${progress.compressionCorrect}/${progress.compressionTotal} phần đạt.` +
     (progress.allCorrect ? ' Đã sửa đúng toàn bộ bài.' : ` Còn ${progress.remainingCount} phần cần sửa.`);
+}
+
+export function reading67SentenceSummary(grading){
+ const rows=grading.target_results,s=grading.structure,ids=s?.targetIds,answers=s?.answerIds,analysis=s?.analysisIds,compression=s?.compressionIds;
+ if(!Array.isArray(rows)||!Array.isArray(ids)||!Array.isArray(answers)||!Array.isArray(analysis)||!Array.isArray(compression)||ids.length!==28||answers.length!==4||analysis.length!==20||compression.length!==4||new Set(ids).size!==28||rows.length!==28||new Set(rows.map(r=>r.target_id)).size!==28||new Set([...answers,...analysis,...compression]).size!==28||[...answers,...analysis,...compression].some(id=>!ids.includes(id))||rows.some(r=>!ids.includes(r.target_id)||!['correct','partial','incorrect','missing'].includes(r.verdict)))return null;
+ const count=group=>rows.filter(r=>group.includes(r.target_id)&&r.verdict==='correct').length,needsRepair=rows.filter(r=>r.verdict!=='correct').map(r=>r.target_id);
+ return {version:1,kind:'sentence_completion',matchingCorrect:count(answers),matchingTotal:4,analysisCorrect:count(analysis),analysisTotal:20,paragraphCorrect:count(compression),paragraphTotal:4,compressionCorrect:count([...analysis,...compression]),compressionTotal:24,total:28,correctCount:28-needsRepair.length,remainingCount:needsRepair.length,needsRepair,allCorrect:!needsRepair.length};
 }
 
 function tfngSummary(grading){

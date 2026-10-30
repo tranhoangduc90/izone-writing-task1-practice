@@ -1,6 +1,7 @@
 // Nhận kết quả đã lưu; chỉ đếm đủ 20 mục hợp lệ, không suy điểm từ phần đã điền.
 // Thiếu/mâu thuẫn trả null để UI và Docs không thông báo đạt toàn bộ sai.
 export function reading67ResultSummary(result) {
+  if(result?.grading?.kind==='matching_people')return peopleSummary(result.grading);
   if(result?.grading?.kind==='matching_headings')return reading67HeadingsSummary(result.grading);
   if(result?.grading?.kind==='green-roofs')return greenRoofsSummary(result.grading);
   if(result?.grading?.kind==='tfng')return tfngSummary(result.grading);
@@ -16,6 +17,13 @@ export function reading67ResultSummary(result) {
     matchingTotal:matching.length, compressionCorrect:compression.filter(r => r.verdict === 'correct').length,
     compressionTotal:compression.length, total:rows.length, correctCount:rows.length-needsRepair.length,
     remainingCount:needsRepair.length, needsRepair, allCorrect:needsRepair.length===0};
+}
+
+function peopleSummary(grading){
+ const rows=grading.target_results,ids=grading.structure?.targetIds,matching=grading.structure?.matchingIds,compression=grading.structure?.compressionIds;
+ if(!Array.isArray(rows)||!Array.isArray(ids)||!Array.isArray(matching)||!Array.isArray(compression)||ids.length!==25||matching.length!==15||compression.length!==10||new Set(ids).size!==25||new Set([...matching,...compression]).size!==25||[...matching,...compression].some(id=>!ids.includes(id))||rows.length!==25||new Set(rows.map(r=>r.target_id)).size!==25||rows.some(r=>!ids.includes(r.target_id)||!['correct','partial','incorrect','missing'].includes(r.verdict)))return null;
+ const correct=group=>rows.filter(r=>group.includes(r.target_id)&&r.verdict==='correct').length,needsRepair=rows.filter(r=>r.verdict!=='correct').map(r=>r.target_id);
+ return {version:1,kind:'matching_people',matchingCorrect:correct(matching),matchingTotal:15,compressionCorrect:correct(compression),compressionTotal:10,total:25,correctCount:25-needsRepair.length,remainingCount:needsRepair.length,needsRepair,allCorrect:needsRepair.length===0};
 }
 
 export function reading67HeadingsSummary(grading){

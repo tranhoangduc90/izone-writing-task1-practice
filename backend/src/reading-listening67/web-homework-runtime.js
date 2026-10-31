@@ -49,7 +49,7 @@ export async function createReading67HomeworkRuntime({config,db,content,identity
   }};
  }else if(config.owner.kind==='http')owner=createReading67HomeworkOwner({url:config.owner.url,key:(await fs.readFile(config.owner.keyFile,'utf8')).trim(),auth,docs,metadata,ownerSource,locate});
  else throw Error('DOC_OWNER_CONFIG_REQUIRED');
- const ownerEntry=createReading67OwnerEntry({db,identity,metadata,policy:config.ownerEntry});
+ const ownerEntry=createReading67OwnerEntry({db,identity,ownerSource,metadata,policy:config.ownerEntry});
  const homework=createReading67Homework({db,metadata,pageBase:config.pageBase,owner,docs,planWrite,resultSummary,progressText,completionText,managedCodes,ownerEntry});
  const adminKey=(await fs.readFile(config.adminKeyFile,'utf8')).trim();if(adminKey.length<32)throw Error('CTA_ADMIN_KEY_REQUIRED');
  let stopped=false,running=null,timer;

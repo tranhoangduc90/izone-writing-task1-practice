@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import {PGlite} from '@electric-sql/pglite';
 import {createReading67OwnerEntry} from '../src/reading-listening67/web-owner-entry.js';
-test('Owner entry uses the verified registry and active student membership, with pilot isolation',async t=>{
+test('Owner entry uses the verified registry and active student membership, with configured scope isolation',async t=>{
  const db=new PGlite();t.after(()=>db.close());for(const name of ['web','identity','homework'])await db.exec(await fs.readFile(new URL('../../docs/migrations/2026-10-22-reading67-'+name+'.sql',import.meta.url),'utf8'));
  const metadata={code:'67-reading-homework-butterflies-britain-tfng',version:'synthetic-v1'},policy={classId:'1293',classCode:'IC2304',courseId:'826336470852',courseWorkId:'896541293906'};
  const a='11111111-1111-4111-8111-111111111111',b='22222222-2222-4222-8222-222222222222',documentId='synthetic-document-owner-1234567890';
@@ -21,7 +21,7 @@ test('Owner entry uses the verified registry and active student membership, with
  await assert.rejects(entry.resolve('synthetic-document-other-1234567890'),{code:'HOMEWORK_ENTRY_NOT_FOUND'});
  revoked=true;await assert.rejects(entry.resolve(documentId),{code:'STUDENT_ACCESS_DENIED'});revoked=false;
  await db.query('UPDATE reading_listening67.web_homework_binding SET target=$1::jsonb',[JSON.stringify({...target,studentRef:b})]);await assert.rejects(entry.resolve(documentId),{code:'HOMEWORK_ENTRY_NOT_FOUND'});
- assert.throws(()=>createReading67OwnerEntry({db,identity,metadata,policy:{...policy,classId:'9999'}}),/PILOT_SCOPE_INVALID/);
+ assert.throws(()=>createReading67OwnerEntry({db,identity,metadata,policy:{...policy,classId:'invalid'}}),/OWNER_ENTRY_SCOPE_INVALID/);
  assert.equal((await db.query('SELECT count(*)::int n FROM reading_listening67.web_draft')).rows[0].n,0);
  assert.equal((await db.query('SELECT count(*)::int n FROM reading_listening67.web_attempt')).rows[0].n,0);
 });

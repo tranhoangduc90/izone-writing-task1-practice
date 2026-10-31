@@ -1,0 +1,32 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import {PGlite} from '@electric-sql/pglite';
+import {createReading67OwnerEntry} from '../src/reading-listening67/web-owner-entry.js';
+const codes=['67-reading-materials-beyond-concrete-matching-information-nen-cap-1','67-reading-homework-butterflies-britain-tfng','67-reading-green-roofs','67-reading-the-desolenator','67-reading-athletes-and-stress','67-reading-materials-to-take-us-beyond-concrete-matching-people'];
+test('Every Reading Homework resolves the registered owner across classes and checks current Classroom mapping',async t=>{
+ const db=new PGlite();t.after(()=>db.close());for(const n of ['web','identity','homework'])await db.exec(await fs.readFile(new URL('../../docs/migrations/2026-10-22-reading67-'+n+'.sql',import.meta.url),'utf8'));
+ const policy={classes:[{classId:'101',classCode:'CLASS-A',courseId:'google-a'},{classId:'202',classCode:'CLASS-B',courseId:'google-b'}]};
+ const refs={'101':'11111111-1111-4111-8111-111111111111','202':'22222222-2222-4222-8222-222222222222'};
+ let revoked=false,moved=false;
+ const identity={member:async(c,s)=>{assert.equal(s,refs[c]);if(revoked)throw Object.assign(Error(),{code:'STUDENT_ACCESS_DENIED'});return {name:'Synthetic '+c,className:policy.classes.find(x=>x.classId===c).classCode};}};
+ const ownerSource={member:async(c,s)=>({classId:c,studentRef:s,courseId:moved?'changed-google-course':policy.classes.find(x=>x.classId===c).courseId,googleUserId:'google-'+s})};
+ for(const [i,code] of codes.entries())for(const cls of policy.classes)await t.test(code+' / '+cls.classCode,async()=>{
+  const metadata={code,version:'synthetic-v1'},scope={ownerId:refs[cls.classId],courseId:cls.classId,...metadata},doc='synthetic-owner-'+i+'-'+cls.classId+'-document';
+  const target={classId:cls.classId,studentRef:scope.ownerId,...metadata,courseId:cls.courseId,courseWorkId:'work-'+i,submissionId:'submission-'+cls.classId,documentId:doc,tabId:'t.0',googleUserId:'google-'+scope.ownerId,verifiedAt:new Date().toISOString()};
+  await db.query('INSERT INTO reading_listening67.web_homework_binding(id,owner_id,course_id,assignment_code,content_version,target) VALUES($1,$2,$3,$4,$5,$6::jsonb)',[crypto.randomUUID(),scope.ownerId,scope.courseId,code,metadata.version,JSON.stringify(target)]);
+  const e=createReading67OwnerEntry({db,identity,ownerSource,metadata,policy});const base='https://example.test/reading/?server=1&assignmentCode='+code;
+  assert.deepEqual(e.publicPolicy.classes,policy.classes.map(({classId,classCode})=>({classId,classCode})));
+  const url=new URL(e.url(base,scope,target));assert.equal(url.searchParams.get('class'),cls.classCode);assert.equal(url.searchParams.get('mode'),'student');assert.equal(url.searchParams.get('documentId'),doc);
+  assert.equal(e.url(base,scope,{...target,courseId:'wrong-course'}),base);
+  assert.equal((await e.resolve(doc)).studentRef,scope.ownerId);await e.assert(doc,{ownerId:scope.ownerId,courseId:scope.courseId});
+  await assert.rejects(e.assert(doc,{ownerId:refs[cls.classId==='101'?'202':'101'],courseId:scope.courseId}),{code:'HOMEWORK_ENTRY_OWNER_MISMATCH'});
+  revoked=true;await assert.rejects(e.resolve(doc),{code:'STUDENT_ACCESS_DENIED'});revoked=false;
+  moved=true;await assert.rejects(e.resolve(doc),{code:'HOMEWORK_ENTRY_NOT_FOUND'});moved=false;
+  await db.query('UPDATE reading_listening67.web_homework_binding SET target=$1::jsonb WHERE assignment_code=$2 AND course_id=$3',[JSON.stringify({...target,studentRef:'33333333-3333-4333-8333-333333333333'}),code,cls.classId]);await assert.rejects(e.resolve(doc),{code:'HOMEWORK_ENTRY_NOT_FOUND'});
+ });
+ const args={db,identity,ownerSource,metadata:{code:codes[0],version:'v'}};
+ assert.equal(createReading67OwnerEntry(args),null);
+ for(const classes of [[],[policy.classes[0],policy.classes[0]],[{classId:'101',classCode:'',courseId:'g'}]])assert.throws(()=>createReading67OwnerEntry({...args,policy:{classes}}),/OWNER_ENTRY_SCOPE_INVALID/);
+ for(const table of ['web_draft','web_attempt','web_result'])assert.equal((await db.query('SELECT count(*)::int n FROM reading_listening67.'+table)).rows[0].n,0);
+});

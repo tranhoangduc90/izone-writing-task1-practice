@@ -23,7 +23,7 @@ import {createReading67OwnerSource} from '../src/reading-listening67/web-owner-s
 const run=promisify(execFile),config=JSON.parse(await fs.readFile(process.argv[2],'utf8'));
 if(!['local_test','https_test','https_classroom'].includes(config.mode)||!path.isAbsolute(config.dataDir))throw Error('TEST_CONFIG_REQUIRED');
 const classroom=config.mode==='https_classroom',https=config.mode!=='local_test';
-if(classroom&&(config.authority.kind!=='http'||config.demoStudentFixture||config.seed||config.allowedClassIds?.join(',')!=='1293'||config.homework?.owner?.kind!=='http'||config.homework.homeworkLesson!==10))throw Error('CLASSROOM_SCOPE_REQUIRED');
+if(classroom&&(config.authority.kind!=='http'||config.demoStudentFixture||config.seed||(!Array.isArray(config.allowedClassIds)||!config.allowedClassIds.length||config.allowedClassIds.some(id=>!/^\d+$/.test(id)))||config.homework?.owner?.kind!=='http'||config.homework.homeworkLesson!==10))throw Error('CLASSROOM_SCOPE_REQUIRED');
 const publicPath=config.publicPath||'';
 if(publicPath&&!/^\/[a-z0-9-]+$/.test(publicPath))throw Error('TEST_PUBLIC_PATH_INVALID');
 const fixtureAuthority=config.authority.kind==='fixture',demo=fixtureAuthority||!!config.demoStudentFixture,port=config.port;
@@ -59,8 +59,9 @@ const content=JSON.parse(await fs.readFile(config.contentPath,'utf8'));
 const managedCodes=[content.code,...await Promise.all((config.additionalLessons||[]).map(async lesson=>JSON.parse(await fs.readFile(lesson.contentPath,'utf8')).code))];
 const grader=await loadReading67WebGrader({snapshotPath:config.graderPath,expectedSha256:config.graderSha256,validation:config.gradingValidation?.enabled===true});
 const allowedClassIds=config.allowedClassIds||initial.classes.map(c=>c.erp_course_class_id);
+if(allowedClassIds.some(id=>!initial.classes.some(c=>c.erp_course_class_id===String(id))))throw Error('LESSON_CLASSES_INVALID');
 const ownerSource=config.homework?.owner?.kind==='http'?createReading67OwnerSource({context,allowedClassIds,url:config.homework.owner.url,key:(await fs.readFile(config.homework.owner.keyFile,'utf8')).trim()}):null;
-const identity=createReading67WebIdentity({db,context,allowedClassIds,verifyGoogle,ownerSource,cookiePath:publicPath+'/api/reading-skills67'});
+const identity=createReading67WebIdentity({db,context,allowedClassIds,verifyGoogle,ownerSource,cookiePath:publicPath+'/api/reading-skills67',includeEmptyClasses:!!config.homework?.ownerEntry});
 const homeworkRuntime=config.homework?.enabled?await createReading67HomeworkRuntime({config:config.homework,db,content,identity,ownerSource,managedCodes}):null;
 const store=createReading67WebStore({db,grader,homework:homeworkRuntime?.homework,jobScope:{code:content.code,version:content.version}});await store.recoverExpired();
 // Demo phát lại output AI thật đã lưu; qua cùng validator, không giả một kết quả mới.
@@ -85,12 +86,12 @@ app.use((q,r,next)=>{
  r.set('Cache-Control','no-store');r.set('X-Content-Type-Options','nosniff');r.set('Referrer-Policy','no-referrer');
  if(q.headers.origin&&!origins.includes(q.headers.origin))return r.status(403).json({error:'ORIGIN_NOT_ALLOWED'});
  if(q.headers.origin){r.set('Access-Control-Allow-Origin',q.headers.origin);r.set('Vary','Origin');r.set('Access-Control-Allow-Credentials','true');}
- r.set('Access-Control-Allow-Headers','Content-Type, Authorization, X-Izone-Csrf');r.set('Access-Control-Allow-Methods','GET, POST, PUT, OPTIONS');
+ r.set('Access-Control-Allow-Headers','Content-Type, Authorization, X-Izone-Csrf, X-Reading-Homework-Document');r.set('Access-Control-Allow-Methods','GET, POST, PUT, OPTIONS');
  if(q.method==='OPTIONS')return r.sendStatus(204);next();
 });
 app.use('/api',rateLimit({windowMs:60000,limit:1200,standardHeaders:'draft-8',legacyHeaders:false}));
 for(const lesson of additionalLessons)app.use('/api/reading-skills67'+lesson.route,lesson.router);
-app.use('/api/reading-skills67',createReading67WebRouter({store,content,grader,identity,authenticate:identity.authenticate,homework:homeworkRuntime?.homework,registerCta,adminKey:homeworkRuntime?.adminKey,config:{studentsOpen:classroom?config.studentsOpen===true:true,homeworkEnabled:!!homeworkRuntime,homeworkMode:homeworkRuntime?.mode,demo,demoGoogle:fixtureAuthority,googleClientId,authority:fixtureAuthority?'fixture':config.demoStudentFixture?'Student fixtures; teacher live Reading V1':'Reading context V1',...(demo?{demoStudent:{classId:config.seed.classId,studentRef:config.seed.studentRef}}:{})}}));
+app.use('/api/reading-skills67',createReading67WebRouter({store,content,grader,identity,authenticate:identity.authenticate,ownerEntry:homeworkRuntime?.ownerEntry,homework:homeworkRuntime?.homework,registerCta,adminKey:homeworkRuntime?.adminKey,config:{studentsOpen:classroom?config.studentsOpen===true:true,homeworkEnabled:!!homeworkRuntime,homeworkMode:homeworkRuntime?.mode,demo,demoGoogle:fixtureAuthority,googleClientId,authority:fixtureAuthority?'fixture':config.demoStudentFixture?'Student fixtures; teacher live Reading V1':'Reading context V1',...(demo?{demoStudent:{classId:config.seed.classId,studentRef:config.seed.studentRef}}:{})}}));
 const pages=path.resolve(config.pagesPath);
 app.get('/reading-skills67/',(_q,r)=>r.sendFile(path.join(pages,'reading-skills67/index.html')));
 app.use('/reading-skills67',express.static(path.join(pages,'reading-skills67'),{dotfiles:'deny',index:false}));

@@ -44,9 +44,10 @@ export function createReading67CtaRegistrar({homework,owner,docs,identity,metada
    const state=await homework.status(scope);
    if(state.cta==='blocked')fail('CTA_WRITE_BLOCKED');
    if(state.cta==='verified'){
-    const readback=planWrite(await docs.read(event.doc_id),{document_id:event.doc_id,tab_id:tabId,code:metadata.code},{kind:'cta',payload:{url:homework.entryUrl}});
+    const entryUrl=state.entryUrl||homework.entryUrl;
+    const readback=planWrite(await docs.read(event.doc_id),{document_id:event.doc_id,tab_id:tabId,code:metadata.code},{kind:'cta',payload:{url:entryUrl}});
     if(!readback.verified)fail('DOC_READBACK_FAILED',503);
-    return {documentId:event.doc_id,status:'verified',assignmentCode:metadata.code,entryUrl:homework.entryUrl};
+    return {documentId:event.doc_id,status:'verified',assignmentCode:metadata.code,entryUrl};
    }
    if(Date.now()>=deadline)break;
    await sleep(250);

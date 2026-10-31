@@ -35,18 +35,29 @@ function memoryDocs(){
   state.revision++;if(loseAck){loseAck=false;throw Error('Mất ACK sau khi Google đã ghi');}
  }};
 }
-async function fixture(t,{managedCodes=[]}={}){
+async function fixture(t,{managedCodes=[],ownerEntry}={}){
  const db=new PGlite();t.after(()=>db.close());for(const name of ['web','identity','homework'])await db.exec(await fs.readFile(new URL('../../docs/migrations/2026-10-22-reading67-'+name+'.sql',import.meta.url),'utf8'));
  const docs=memoryDocs(),control={missing:false,wrong:false,failQueue:false};
  const target=s=>({classId:s.courseId,studentRef:s.ownerId,code:s.code,version:s.version,courseId:'classroom',courseWorkId:'work78',submissionId:'sub-'+s.ownerId,documentId:'doc-'+s.ownerId,tabId:'child'});
  const owner={verify:async t=>t,resolve:async s=>{if(control.missing)throw Object.assign(Error('Chưa giao'),{code:'HOMEWORK_NOT_FOUND'});const value=target(s);return control.wrong?{...value,studentRef:B}:value;}};
- const homework=createReading67Homework({db,docs,owner,managedCodes,metadata:{code,version,homeworkLesson:78},pageBase:'https://page.test/reading-skills67/'});
+ const homework=createReading67Homework({db,docs,owner,managedCodes,ownerEntry,metadata:{code,version,homeworkLesson:78},pageBase:'https://page.test/reading-skills67/'});
  const store=createReading67WebStore({db,grader,homework});
  const jobs=async()=> (await db.query('SELECT * FROM reading_listening67.web_homework_job ORDER BY sequence')).rows;
  const due=()=>db.query('UPDATE reading_listening67.web_homework_job SET available_at=now()');
  const drain=async()=>{for(let i=0;i<30;i++)if(!await homework.once())return;throw Error('Queue did not drain');};
  return {db,docs,control,homework,store,target,jobs,due,drain};
 }
+test('Owner-bound CTA is written and verified per document, without creating answers or changing status text',async t=>{
+ const ownerEntry={url(base,s,target){if(!target)return base;const u=new URL(base);u.searchParams.set('mode','student');u.searchParams.set('documentId',target.documentId);return u.href;}};
+ const f=await fixture(t,{ownerEntry}),target=f.target(scope);
+ await f.homework.register(scope,target);await f.drain();
+ const expected=ownerEntry.url(f.homework.entryUrl,scope,target);
+ assert.equal(f.docs.get(target.documentId).cta.link.url,expected);
+ assert.equal((await f.homework.status(scope)).entryUrl,expected);
+ const writes=f.docs.calls.write;await f.homework.register(scope,target);await f.drain();assert.equal(f.docs.calls.write,writes);
+ assert.equal((await f.db.query('SELECT count(*)::int n FROM reading_listening67.web_draft')).rows[0].n,0);
+ assert.equal(f.docs.get(target.documentId).chars.map(c=>c.text).join(''),'Chữ tay giữ nguyên');
+});
 test('Docs thêm mã thứ hai sau đăng ký, trước worker: giữ job blocked và không ghi',async t=>{
  const other='new-homework-code',f=await fixture(t,{managedCodes:[code,other]});
  await f.homework.register(scope,f.target(scope));

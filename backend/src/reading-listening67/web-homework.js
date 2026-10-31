@@ -13,11 +13,12 @@ const clause='owner_id=$1 AND course_id=$2 AND assignment_code=$3 AND content_ve
 const fail=(code,status=409)=>{throw new WebGradingError(code,status);};
 const scopeFor=b=>({ownerId:b.owner_id,courseId:b.course_id,code:b.assignment_code,version:b.content_version});
 
-export function createReading67Homework({db,metadata,pageBase,owner,docs,managedCodes=[],clock=Date.now,planWrite=planReading67HomeworkWrite,resultSummary=reading67ResultSummary,progressText=reading67ProgressText,completionText}){
+export function createReading67Homework({db,metadata,pageBase,owner,docs,managedCodes=[],clock=Date.now,planWrite=planReading67HomeworkWrite,resultSummary=reading67ResultSummary,progressText=reading67ProgressText,completionText,ownerEntry}){
  docs=guardReading67HomeworkDocs(docs,managedCodes);
  const page=new URL(pageBase);if(page.protocol!=='https:')throw Error('HTTPS_PAGE_BASE_REQUIRED');
  page.searchParams.set('server','1');page.searchParams.set('assignmentCode',metadata.code);
  const entryUrl=page.href;
+ const entryFor=(s,target)=>ownerEntry?.url(entryUrl,s,target)||entryUrl;
  function teacherUrl(s,attemptId){const url=new URL(entryUrl);url.searchParams.set('teacher','1');url.searchParams.set('classId',s.courseId);url.searchParams.set('studentRef',s.ownerId);if(attemptId)url.searchParams.set('attemptId',attemptId);return url.href;}
  async function ensure(tx,s){
   if(s.code!==metadata.code||s.version!==metadata.version)fail('DOC_CODE_MISMATCH');
@@ -74,7 +75,7 @@ export function createReading67Homework({db,metadata,pageBase,owner,docs,managed
   if(target.classId!==s.courseId||target.studentRef!==s.ownerId||target.code!==s.code||target.version!==s.version)fail('DOC_IDENTITY_MISMATCH');
   const verified=await owner.verify(target);
   const document=await docs.read(verified.documentId);documentGuard?.(document);
-  const ctaPlan=planWrite(document,{document_id:verified.documentId,tab_id:verified.tabId,code:s.code},{kind:'cta',payload:{url:entryUrl}});
+  const ctaPlan=planWrite(document,{document_id:verified.documentId,tab_id:verified.tabId,code:s.code},{kind:'cta',payload:{url:entryFor(s,verified)}});
   await db.transaction(async tx=>{
    const b=await ensure(tx,s);
    if(b.target&&['classId','studentRef','code','version','courseId','courseWorkId','submissionId','documentId','tabId'].some(k=>b.target[k]!==verified[k]))fail('DOC_TARGET_CHANGED');
@@ -91,7 +92,7 @@ export function createReading67Homework({db,metadata,pageBase,owner,docs,managed
   if(!b)return {status:'not_started',cta:'pending',entryUrl};
   const jobs=(await db.query('SELECT id,sequence,kind,status,error_code AS "errorCode",verified_at AS "verifiedAt" FROM reading_listening67.web_homework_job WHERE binding_id=$1 ORDER BY sequence',[b.id])).rows;
   const last=jobs.filter(j=>j.kind==='status').at(-1),cta=jobs.find(j=>j.kind==='cta');
-  return {status:last?.status||'not_started',cta:cta?.status||'pending',entryUrl,jobs,hasTarget:!!b.target};
+  return {status:last?.status||'not_started',cta:cta?.status||'pending',entryUrl:entryFor(s,b.target),jobs,hasTarget:!!b.target};
  }
  async function once(){
   const job=await db.transaction(async tx=>{
@@ -108,8 +109,9 @@ export function createReading67Homework({db,metadata,pageBase,owner,docs,managed
    if(b.target&&['courseId','courseWorkId','submissionId','documentId','tabId'].some(k=>b.target[k]!==target[k]))fail('DOC_TARGET_CHANGED');
    await db.query('UPDATE reading_listening67.web_homework_binding SET target=$2::jsonb WHERE id=$1',[b.id,JSON.stringify(target)]);
    const effective={...b,document_id:target.documentId,tab_id:target.tabId,code:s.code};
-   let plan=planWrite(await docs.read(target.documentId),effective,job);
-   if(!plan.verified){await docs.write(target.documentId,plan);plan=planWrite(await docs.read(target.documentId),{...effective,last_doc_text:job.kind==='status'?job.payload.text:b.last_doc_text},job);}
+   const effectiveJob=job.kind==='cta'?{...job,payload:{...job.payload,url:entryFor(s,target)}}:job;
+   let plan=planWrite(await docs.read(target.documentId),effective,effectiveJob);
+   if(!plan.verified){await docs.write(target.documentId,plan);plan=planWrite(await docs.read(target.documentId),{...effective,last_doc_text:job.kind==='status'?job.payload.text:b.last_doc_text},effectiveJob);}
    if(!plan.verified)fail('DOC_READBACK_FAILED');
    await db.transaction(async tx=>{
     const row=(await tx.query("UPDATE reading_listening67.web_homework_job SET status='verified',verified_at=now(),error_code=NULL,lease_until=NULL WHERE id=$1 AND lease_id=$2 AND status='processing' AND lease_until>now() RETURNING id",[job.id,job.leaseId])).rows[0];

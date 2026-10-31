@@ -4,6 +4,7 @@ import path from 'node:path';
 import express from 'express';
 import {OAuth2Client} from 'google-auth-library';
 import {createListeningHomeworkApp,DOC_CONTRACT,listeningProgressText,listeningCompletionText} from '../src/listening-homework67/app.js';
+import {createListeningLessonRouter} from '../src/listening-homework67/lesson-router.js';
 import {listeningSummary} from '../src/listening-homework67/grader.js';
 import {createListeningContext} from '../src/listening-homework67/context.js';
 import {sha256} from '../src/reading-listening67/web-grader.js';
@@ -34,13 +35,29 @@ const google=new OAuth2Client(config.googleClientId);
 // owner binding must not deny a valid learner the independent homework page;
 // the Docs worker still verifies the stricter Google owner before every write.
 const identity=createReading67WebIdentity({db,context,allowedClassIds,cookieName:'listening_homework_teacher',cookiePath:(config.publicPath||'')+'/api/listening-homework67',verifyGoogle:local?async credential=>{if(credential!=='fixture-teacher-allowed')throw Error('INVALID_FIXTURE');return {email:'teacher@example.test',sub:'fixture-google',email_verified:true};}:async credential=>(await google.verifyIdToken({idToken:credential,audience:config.googleClientId})).getPayload()});
-const homeworkRuntime=config.homework?.enabled?await createReading67HomeworkRuntime({config:config.homework,db,content:lesson,identity,ownerSource,contract:DOC_CONTRACT,resultSummary:listeningSummary,progressText:listeningProgressText,completionText:listeningCompletionText}):null;
+const definitions=[{lesson,audio:JSON.parse(await fs.readFile(config.audioPath,'utf8')),homework:config.homework}];
+for(const extra of config.additionalLessons||[]){
+ if(!path.isAbsolute(extra.lessonPath)||!path.isAbsolute(extra.audioPath))throw Error('LESSON_PATH_INVALID');
+ if(!local&&(!Array.isArray(extra.allowedClassIds)||!extra.allowedClassIds.length))throw Error('LESSON_CLASS_SCOPE_REQUIRED');
+ definitions.push({lesson:JSON.parse(await fs.readFile(extra.lessonPath,'utf8')),audio:JSON.parse(await fs.readFile(extra.audioPath,'utf8')),homework:extra.homework,studentsOpen:extra.studentsOpen,allowedClassIds:extra.allowedClassIds});
+}
+if(new Set(definitions.map(d=>d.lesson.code)).size!==definitions.length)throw Error('DUPLICATE_LISTENING_LESSON');
 // Keep the configured reasoning quality. The deadline stays below the 15-minute
 // database lease while allowing long HIGH-reasoning responses to finish.
 const provider=async({prompt,operationId})=>{const response=await fetch(config.ai.endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model_id:config.ai.model||'gemini-3.5-flash',prompt,anh_minh_hoa:'',operation_id:operationId,generation_config:{temperature:0,response_mime_type:'application/json'}}),signal:AbortSignal.timeout(600000)});if(!response.ok)throw Object.assign(Error('AI_HTTP_'+response.status),{code:'AI_HTTP_'+response.status});const text=await response.text();try{return JSON.parse(text);}catch{return {text};}};
-const runtime=createListeningHomeworkApp({db,lesson,provider,model:config.ai.model||'gemini-3.5-flash',identity,homeworkRuntime,audio:JSON.parse(await fs.readFile(config.audioPath,'utf8')),origins:config.origins,studentsOpen:config.studentsOpen,googleClientId:config.googleClientId,fixture:local,ssoBridge:config.sso?async q=>fetch(config.sso.bridgeUrl,{method:'POST',headers:{'Content-Type':'application/json',Origin:q.headers.origin,'X-Izone-Csrf':'1',Cookie:q.headers.cookie||''},body:JSON.stringify(q.body||{}),signal:AbortSignal.timeout(10000)}):null});
+const runtimes=[];
+for(const definition of definitions){
+ const lessonContext=definition.allowedClassIds&&!local?createListeningContext({url:config.authority.url,key:(await fs.readFile(config.authority.keyFile,'utf8')).trim(),allowedClassIds:definition.allowedClassIds}):context;
+ const lessonIdentity=definition.allowedClassIds?createReading67WebIdentity({db,context:lessonContext,allowedClassIds:definition.allowedClassIds,cookieName:'listening_homework_teacher',cookiePath:(config.publicPath||'')+'/api/listening-homework67',verifyGoogle:local?async credential=>{if(credential!=='fixture-teacher-allowed')throw Error('INVALID_FIXTURE');return {email:'teacher@example.test',sub:'fixture-google',email_verified:true};}:async credential=>(await google.verifyIdToken({idToken:credential,audience:config.googleClientId})).getPayload()}):identity;
+ const lessonOwner=definition.allowedClassIds&&config.owner?createReading67OwnerSource({context:lessonContext,allowedClassIds:definition.allowedClassIds,url:config.owner.url,key:(await fs.readFile(config.owner.keyFile,'utf8')).trim()}):ownerSource;
+ const homeworkRuntime=definition.homework?.enabled?await createReading67HomeworkRuntime({config:definition.homework,db,content:definition.lesson,identity:lessonIdentity,ownerSource:lessonOwner,contract:DOC_CONTRACT,resultSummary:listeningSummary,progressText:listeningProgressText,completionText:listeningCompletionText}):null;
+ if(!local&&!homeworkRuntime)throw Error('LESSON_HOMEWORK_REQUIRED');
+ const runtime=createListeningHomeworkApp({db,lesson:definition.lesson,provider,model:config.ai.model||'gemini-3.5-flash',identity:lessonIdentity,homeworkRuntime,audio:definition.audio,origins:config.origins,studentsOpen:definition.studentsOpen??config.studentsOpen,googleClientId:config.googleClientId,fixture:local,ssoBridge:config.sso?async q=>fetch(config.sso.bridgeUrl,{method:'POST',headers:{'Content-Type':'application/json',Origin:q.headers.origin,'X-Izone-Csrf':'1',Cookie:q.headers.cookie||''},body:JSON.stringify(q.body||{}),signal:AbortSignal.timeout(10000)}):null});
+ runtimes.push({...runtime,code:definition.lesson.code,homeworkRuntime});
+}
+const runtime={app:createListeningLessonRouter(runtimes,{defaultCode:lesson.code,aliases:{'67-listening-02':'67-listening-scandinavian-studies'}})};
 if(local){runtime.app.use('/listening-homework',express.static(path.join(config.pagesPath,'listening-homework')));runtime.app.use('/shared',express.static(path.join(config.pagesPath,'shared')));runtime.app.use('/term-tests/shared',express.static(path.join(config.pagesPath,'term-tests/shared')));}
 const mounted=express();mounted.use(config.publicPath||'/',runtime.app);
-const server=mounted.listen(config.port,local?'127.0.0.1':'0.0.0.0',()=>{runtime.worker.start();homeworkRuntime?.start();console.log(JSON.stringify({ready:true,product:'listening-homework67',port:config.port,fixture:local,classes:allowedClassIds.length}));});
-async function close(){server.close();await runtime.worker.close();await homeworkRuntime?.close();await db.close();process.exit(0);}
+const server=mounted.listen(config.port,local?'127.0.0.1':'0.0.0.0',()=>{for(const r of runtimes){r.worker.start();r.homeworkRuntime?.start();}console.log(JSON.stringify({ready:true,product:'listening-homework67',port:config.port,fixture:local,classes:allowedClassIds.length,lessons:runtimes.map(r=>r.code)}));});
+async function close(){server.close();for(const r of runtimes){await r.worker.close();await r.homeworkRuntime?.close();}await db.close();process.exit(0);}
 process.on('SIGTERM',close);process.on('SIGINT',close);

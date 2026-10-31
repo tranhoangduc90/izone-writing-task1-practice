@@ -31,7 +31,7 @@ export function createListeningGrader({lesson,provider,model='gemini-3.5-flash',
  }
  function prepareWeb(answers,operationId=randomUUID()){
   const gate=inspectWeb(answers),locked={},pending=[];
-  for(const t of gate.parsed.targets){const item=lesson.items.find(i=>i.id===t.target_id),exact=normalize(t.source_text)===normalize(item.answer)||(item.id==='D2'&&normalize(t.source_text)==='specialized');
+  for(const t of gate.parsed.targets){const item=lesson.items.find(i=>i.id===t.target_id),approved=[item.answer,...(item.acceptedAnswers||[]),...(item.id==='D2'&&normalize(item.answer)==='specialised'?['specialized']:[])],exact=approved.some(a=>normalize(t.source_text)===normalize(a));
    if(t.observed_state==='unanswered'||exact)locked[item.id]={target_id:item.id,units:item.units.map(u=>({unit_id:u.id,status:exact?'present':'absent',span:exact?t.source_text:null})),writing_notes:[],meaning_errors:[],contradiction:false,reason:exact?'Bạn đã thể hiện đúng các ý cần có.':'Bạn chưa trả lời mục này.',next_step:exact?'':`Lần sau, đọc yêu cầu của mục ${item.id} và đối chiếu lại đoạn nghe trước khi viết câu trả lời.`};
    else pending.push({...item,response:t.source_text});
   }

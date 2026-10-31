@@ -28,7 +28,7 @@ export async function createAdditionalReading67Lessons({configs=[],db,context,in
   const store=createReading67WebStore({db,grader,homework:homeworkRuntime?.homework,jobScope:{code:content.code,version:content.version}});
   await store.recoverExpired();
   const worker=createReading67WebWorker({store,grader,onError:error=>console.error(JSON.stringify({event:'reading_homework_grading_error',lesson:content.lesson,code:error.code||'FAILED'}))});
-  const router=createReading67WebRouter({store,content,grader,identity,authenticate:identity.authenticate,homework:homeworkRuntime?.homework,registerCta:homeworkRuntime?.registerCta,adminKey:homeworkRuntime?.adminKey,config:{studentsOpen:config.studentsOpen,homeworkEnabled:!!homeworkRuntime,homeworkMode:homeworkRuntime?.mode,demo,demoGoogle:demo,googleClientId,authority:demo?'fixture':'Reading context V1'}});
+  const router=createReading67WebRouter({store,content,grader,identity,authenticate:identity.authenticate,ownerEntry:homeworkRuntime?.ownerEntry,homework:homeworkRuntime?.homework,registerCta:homeworkRuntime?.registerCta,adminKey:homeworkRuntime?.adminKey,config:{studentsOpen:config.studentsOpen,homeworkEnabled:!!homeworkRuntime,homeworkMode:homeworkRuntime?.mode,demo,demoGoogle:demo,googleClientId,authority:demo?'fixture':'Reading context V1'}});
   runtimes.push({route:config.route,code:content.code,version:content.version,store,router,cta:homeworkRuntime?{code:content.code,registerCta:homeworkRuntime.registerCta,adminKey:homeworkRuntime.adminKey}:null,async start(){worker.start();homeworkRuntime?.start();},async close(){await worker.close();await homeworkRuntime?.close();}});
  }
  return runtimes;

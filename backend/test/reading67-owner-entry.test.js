@@ -1,0 +1,27 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import {PGlite} from '@electric-sql/pglite';
+import {createReading67OwnerEntry} from '../src/reading-listening67/web-owner-entry.js';
+test('Owner entry uses the verified registry and active student membership, with pilot isolation',async t=>{
+ const db=new PGlite();t.after(()=>db.close());for(const name of ['web','identity','homework'])await db.exec(await fs.readFile(new URL('../../docs/migrations/2026-10-22-reading67-'+name+'.sql',import.meta.url),'utf8'));
+ const metadata={code:'67-reading-homework-butterflies-britain-tfng',version:'synthetic-v1'},policy={classId:'1293',classCode:'IC2304',courseId:'826336470852',courseWorkId:'896541293906'};
+ const a='11111111-1111-4111-8111-111111111111',b='22222222-2222-4222-8222-222222222222',documentId='synthetic-document-owner-1234567890';
+ const scope={ownerId:a,courseId:policy.classId,...metadata},target={classId:scope.courseId,studentRef:a,...metadata,courseId:policy.courseId,courseWorkId:policy.courseWorkId,documentId,submissionId:'synthetic-submission',tabId:'t.0'};
+ let revoked=false,calls=0;const identity={member:async(c,s)=>{calls++;assert.equal(c,'1293');assert.equal(s,a);if(revoked)throw Object.assign(Error(),{code:'STUDENT_ACCESS_DENIED'});return {name:'Synthetic A',className:'IC2304'};}};
+ await db.query('INSERT INTO reading_listening67.web_homework_binding(id,owner_id,course_id,assignment_code,content_version,target) VALUES($1,$2,$3,$4,$5,$6::jsonb)',['33333333-3333-4333-8333-333333333333',a,'1293',metadata.code,metadata.version,JSON.stringify(target)]);
+ const entry=createReading67OwnerEntry({db,identity,metadata,policy}),base='https://example.test/reading/?server=1&assignmentCode='+metadata.code;
+ assert.equal(createReading67OwnerEntry({db,identity,metadata}),null);
+ const link=new URL(entry.url(base,scope,target));assert.equal(link.searchParams.get('mode'),'student');assert.equal(link.searchParams.get('documentId'),documentId);assert.equal(link.searchParams.has('studentRef'),false);
+ assert.equal(entry.url(base,{...scope,courseId:'9999'},target),base);assert.equal(entry.url(base,scope,{...target,courseWorkId:'different'}),base);
+ const resolved=await entry.resolve(documentId);assert.equal(resolved.studentRef,a);assert.equal(resolved.classCode,'IC2304');assert.equal(calls,1);
+ await entry.assert(documentId,{ownerId:a,courseId:'1293'});
+ await assert.rejects(entry.assert(documentId,{ownerId:b,courseId:'1293'}),{code:'HOMEWORK_ENTRY_OWNER_MISMATCH'});
+ await assert.rejects(entry.assert(documentId,{ownerId:a,courseId:'9999'}),{code:'HOMEWORK_ENTRY_OWNER_MISMATCH'});
+ await assert.rejects(entry.resolve('synthetic-document-other-1234567890'),{code:'HOMEWORK_ENTRY_NOT_FOUND'});
+ revoked=true;await assert.rejects(entry.resolve(documentId),{code:'STUDENT_ACCESS_DENIED'});revoked=false;
+ await db.query('UPDATE reading_listening67.web_homework_binding SET target=$1::jsonb',[JSON.stringify({...target,studentRef:b})]);await assert.rejects(entry.resolve(documentId),{code:'HOMEWORK_ENTRY_NOT_FOUND'});
+ assert.throws(()=>createReading67OwnerEntry({db,identity,metadata,policy:{...policy,classId:'9999'}}),/PILOT_SCOPE_INVALID/);
+ assert.equal((await db.query('SELECT count(*)::int n FROM reading_listening67.web_draft')).rows[0].n,0);
+ assert.equal((await db.query('SELECT count(*)::int n FROM reading_listening67.web_attempt')).rows[0].n,0);
+});

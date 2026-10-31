@@ -17,8 +17,14 @@ function fixture(){
  const owner={resolveClassroom:async input=>{assert.deepEqual(input,{courseId:'course-A',googleUserId:'google-A'});if(state.wrongOwner)throw Object.assign(Error(),{code:'OWNER_MISMATCH'});return {classId:'1124',studentRef:A};}};
  const docs={read:async()=>{state.read++;return document;}};
  const registrar=createReading67CtaRegistrar({homework,owner,docs,identity:{member:async()=>({className:state.className})},metadata:{code,version},waitMs:0});
- return {state,document,registrar,docs};
+ return {state,document,registrar,docs,homework};
 }
+test('Registrar verifies the personalized URL returned by Homework status',async()=>{
+ const f=fixture(),entryUrl=f.homework.entryUrl+'&mode=student&documentId='+event.doc_id;
+ f.homework.status=async()=>({cta:'verified',entryUrl});
+ f.document.tabs[0].documentTab.body.content[0].table.tableRows[0].tableCells[0].content[0].paragraph.elements[0].textRun.textStyle.link.url=entryUrl;
+ assert.equal((await f.registrar(event)).entryUrl,entryUrl);
+});
 test('CTA verified chỉ sau đăng ký đúng event/mapping và đọc lại link đúng mã; retry giữ cùng đích',async()=>{
  const f=fixture();for(let i=0;i<2;i++)assert.equal((await f.registrar(event)).status,'verified');
  assert.equal(f.state.read,4);assert.equal(f.state.registered.length,2);

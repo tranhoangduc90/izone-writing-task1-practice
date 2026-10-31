@@ -85,7 +85,7 @@ app.use((q,r,next)=>{
  r.set('Cache-Control','no-store');r.set('X-Content-Type-Options','nosniff');r.set('Referrer-Policy','no-referrer');
  if(q.headers.origin&&!origins.includes(q.headers.origin))return r.status(403).json({error:'ORIGIN_NOT_ALLOWED'});
  if(q.headers.origin){r.set('Access-Control-Allow-Origin',q.headers.origin);r.set('Vary','Origin');r.set('Access-Control-Allow-Credentials','true');}
- r.set('Access-Control-Allow-Headers','Content-Type, Authorization, X-Izone-Csrf');r.set('Access-Control-Allow-Methods','GET, POST, PUT, OPTIONS');
+ r.set('Access-Control-Allow-Headers','Content-Type, Authorization, X-Izone-Csrf, X-Reading-Homework-Document');r.set('Access-Control-Allow-Methods','GET, POST, PUT, OPTIONS');
  if(q.method==='OPTIONS')return r.sendStatus(204);next();
 });
 app.use('/api',rateLimit({windowMs:60000,limit:1200,standardHeaders:'draft-8',legacyHeaders:false}));

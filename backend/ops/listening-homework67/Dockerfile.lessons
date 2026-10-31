@@ -1,0 +1,11 @@
+# Chỉ mở rộng Listening Homework trên image live đã xác minh.
+# Không dựng lại Writing/Reading hay thay dữ liệu bài làm.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+COPY backend/src/listening-homework67/app.js /app/src/listening-homework67/app.js
+COPY backend/src/listening-homework67/grader.js /app/src/listening-homework67/grader.js
+COPY backend/src/listening-homework67/lesson-router.js /app/src/listening-homework67/lesson-router.js
+COPY backend/src/reading-listening67/web-store.js /app/src/reading-listening67/web-store.js
+COPY backend/src/reading-listening67/web-homework.js /app/src/reading-listening67/web-homework.js
+COPY backend/src/reading-listening67/web-homework-code-guard.js /app/src/reading-listening67/web-homework-code-guard.js
+COPY backend/scripts/serve-listening-homework67.mjs /app/scripts/serve-listening-homework67.mjs

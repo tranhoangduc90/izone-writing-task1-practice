@@ -12,7 +12,7 @@ export function publicLesson(lesson){
 }
 export function createListeningHomeworkApp({db,lesson,provider,model='gemini-3.5-flash',identity,homeworkRuntime,audio,origins,studentsOpen=false,googleClientId='',fixture=false,ssoBridge}){
  const content=publicLesson(lesson),grader=createListeningGrader({lesson,provider,model});
- const store=createReading67WebStore({db,grader,homework:homeworkRuntime?.homework,resultSummary:listeningSummary});
+ const store=createReading67WebStore({db,grader,homework:homeworkRuntime?.homework,resultSummary:listeningSummary,jobScope:{code:lesson.code,version:lesson.version}});
  const worker=createReading67WebWorker({store,grader,onError:e=>console.error(JSON.stringify({event:'listening_homework_worker',code:e.code||'FAILED'}))});
  const app=express();app.disable('x-powered-by');app.set('trust proxy',1);
  app.use((q,r,next)=>{r.set({'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'});if(q.headers.origin&&!origins.includes(q.headers.origin))return r.status(403).json({error:'ORIGIN_NOT_ALLOWED'});if(q.headers.origin)r.set({'Access-Control-Allow-Origin':q.headers.origin,'Access-Control-Allow-Credentials':'true','Vary':'Origin'});r.set({'Access-Control-Allow-Headers':'Content-Type, Authorization, X-Izone-Csrf','Access-Control-Allow-Methods':'GET, POST, PUT, OPTIONS'});if(q.method==='OPTIONS')return r.sendStatus(204);next();});

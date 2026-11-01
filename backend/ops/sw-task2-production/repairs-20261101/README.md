@@ -9,7 +9,15 @@ Bằng chứng: validator thật RED trên phản hồi lịch sử, GREEN trên
 
 Writer mới `sha256:6fa545962b73f74c8f6456ba0eccaafa932c2210b3ab901a91d8381ee06191d8`; bản trước giữ tại `shops-writing-writer-before-reason-20261101`. Mount kết quả, env, hai network, giới hạn bộ nhớ và read-only rootfs giữ nguyên. API/DB/worker không rebuild. Nguồn dựng và bản chụp cấu hình riêng tại `/opt/izone-shops-writing/releases/20261101-reason-preservation`.
 
-Đã cứu thành công một lượt Draft được Đức chỉ định: snapshot nguyên vẹn, hoàn tất và HTTPS đọc lại đủ 5 thẻ với readbackOk=true. Không tự cứu hàng loạt lượt lỗi khác. Một bài khác còn phản hồi gộp nhiều sửa trong một issue: replay vẫn bị từ chối sau sửa từ lặp; giữ là tình huống cần xử lý riêng, không hạ kiểm chứng để ép đạt.
+Đã cứu thành công hai lượt Draft được Đức chỉ định: snapshot nguyên vẹn, HTTPS đọc lại đủ 5 và 17 thẻ với readbackOk=true. Không tự cứu hàng loạt lượt lỗi khác. Ca gộp nhiều sửa trong một issue đã được xử lý tiếp: chỉ tách những sửa mà AI đã khai báo, giữ nguyên câu sửa và lời giải thích, rồi chạy lại kiểm tra đối chiếu toàn bộ. Phần chữ thay đổi không có lý do vẫn bị từ chối; không hạ kiểm chứng để ép đạt.
+
+## Hồi quy dùng lại cho lần phát hành sau
+
+- `sentence-issues.mjs`: đúng hai hàm đang có trong 14 validator của workflow SW, gồm sửa từ lặp và tách sửa đã khai báo. Đây là nguồn sửa để đồng bộ vào Code node, không phải một engine khác được API tự nạp.
+- `sentence-issues.test.mjs`: dữ liệu giả kiểm từ lặp, sửa gộp, giữ lý do và bác thay đổi chưa được giải thích. Khi có `SW_WORKFLOW_SNAPSHOT` trỏ tới snapshot riêng, kiểm thêm cả 14 node chứa nguyên văn hai hàm đã kiểm. Ngày 01/11: 4/4 đạt trên snapshot sau cứu bài thứ hai.
+- `writer-regression.mjs`: chạy trong image writer đã ghim, phân tích payload giả bằng parser thật. Kiểm giữ nguyên cụm “cô lập” và vẫn loại mã HTML nguy hiểm. Ngày 01/11: 2/2 đạt trên container hiện hành; không HTTP, AI, DB hoặc ghi kết quả.
+
+Lệnh kiểm độc lập: `node --test backend/ops/sw-task2-production/repairs-20261101/sentence-issues.test.mjs`. Ca đối chiếu 14 node sẽ được ghi skip nếu chưa cung cấp snapshot riêng; không coi skip là đã kiểm triển khai. Với writer, chuyển nội dung `writer-regression.mjs` vào stdin của `docker exec -i -w /app shops-writing-writer node --input-type=module`; chỉ thực hiện trên runtime được phép kiểm. Có thể đặt `SW_WRITER_PARSER` nếu đường dẫn parser của image được ghim khác `/app/parser.mjs`.
 
 Kho bằng chứng riêng: `E:/Codex-Private/sw-cs181026-vietanh-20261101/`, gồm workflow trước/candidate/sau, execution lịch sử, writer parser trước/sau, canary và receipt triển khai, kết quả đọc HTTPS. Không đưa bài học viên, capability kết quả, environment hoặc credential vào Git.
 

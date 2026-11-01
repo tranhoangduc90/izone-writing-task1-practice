@@ -31,7 +31,8 @@ export function createReading67Homework({db,metadata,pageBase,owner,docs,managed
   const old=(await tx.query('SELECT * FROM reading_listening67.web_homework_job WHERE binding_id=$1 AND event_key=$2',[b.id,key])).rows[0];if(old)return old;
   const sequence=kind==='cta'?0:b.sequence+1;
   if(kind!=='cta')await tx.query('UPDATE reading_listening67.web_homework_binding SET sequence=$2 WHERE id=$1',[b.id,sequence]);
-  return (await tx.query('INSERT INTO reading_listening67.web_homework_job(id,binding_id,event_key,sequence,kind,payload) VALUES($1,$2,$3,$4,$5,$6::jsonb) RETURNING *',[randomUUID(),b.id,key,sequence,kind,JSON.stringify(payload)])).rows[0];
+  const job=(await tx.query('INSERT INTO reading_listening67.web_homework_job(id,binding_id,event_key,sequence,kind,payload) VALUES($1,$2,$3,$4,$5,$6::jsonb) RETURNING *',[randomUUID(),b.id,key,sequence,kind,JSON.stringify(payload)])).rows[0];
+  tx.afterCommit?.(()=>db.workCoordinator?.wake('docs'));return job;
  }
  async function state(tx,s,b){
   const draft=(await tx.query('SELECT run_no,revision FROM reading_listening67.web_draft WHERE '+clause,args(s))).rows[0];

@@ -52,7 +52,7 @@ export async function createReading67HomeworkRuntime({config,db,content,identity
  const ownerEntry=createReading67OwnerEntry({db,identity,ownerSource,metadata,policy:config.ownerEntry});
  const homework=createReading67Homework({db,metadata,pageBase:config.pageBase,owner,docs,planWrite,resultSummary,progressText,completionText,managedCodes,ownerEntry});
  const adminKey=(await fs.readFile(config.adminKeyFile,'utf8')).trim();if(adminKey.length<32)throw Error('CTA_ADMIN_KEY_REQUIRED');
- let stopped=false,running=null,timer;
+ let stopped=false,running=null,timer,registration=null;
  async function tick(){if(stopped)return;running=homework.once();try{await running;}catch(error){console.error(JSON.stringify({event:'reading67_homework_error',code:error.code||'DOC_RETRY'}));}finally{running=null;if(!stopped)timer=setTimeout(tick,500);}}
- return {homework,docs,owner,ownerEntry,adminKey,registerCta:createReading67CtaRegistrar({homework,owner,docs,identity,metadata,locate,planWrite}),start(){tick();},async close(){stopped=true;clearTimeout(timer);await running;},mode:config.owner.kind};
+ return {homework,docs,owner,ownerEntry,adminKey,registerCta:createReading67CtaRegistrar({homework,owner,docs,identity,metadata,locate,planWrite}),start(){if(stopped||registration||running||timer)return;if(db.workCoordinator)registration=db.workCoordinator.register({lane:'docs',scope:metadata,run:()=>homework.once(),onError:error=>console.error(JSON.stringify({event:'reading67_homework_error',code:error.code||'DOC_RETRY'}))});else tick();},async close(){stopped=true;clearTimeout(timer);await registration?.close();await running;},mode:config.owner.kind};
 }

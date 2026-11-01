@@ -50,7 +50,7 @@ const googleClientId=fixtureAuthority?'':(await source()).googleClientId;
 const oauth=new OAuth2Client(googleClientId);
 const verifyGoogle=fixtureAuthority?async value=>{if(value!=='demo-teacher-allowed')throw Error('INVALID_DEMO_CREDENTIAL');return {email:'teacher@example.test',sub:'demo-google-subject',email_verified:true};}:async credential=>(await oauth.verifyIdToken({idToken:credential,audience:googleClientId})).getPayload();
 await fs.mkdir(config.dataDir,{recursive:true});
-const db=config.database?.kind==='postgres'?createReading67Postgres({connectionString:(await fs.readFile(config.database.connectionFile,'utf8')).trim()}):new (await import('@electric-sql/pglite')).PGlite(path.join(config.dataDir,'postgres'));
+const db=config.database?.kind==='postgres'?createReading67Postgres({connectionString:(await fs.readFile(config.database.connectionFile,'utf8')).trim(),workCoordinatorEnabled:config.workCoordinatorEnabled===true}):new (await import('@electric-sql/pglite')).PGlite(path.join(config.dataDir,'postgres'));
 if(https&&config.database?.kind!=='postgres')throw Error('HTTPS_TEST_REQUIRES_OWN_POSTGRES');
 if(config.database?.kind!=='postgres')for(const name of ['web','identity',...(config.homework?.enabled?['homework']:[])])await db.exec(await fs.readFile(new URL(`../../docs/migrations/2026-10-22-reading67-${name}.sql`,import.meta.url),'utf8'));
 if(config.database?.kind!=='postgres'&&config.gradingValidation?.enabled)await db.exec(await fs.readFile(new URL('../../docs/migrations/2026-10-26-reading67-validation.sql',import.meta.url),'utf8'));

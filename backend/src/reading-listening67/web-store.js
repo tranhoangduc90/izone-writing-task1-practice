@@ -60,6 +60,7 @@ export function createReading67WebStore({db,grader,homework,resultSummary=readin
       if(!cached){
         await tx.query('INSERT INTO reading_listening67.web_attempt(id,owner_id,course_id,assignment_code,content_version,draft_revision,snapshot,input_hash,grader_hash,completeness,run_no) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10::jsonb,$11)',[attemptId,...args,revision,JSON.stringify(row.body),inputHash,grader.pins.sha256,JSON.stringify(gate.completeness),row.run_no]);
         await tx.query("INSERT INTO reading_listening67.web_job(id,attempt_id,status) VALUES($1,$2,'queued')",[randomUUID(),attemptId]);
+        tx.afterCommit?.(()=>db.workCoordinator?.wake('grading'));
       }
       await tx.query('INSERT INTO reading_listening67.web_request(owner_id,course_id,assignment_code,content_version,request_id,request_hash,attempt_id) VALUES($1,$2,$3,$4,$5,$6,$7)',[...args,requestId,requestHash,attemptId]);
       if(afterSubmit)await afterSubmit(tx,scope,attemptId);
@@ -130,14 +131,14 @@ export function createReading67WebStore({db,grader,homework,resultSummary=readin
     if(homework)for(const job of recovered.rows){const a=(await tx.query('SELECT * FROM reading_listening67.web_attempt WHERE id=$1',[job.attempt_id])).rows[0];await homework.outcome(tx,{ownerId:a.owner_id,courseId:a.course_id,code:a.assignment_code,version:a.content_version},job.id);}
     return recovered;
   });}
-  return {draft,save,submit,attempt,history,archives,reset,firstCompleted,claim,recordProvider,finish,fail,recoverExpired,validation};
+  return {draft,save,submit,attempt,history,archives,reset,firstCompleted,claim,recordProvider,finish,fail,recoverExpired,validation,coordination:jobScope&&db.workCoordinator?{coordinator:db.workCoordinator,scope:{...jobScope,validation:!!validation}}:null};
 }
 
 export function createReading67WebWorker({store,grader,onError=()=>{}}){
-  let running=null,timer=null,closed=false,lastRecovery=0;
+  let running=null,timer=null,registration=null,closed=false,lastRecovery=0;
   async function tick(){
     if(running||closed)return;
-    running=(async()=>{if(Date.now()-lastRecovery>30000){await store.recoverExpired();lastRecovery=Date.now();}const job=await store.claim();if(!job)return;
+    running=(async()=>{if(!registration&&Date.now()-lastRecovery>30000){await store.recoverExpired();lastRecovery=Date.now();}const job=await store.claim();if(!job)return false;
       try{
         if(job.graderHash!==grader.pins.sha256)throw new WebGradingError('GRADER_PIN_MISMATCH',503);
         const saved=store.validation?await store.validation.load(job):null;
@@ -145,9 +146,9 @@ export function createReading67WebWorker({store,grader,onError=()=>{}}){
         const prepared=grader.prepareWeb(job.answers,job.jobId);
         const result=await grader.finish(prepared,{replayResponse:job.replayResponse,validationState:saved?.state,recoveredRound:saved?.received,onCheckpoint:s=>store.validation?.checkpoint(job,s),onRound:e=>store.validation?.round(job,e),onProviderResponse:r=>store.recordProvider(job,r)});
         await store.finish(job,result);
-      }catch(error){try{if(error.code==='AI_REPAIR_PENDING'&&store.validation)await store.validation.defer(job,error);else await store.fail(job,error);}catch(storeError){onError(storeError);}if(error.code!=='AI_REPAIR_PENDING')onError(error);}
+      }catch(error){try{if(error.code==='AI_REPAIR_PENDING'&&store.validation)await store.validation.defer(job,error);else await store.fail(job,error);}catch(storeError){onError(storeError);}if(error.code!=='AI_REPAIR_PENDING')onError(error);}return true;
     })();
-    try{await running;}catch(error){onError(error);}finally{running=null;}
+    try{return await running;}catch(error){onError(error);return false;}finally{running=null;}
   }
-  return {tick,start(){if(!timer){timer=setInterval(tick,750);timer.unref();tick();}},async close(){closed=true;clearInterval(timer);await running;}};
+  return {tick,start(){if(closed||timer||registration)return;if(store.coordination){const {coordinator,scope}=store.coordination;registration=coordinator.register({lane:'grading',scope,run:tick,maintain:()=>store.recoverExpired(),onError});}else{timer=setInterval(tick,750);timer.unref();tick();}},async close(){closed=true;clearInterval(timer);await registration?.close();await running;}};
 }

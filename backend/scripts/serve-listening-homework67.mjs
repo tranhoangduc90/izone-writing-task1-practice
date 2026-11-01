@@ -58,6 +58,6 @@ for(const definition of definitions){
 const runtime={app:createListeningLessonRouter(runtimes,{defaultCode:lesson.code,aliases:{'67-listening-02':'67-listening-scandinavian-studies'}})};
 if(local){runtime.app.use('/listening-homework',express.static(path.join(config.pagesPath,'listening-homework')));runtime.app.use('/shared',express.static(path.join(config.pagesPath,'shared')));runtime.app.use('/term-tests/shared',express.static(path.join(config.pagesPath,'term-tests/shared')));}
 const mounted=express();mounted.use(config.publicPath||'/',runtime.app);
-const server=mounted.listen(config.port,local?'127.0.0.1':'0.0.0.0',()=>{for(const r of runtimes){r.worker.start();r.homeworkRuntime?.start();}console.log(JSON.stringify({ready:true,product:'listening-homework67',port:config.port,fixture:local,classes:allowedClassIds.length,lessons:runtimes.map(r=>r.code)}));});
-async function close(){server.close();for(const r of runtimes){await r.worker.close();await r.homeworkRuntime?.close();}await db.close();process.exit(0);}
+const server=mounted.listen(config.port,local?'127.0.0.1':'0.0.0.0',()=>{if(config.workersEnabled!==false)for(const r of runtimes){r.worker.start();r.homeworkRuntime?.start();}console.log(JSON.stringify({ready:true,product:'listening-homework67',port:config.port,fixture:local,classes:allowedClassIds.length,lessons:runtimes.map(r=>r.code)}));});
+let closing=false;async function close(){if(closing)return;closing=true;server.close();for(const r of runtimes){await r.worker.close();await r.homeworkRuntime?.close();}await db.close();process.exit(0);}
 process.on('SIGTERM',close);process.on('SIGINT',close);

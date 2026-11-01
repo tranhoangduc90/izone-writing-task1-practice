@@ -1,0 +1,17 @@
+--- atomic-before.js
++++ atomic-after.js
+@@ -21,10 +21,12 @@
+     const before = String(issue?.span ?? '');
+     const after = String(issue?.revised_span ?? '');
+     if (!before || !after || before === after || !String(issue?.reason ?? '').trim()) return false;
+-    const foundAt = original.indexOf(before, originalAt);
++    let foundAt = original.indexOf(before, originalAt);
++    while (foundAt >= 0 && !revised.startsWith(original.slice(originalAt, foundAt) + after, revisedAt)) {
++      foundAt = original.indexOf(before, foundAt + 1);
++    }
+     if (foundAt < 0) return false;
+     const unchanged = original.slice(originalAt, foundAt);
+-    if (!revised.startsWith(unchanged + after, revisedAt)) return false;
+     if (before.length > original.length * 0.55 && original.length >= 35) return false;
+     if (after.length > revised.length * 0.55 && revised.length >= 35) return false;
+     if (groupsSeveralEdits(before, after)) return false;

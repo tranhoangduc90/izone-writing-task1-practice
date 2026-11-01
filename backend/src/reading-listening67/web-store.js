@@ -132,7 +132,7 @@ export function createReading67WebStore({db,grader,homework,resultSummary=readin
     if(homework)for(const job of recovered.rows){const a=(await tx.query('SELECT * FROM reading_listening67.web_attempt WHERE id=$1',[job.attempt_id])).rows[0];await homework.outcome(tx,{ownerId:a.owner_id,courseId:a.course_id,code:a.assignment_code,version:a.content_version},job.id);}
     return recovered;
   });}
-  return {draft,save,submit,attempt,history,archives,reset,firstCompleted,claim,recordProvider,finish,fail,recoverExpired,validation,coordination:jobScope&&db.workCoordinator?{coordinator:db.workCoordinator,scope:{...jobScope,validation:!!validation}}:null};
+  return {draft,save,submit,attempt,history,archives,reset,firstCompleted,claim,recordProvider,finish,fail,recoverExpired,validation,observations:jobScope?db.webObservations:null,coordination:jobScope&&db.workCoordinator?{coordinator:db.workCoordinator,scope:{...jobScope,validation:!!validation}}:null};
 }
 
 export function createReading67WebWorker({store,grader,onError=()=>{}}){

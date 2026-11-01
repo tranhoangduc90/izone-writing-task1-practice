@@ -3,7 +3,7 @@
  * Kiểm UUID–ERP–lớp ở mỗi request; bộ nhớ browser không cấp quyền. Google chỉ
  * xác minh GV, quyền lớp vẫn từ snapshot. Không ghi dữ liệu sang sản phẩm mẫu.
  */
-import {randomBytes} from 'node:crypto';
+import {randomBytes,randomUUID} from 'node:crypto';
 import {sha256,WebGradingError} from './web-grader.js';
 const DAY=86400000;
 const secret=()=>randomBytes(32).toString('base64url');
@@ -14,22 +14,24 @@ export function createReading67WebIdentity({db,context,allowedClassIds,verifyGoo
  if(!/^[a-z0-9_]+$/.test(cookieName))throw Error('COOKIE_NAME_INVALID');
  const cookie=q=>new RegExp('(?:^|;\\s*)'+cookieName+'=([\\w-]{43})(?:;|$)').exec(q.headers.cookie||'')?.[1];
  const allowed=new Set(allowedClassIds.map(String));
+ const observationId=randomUUID();
  const courseAllowed=id=>{if(!allowed.has(String(id)))denied();};
  async function classes(){
   if(includeEmptyClasses)return (await context.snapshot()).classes.filter(c=>allowed.has(c.erp_course_class_id)).map(c=>({id:c.erp_course_class_id,classCode:c.erp_class_name_snapshot})).sort((a,b)=>a.classCode.localeCompare(b.classCode,'vi'));
   return (await context.classes()).filter(c=>allowed.has(c.id));
  }
  async function roster(classId){courseAllowed(classId);return (await (ownerSource?ownerSource.roster(classId):context.roster(classId))).map(s=>({studentRef:s.studentRef,name:s.name}));}
- async function member(classId,studentRef){
+ async function memberDetails(classId,studentRef){
   courseAllowed(classId);
   const snapshot=await context.snapshot();
   const row=snapshot.students.find(s=>s.public_id===studentRef&&s.erp_course_class_id===String(classId)&&s.status==='approved');
   const active=row&&snapshot.memberships.some(m=>m.erp_course_class_id===String(classId)&&m.erp_student_contact_id===row.erp_student_contact_id&&m.source_state==='active');
   if(!active)denied('STUDENT_ACCESS_DENIED');
-  if(ownerSource)await ownerSource.member(String(classId),studentRef);
+  const owner=ownerSource?await ownerSource.member(String(classId),studentRef):null;
   const c=snapshot.classes.find(c=>c.erp_course_class_id===String(classId));
-  return {ownerId:row.public_id,courseId:String(classId),erpId:row.erp_student_contact_id,name:row.erp_student_name_snapshot,className:c.erp_class_name_snapshot};
+  return {person:{ownerId:row.public_id,courseId:String(classId),erpId:row.erp_student_contact_id,name:row.erp_student_name_snapshot,className:c.erp_class_name_snapshot},owner};
  }
+ async function member(classId,studentRef){return (await memberDetails(classId,studentRef)).person;}
  async function resolve(input){
   const s=await context.snapshot();
   let rows=s.students.filter(r=>allowed.has(r.erp_course_class_id)&&r.status==='approved'&&s.memberships.some(m=>m.erp_course_class_id===r.erp_course_class_id&&m.erp_student_contact_id===r.erp_student_contact_id&&m.source_state==='active'));
@@ -83,5 +85,18 @@ export function createReading67WebIdentity({db,context,allowedClassIds,verifyGoo
  }
  async function teacherClasses(q){const session=await readTeacher(q),list=await classes(),result=[];for(const c of list)if(await context.teacher(c.id,session.email,session.google_subject))result.push(c);if(!result.length)denied();return result;}
  async function logoutTeacher(q,r){const token=cookie(q);if(token)await db.query('DELETE FROM reading_listening67.web_teacher_session WHERE token_hash=$1',[sha256(token)]);writeCookie(q,r,'');}
- return {classes,roster,member,resolve,loginStudent,authenticate,logoutStudent,loginTeacher,authorizeTeacher,teacherClasses,logoutTeacher};
+ function observeStudent(q,expected){
+  const token=bearer(q);if(!token)denied('WEB_UNAUTHORIZED',401);const hash=sha256(token);
+  const check=(row,person)=>{if(!row||Date.parse(row.expires_at)<=clock())denied('WEB_UNAUTHORIZED',401);if(row.owner_id!==person.ownerId||row.course_id!==person.courseId||row.erp_id!==person.erpId)denied();};
+  return {kind:'student',hash,key:JSON.stringify([observationId,'student',hash,expected.courseId,expected.ownerId]),
+   async verify(row){check(row,expected);const value=await memberDetails(row.course_id,row.owner_id);check(row,value.person);return value;},
+   assertCurrent(row,value){check(row,value.person);}};
+ }
+ function observeTeacher(q,classId){
+  courseAllowed(classId);const token=cookie(q);if(!token)denied('TEACHER_LOGIN_REQUIRED',401);const hash=sha256(token);
+  return {kind:'teacher',hash,key:JSON.stringify([observationId,'teacher',hash,String(classId)]),
+   async verify(row){if(!row||Math.min(Date.parse(row.expires_at),Date.parse(row.absolute_expires_at))<=clock())denied('TEACHER_LOGIN_REQUIRED',401);if(!await context.teacher(String(classId),row.email,row.google_subject))denied();return {email:row.email,subject:row.google_subject};},
+   assertCurrent(row,value){if(!row||Math.min(Date.parse(row.expires_at),Date.parse(row.absolute_expires_at))<=clock())denied('TEACHER_LOGIN_REQUIRED',401);if(row.email!==value.email||row.google_subject!==value.subject)denied();}};
+ }
+ return {classes,roster,member,resolve,loginStudent,authenticate,logoutStudent,loginTeacher,authorizeTeacher,teacherClasses,logoutTeacher,observeStudent,observeTeacher};
 }

@@ -11,6 +11,7 @@ export function createReading67OwnerEntry({db,identity,ownerSource,metadata,poli
  if(currentCourse&&!ownerSource)throw Error('OWNER_ENTRY_SOURCE_REQUIRED');
  if(!classes.length||new Set(classes.map(c=>c.classId)).size!==classes.length||classes.some(c=>!/^\d+$/.test(c.classId)||typeof c.classCode!=='string'||!c.classCode.trim()||(!currentCourse||c.courseId!==undefined)&&(typeof c.courseId!=='string'||!c.courseId)))throw Error('OWNER_ENTRY_SCOPE_INVALID');
  const byClass=new Map(classes.map(c=>[c.classId,c]));
+ const pendingOwners=new Map();
  const matches=(s,t)=>{const c=byClass.get(s.courseId);return !!c&&s.code===metadata.code&&s.version===metadata.version&&t?.classId===s.courseId&&t.studentRef===s.ownerId&&t.code===s.code&&t.version===s.version&&typeof t.courseId==='string'&&!!t.courseId&&(!c.courseId||t.courseId===c.courseId)&&(!c.courseWorkId||t.courseWorkId===c.courseWorkId);};
  async function binding(documentId){
   if(typeof documentId!=='string'||!/^[A-Za-z0-9_-]{20,200}$/.test(documentId))fail('HOMEWORK_ENTRY_NOT_FOUND');
@@ -32,6 +33,21 @@ export function createReading67OwnerEntry({db,identity,ownerSource,metadata,poli
   // Teachers retain native access to historical work even after a learner leaves
   // the active roster. The verified binding sets scope; class permission is live.
   async resolveTeacher(documentId,authorize){const {scope}=await binding(documentId);await authorize(scope.courseId);return {documentId,classId:scope.courseId,studentRef:scope.ownerId,classCode:byClass.get(scope.courseId).classCode,code:metadata.code,version:metadata.version};},
-  async assert(documentId,person){const {scope,target}=await binding(documentId);if(person.ownerId!==scope.ownerId||person.courseId!==scope.courseId)fail('HOMEWORK_ENTRY_OWNER_MISMATCH');await current(scope,target);}
+  async assert(documentId,person){const {scope,target}=await binding(documentId);if(person.ownerId!==scope.ownerId||person.courseId!==scope.courseId)fail('HOMEWORK_ENTRY_OWNER_MISMATCH');await current(scope,target);},
+  observation(documentId,person){return {code:metadata.code,version:metadata.version,documentId,
+   async prepare(checked){
+    if(!ownerSource||checked.owner)return checked;
+    const key=JSON.stringify([person.courseId,person.ownerId]);
+    if(!pendingOwners.has(key))pendingOwners.set(key,Promise.resolve().then(()=>ownerSource.member(person.courseId,person.ownerId)).finally(()=>pendingOwners.delete(key)));
+    return {...checked,entryOwner:await pendingOwners.get(key)};
+   },
+   verify(rows,checked){
+    if(rows.length!==1)fail('HOMEWORK_ENTRY_NOT_FOUND');const b=rows[0],scope={ownerId:b.owner_id,courseId:b.course_id,code:b.assignment_code,version:b.content_version},target=b.target;
+    if(!matches(scope,target)||target.documentId!==documentId||!target.courseWorkId||!target.submissionId||!target.tabId)fail('HOMEWORK_ENTRY_NOT_FOUND');
+    if(person.ownerId!==scope.ownerId||person.courseId!==scope.courseId)fail('HOMEWORK_ENTRY_OWNER_MISMATCH');
+    if(checked.person?.ownerId!==person.ownerId||checked.person.courseId!==person.courseId||checked.person.className!==byClass.get(scope.courseId).classCode)fail('HOMEWORK_ENTRY_NOT_FOUND');
+    const source=checked.entryOwner||checked.owner;
+    if(ownerSource&&(source?.courseId!==target.courseId||source.googleUserId!==target.googleUserId))fail('HOMEWORK_ENTRY_NOT_FOUND');
+   }};}
  };
 }

@@ -10,6 +10,7 @@ import {createWebWorkCoordinator,selectReadyWebScopes} from '../../src/reading-l
 import {createReading67Homework} from '../../src/reading-listening67/web-homework.js';
 import {claimWebWorkBatch,releaseUnstartedWebWork} from '../../src/reading-listening67/web-work-claims.js';
 import {createReading67WebRouter} from '../../src/reading-listening67/web-routes.js';
+import {registerObservationNativeTests} from './observation-native.mjs';
 const connectionString=process.env.TEST_SERVICES_DATABASE_URL;
 if(!connectionString||new URL(connectionString).pathname!=='/test_services_optimization_20261101')throw Error('ISOLATED_FIXTURE_DATABASE_REQUIRED');
 const db=createReading67Postgres({connectionString,max:4});
@@ -190,3 +191,5 @@ test('Native idle benchmark: six Docs lessons retain 500-ms checks with at least
  assert.ok(reduction>=.7,JSON.stringify({legacy,shared,reduction}));assert.ok(shared.writes>=10);assert.ok(legacy.writes>=10);
  // Latency is recorded, not certified by an arbitrary tiny fixture threshold.
 });
+
+registerObservationNativeTests({connectionString,grader,scope,save,submit,result,until});

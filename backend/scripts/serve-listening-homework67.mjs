@@ -18,7 +18,7 @@ if(!local&&config.mode!=='production')throw Error('MODE_REQUIRED');
 if(!Number.isInteger(config.port)||config.port<1024||!path.isAbsolute(config.lessonPath))throw Error('CONFIG_INVALID');
 if(!local&&(config.authority.kind!=='http'||config.database?.kind!=='postgres'||!config.homework?.enabled||!config.sso?.bridgeUrl||config.allowAllCourse67!==true||!config.allowedClassIds?.length))throw Error('PRODUCTION_BOUNDARY_CONFIG_REQUIRED');
 const lesson=JSON.parse(await fs.readFile(config.lessonPath,'utf8'));
-const db=local?new (await import('@electric-sql/pglite')).PGlite(config.dataDir):createReading67Postgres({connectionString:(await fs.readFile(config.database.connectionFile,'utf8')).trim(),max:4,workCoordinatorEnabled:config.workCoordinatorEnabled===true});
+const db=local?new (await import('@electric-sql/pglite')).PGlite(config.dataDir):createReading67Postgres({connectionString:(await fs.readFile(config.database.connectionFile,'utf8')).trim(),max:4,workCoordinatorEnabled:config.workCoordinatorEnabled===true,onWorkSignalError:error=>console.error(JSON.stringify({event:'listening_homework67_work_signal_error',code:error.code||'WORK_SIGNAL_UNAVAILABLE'}))});
 if(!local){const role=(await db.query('SELECT current_database() AS db,current_user AS role,rolsuper,rolcreatedb,rolcreaterole FROM pg_roles WHERE rolname=current_user')).rows[0];if(role.db!=='listening_homework67'||role.role!=='listening_homework67_app'||role.rolsuper||role.rolcreatedb||role.rolcreaterole)throw Error('OWN_DATABASE_ROLE_REQUIRED');}
 // Migrations are operator actions in production. Never discover or migrate another DB.
 if(local)await db.exec(await fs.readFile(new URL('../ops/listening-homework67/schema.sql',import.meta.url),'utf8'));

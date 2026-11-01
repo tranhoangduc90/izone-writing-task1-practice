@@ -7,6 +7,7 @@ import {createReading67Postgres} from '../../src/reading-listening67/web-postgre
 import {createReading67WebStore,createReading67WebWorker} from '../../src/reading-listening67/web-store.js';
 import {createWebWorkCoordinator,selectReadyWebScopes} from '../../src/reading-listening67/web-work-coordinator.js';
 import {createReading67Homework} from '../../src/reading-listening67/web-homework.js';
+import {claimWebWorkBatch,releaseUnstartedWebWork} from '../../src/reading-listening67/web-work-claims.js';
 const connectionString=process.env.TEST_SERVICES_DATABASE_URL;
 if(!connectionString||new URL(connectionString).pathname!=='/test_services_optimization_20261101')throw Error('ISOLATED_FIXTURE_DATABASE_REQUIRED');
 const db=createReading67Postgres({connectionString,max:4});
@@ -60,6 +61,74 @@ test('Shared workers process independent lesson scopes while one grader is block
  }finally{release();await wa.close();await wb.close();await db.workCoordinator.close();delete db.workCoordinator;}
 });
 
+test('Native batch claims skip locked jobs and concurrent instances cannot receive the same lease',async()=>{
+ const a=scope('batch-A'),b=scope('batch-B'),sa=createReading67WebStore({db,grader,jobScope:a}),sb=createReading67WebStore({db,grader,jobScope:b});
+ const sent=[];
+ for(let n=0;n<4;n++){const s={...a,ownerId:randomUUID()};await save(sa,s,'A-'+n);sent.push(await submit(sa,s));}
+ await save(sb,b,'B');const bb=await submit(sb,b);let release,locked=false;
+ const wait=new Promise(resolve=>release=resolve);
+ const blocking=db.transaction(async tx=>{await tx.query('SELECT id FROM reading_listening67.web_job WHERE id=$1 FOR UPDATE',[sent[0].jobId]);locked=true;await wait;});
+ try{
+  await until(()=>locked);
+  const sets=await Promise.all([claimWebWorkBatch(db,'grading',[a,b]),claimWebWorkBatch(db,'grading',[a,b])]),items=sets.flat();
+  assert.equal(items.length,3);assert.equal(new Set(items.map(i=>i.job.jobId)).size,3);assert.equal(new Set(items.map(i=>i.job.leaseToken)).size,3);
+  assert.ok(items.every(i=>i.job.jobId!==sent[0].jobId));assert.equal(items.filter(i=>i.job.jobId===bb.jobId).length,1);
+  for(const item of items){assert.equal(item.job.ownerId,item.code===b.code?b.ownerId:(await db.query('SELECT owner_id FROM reading_listening67.web_attempt WHERE id=$1',[item.job.attemptId])).rows[0].owner_id);await (item.code===b.code?sb:sa).finish(item.job,result(item.job));}
+ }finally{release();await blocking;}
+ const resumed=await claimWebWorkBatch(db,'grading',[a]);assert.equal(resumed.length,1);await releaseUnstartedWebWork(db,'grading',resumed);
+ assert.equal((await db.query('SELECT status FROM reading_listening67.web_job WHERE id=$1',[resumed[0].job.jobId])).rows[0].status,'queued');
+});
+
+test('Native Docs batch preserves owner, document, sequence and verifies each accepted job through the existing writer',async()=>{
+ const a=scope('docs-batch-A'),b=scope('docs-batch-B'),writes=[],values=new Map();
+ const homes=[a,b].map(metadata=>createReading67Homework({db,metadata,pageBase:'https://fixture.test/homework',
+  owner:{async resolve(s){return {classId:s.courseId,studentRef:s.ownerId,code:s.code,version:s.version,documentId:'fixture-doc-'+s.ownerId,tabId:'fixture-tab'};}},
+  docs:{async read(id){return {value:values.get(id)};},async write(id,plan){writes.push({id,value:plan.value});values.set(id,plan.value);}},
+  planWrite(document,binding,job){const value=JSON.stringify([binding.document_id,job.binding_id,job.sequence,job.payload]);return {verified:document.value===value,value};}
+ }));
+ const stores=[a,b].map((metadata,n)=>createReading67WebStore({db,grader,jobScope:metadata,homework:homes[n]}));
+ await save(stores[0],a,'A');await save(stores[1],b,'B');
+ for(let sequence=0;sequence<=1;sequence++){
+  const claims=await claimWebWorkBatch(db,'docs',[a,b]);assert.equal(claims.length,2);
+  await Promise.all(claims.reverse().map(async item=>{assert.equal(item.job.sequence,sequence);const index=item.code===a.code?0:1;assert.equal(await homes[index].once(item.job),true);}));
+ }
+ assert.equal(writes.length,4);assert.equal(new Set(writes.map(w=>w.id)).size,2);
+ for(let n=0;n<2;n++){const status=await homes[n].status([a,b][n]);assert.equal(status.cta,'verified');assert.equal(status.status,'verified');assert.ok(status.jobs.every(j=>j.status==='verified'));}
+});
+
+test('Two native service instances notify only after commit, keep native claims and recover from a lost listener',async()=>{
+ const errors=[],writer=createReading67Postgres({connectionString,max:2,workCoordinatorEnabled:true,onWorkSignalError:e=>errors.push(e.code)}),reader=createReading67Postgres({connectionString,max:2,workCoordinatorEnabled:true,onWorkSignalError:e=>errors.push(e.code)});
+ const s=scope('notify-native'),store=createReading67WebStore({db:writer,grader,jobScope:s}),received=[];
+ const handle=reader.workCoordinator.register({lane:'grading',scope:s,batchClaim:true,async run(job){received.push(job);await store.finish(job,result(job));return true;}});
+ try{
+  await until(()=>writer.workSignals.snapshot().connected&&reader.workSignals.snapshot().connected);
+  const before=reader.workSignals.snapshot().received;
+  await assert.rejects(writer.transaction(async tx=>{tx.afterCommit(()=>writer.wakeWork('grading'));throw Error('ROLLBACK_NOTIFICATION');}),/ROLLBACK_NOTIFICATION/);
+  await new Promise(resolve=>setTimeout(resolve,30));assert.equal(reader.workSignals.snapshot().received,before);
+  await save(store,s,'first');const first=await submit(store,s);
+  await until(()=>reader.workSignals.snapshot().received>before);await until(async()=> (await store.attempt(s,first.attemptId)).status==='done');assert.equal(received[0].ownerId,s.ownerId);
+  const connections=reader.workSignals.snapshot().connections;
+  // Strong DB guard at the top restricts this fault injection to our isolated fixture.
+  await db.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=current_database() AND application_name='reading67_work_listener' AND pid<>pg_backend_pid()");
+  await until(()=>reader.workSignals.snapshot().connected&&reader.workSignals.snapshot().connections>connections);
+  await save(store,s,'second',1);const second=await submit(store,s,2);await until(async()=> (await store.attempt(s,second.attemptId)).status==='done');
+  assert.equal(received.length,2);assert.notEqual(received[0].jobId,received[1].jobId);assert.ok(errors.length>=1);
+ }finally{await handle.close();await writer.close();await reader.close();}
+});
+
+test('A post-commit wake failure preserves the save and submission and a peer finds durable work by fallback',async()=>{
+ const writer=createReading67Postgres({connectionString,max:2,workCoordinatorEnabled:true}),reader=createReading67Postgres({connectionString,max:2,workCoordinatorEnabled:true});
+ const s=scope('notify-lost'),store=createReading67WebStore({db:writer,grader,jobScope:s});
+ const handle=reader.workCoordinator.register({lane:'grading',scope:s,batchClaim:true,async run(job){await store.finish(job,result(job));return true;}});
+ try{
+  await until(()=>reader.workSignals.snapshot().connected);
+  writer.wakeWork=()=>{throw Error('WAKE_DELIVERY_LOST');};
+  const saved=await save(store,s,'durable');assert.equal(saved.revision,1);
+  const sent=await submit(store,s);await until(async()=> (await store.attempt(s,sent.attemptId)).status==='done');
+  assert.equal((await store.draft(s)).body.answers.answer,'durable');assert.equal((await store.history(s)).length,1);
+ }finally{await handle.close();await writer.close();await reader.close();}
+});
+
 test('Native idle benchmark: six Docs lessons retain 500-ms checks with at least 70 percent fewer database admissions',async()=>{
  const scopes=Array.from({length:6},(_,n)=>({code:'idle-'+n,version:'fixture-v1'}));
  async function measure(shared){
@@ -68,7 +137,7 @@ test('Native idle benchmark: six Docs lessons retain 500-ms checks with at least
   const homes=scopes.map(metadata=>createReading67Homework({db:watched,metadata,pageBase:'https://fixture.test/homework',owner:{resolve(){throw Error('UNEXPECTED_OWNER_CALL');}},docs:{read(){throw Error('UNEXPECTED_GOOGLE_CALL');}}}));
   const runner=shared?createWebWorkCoordinator({db:watched}):null;const timers=[];let stopped=false;const pending=new Set();
   function startLegacy(homework){const tick=()=>{if(stopped)return;const run=homework.once().finally(()=>{pending.delete(run);if(!stopped)timers.push(setTimeout(tick,500));});pending.add(run);};tick();}
-  const handles=homes.map((homework,n)=>runner?runner.register({lane:'docs',scope:scopes[n],run:()=>homework.once()}):startLegacy(homework));
+  const handles=homes.map((homework,n)=>runner?runner.register({lane:'docs',scope:scopes[n],batchClaim:true,run:job=>homework.once(job)}):startLegacy(homework));
   // Concurrent real writes/ACKs exercise the same pool while idle lanes poll.
   const store=createReading67WebStore({db,grader}),s=scope('latency-'+shared);let revision=0;
   const started=performance.now();

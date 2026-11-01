@@ -32,7 +32,7 @@ export function createReading67Homework({db,metadata,pageBase,owner,docs,managed
   const sequence=kind==='cta'?0:b.sequence+1;
   if(kind!=='cta')await tx.query('UPDATE reading_listening67.web_homework_binding SET sequence=$2 WHERE id=$1',[b.id,sequence]);
   const job=(await tx.query('INSERT INTO reading_listening67.web_homework_job(id,binding_id,event_key,sequence,kind,payload) VALUES($1,$2,$3,$4,$5,$6::jsonb) RETURNING *',[randomUUID(),b.id,key,sequence,kind,JSON.stringify(payload)])).rows[0];
-  tx.afterCommit?.(()=>db.workCoordinator?.wake('docs'));return job;
+  tx.afterCommit?.(()=>db.wakeWork?db.wakeWork('docs'):db.workCoordinator?.wake('docs'));return job;
  }
  async function state(tx,s,b){
   const draft=(await tx.query('SELECT run_no,revision FROM reading_listening67.web_draft WHERE '+clause,args(s))).rows[0];
@@ -95,8 +95,8 @@ export function createReading67Homework({db,metadata,pageBase,owner,docs,managed
   const last=jobs.filter(j=>j.kind==='status').at(-1),cta=jobs.find(j=>j.kind==='cta');
   return {status:last?.status||'not_started',cta:cta?.status||'pending',entryUrl:entryFor(s,b.target),jobs,hasTarget:!!b.target};
  }
- async function once(){
-  const job=await db.transaction(async tx=>{
+ async function once(claimedJob){
+  const job=claimedJob||await db.transaction(async tx=>{
    const j=(await tx.query("SELECT j.* FROM reading_listening67.web_homework_job j JOIN reading_listening67.web_homework_binding lesson_binding ON lesson_binding.id=j.binding_id WHERE lesson_binding.assignment_code=$1 AND lesson_binding.content_version=$2 AND ((j.status='pending' AND j.available_at<=now()) OR (j.status='processing' AND j.lease_until<now())) AND NOT EXISTS(SELECT 1 FROM reading_listening67.web_homework_job old WHERE old.binding_id=j.binding_id AND old.sequence<j.sequence AND old.status<>'verified') ORDER BY j.created_at,j.sequence FOR UPDATE OF j SKIP LOCKED LIMIT 1",[metadata.code,metadata.version])).rows[0];
    if(!j)return null;const leaseId=randomUUID();
    await tx.query("UPDATE reading_listening67.web_homework_job SET status='processing',lease_id=$2,lease_until=now()+interval '180 seconds',attempts=attempts+1 WHERE id=$1",[j.id,leaseId]);

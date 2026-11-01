@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import {PGlite} from '@electric-sql/pglite';
 import {createWebWorkCoordinator,selectReadyWebScopes} from '../src/reading-listening67/web-work-coordinator.js';
+import {claimWebWorkBatch,releaseUnstartedWebWork} from '../src/reading-listening67/web-work-claims.js';
 
 const A={code:'fixture-A',version:'v1',validation:true};
 const B={code:'fixture-B',version:'v2',validation:false};
@@ -84,7 +85,50 @@ test('Deregistration prevents late selection from running a closed adapter',asyn
  const runner=createWebWorkCoordinator({db:{async query(){if(initial){initial=false;await delayed;}return {rows:[A]};}},...time});
  const handle=runner.register({lane:'grading',scope:A,run:async()=>{ran++;return false;},maintain:async()=>{maintained++;}});
  assert.throws(()=>runner.register({lane:'grading',scope:A,run(){}}),/ALREADY_REGISTERED/);
- await time.advance(0);assert.equal(maintained,1);await handle.close();release();await settle();assert.equal(ran,0);await runner.close();await time.advance(30000);assert.equal(maintained,1);
+ await time.advance(0);assert.equal(maintained,1);const closing=handle.close();release();await closing;await settle();assert.equal(ran,0);await runner.close();await time.advance(30000);assert.equal(maintained,1);
+});
+
+test('Batch grading claims one due job per exact scope and keeps future validation and unknown outcomes untouched',async t=>{
+ const {db,grading}=await sqlFixture(t);
+ const future={...A,code:'future'},hidden={...A,version:'hidden'};
+ const a=await grading(A),b=await grading(B),later=await grading(future,{future:true}),other=await grading(hidden),unknown=await grading({...A,code:'unknown'},{status:'needs_review'});
+ await db.query("UPDATE reading_listening67.web_job SET provider_response=$2 WHERE id=$1",[a,{saved:'provider-response'}]);
+ const second=await grading(A);await db.query("UPDATE reading_listening67.web_job SET created_at=now()+interval '1 minute' WHERE id=$1",[second]);
+ const claimed=await claimWebWorkBatch(db,'grading',[A,B,future,{...A,code:'unknown'}]);
+ assert.deepEqual(new Set(claimed.map(i=>i.job.jobId)),new Set([a,b]));
+ assert.equal(claimed.find(i=>i.code===A.code).job.replayResponse.saved,'provider-response');
+ assert.equal(new Set(claimed.map(i=>i.job.leaseToken)).size,2);
+ const remaining=(await db.query('SELECT id,status FROM reading_listening67.web_job WHERE id=ANY($1::uuid[])',[ [later,other,unknown,second] ])).rows;
+ assert.ok(remaining.every(r=>r.status===(r.id===unknown?'needs_review':'queued')));
+ await releaseUnstartedWebWork(db,'grading',claimed.map(i=>({...i,job:{...i.job,leaseToken:randomUUID()}})));
+ assert.equal((await db.query("SELECT count(*)::int n FROM reading_listening67.web_job WHERE status='processing'")).rows[0].n,2);
+ await releaseUnstartedWebWork(db,'grading',claimed);
+ assert.equal((await db.query("SELECT count(*)::int n FROM reading_listening67.web_job WHERE status='processing'")).rows[0].n,0);
+ await assert.rejects(claimWebWorkBatch(db,'grading',[A,A]),/WORK_SCOPE_INVALID/);
+});
+
+test('Batch Docs claims retain predecessor ordering, expired lease recovery and attempt counts',async t=>{
+ const {db,binding,docs}=await sqlFixture(t);
+ const a=await binding(A),b=await binding(B),future={code:'later',version:'v1'},c=await binding(future);
+ await docs(a,0,{status:'blocked'});await docs(a,1);
+ await docs(b,0,{status:'verified'});await docs(b,1,{status:'processing',lease:true});await docs(b,2);
+ await docs(c,0,{future:true});
+ const claimed=await claimWebWorkBatch(db,'docs',[A,B,future]);
+ assert.equal(claimed.length,1);assert.equal(claimed[0].code,B.code);assert.equal(claimed[0].job.sequence,1);assert.equal(claimed[0].job.attempts,1);assert.ok(claimed[0].job.leaseId);
+ assert.deepEqual(await claimWebWorkBatch(db,'docs',[A,B,future]),[]);
+ await releaseUnstartedWebWork(db,'docs',claimed);
+ const released=(await db.query('SELECT status,attempts,lease_id FROM reading_listening67.web_homework_job WHERE id=$1',[claimed[0].job.id])).rows[0];
+ assert.deepEqual(released,{status:'pending',attempts:0,lease_id:null});
+});
+
+test('Closing a scope during a committed batch claim returns unstarted work without calling a worker',async t=>{
+ const {db,grading}=await sqlFixture(t),time=fakeClock();const id=await grading(A);
+ let released,received=false,runs=0;const wait=new Promise(resolve=>released=resolve);
+ const watched={async query(...args){const result=await db.query(...args);if(args[0].includes('picked AS MATERIALIZED')){received=true;await wait;}return result;}};
+ const runner=createWebWorkCoordinator({db:watched,...time}),handle=runner.register({lane:'grading',scope:A,batchClaim:true,run:async()=>{runs++;}});
+ await time.advance(0);while(!received)await settle();
+ const closing=handle.close();released();await closing;await runner.close();
+ assert.equal(runs,0);assert.deepEqual((await db.query('SELECT status,lease_token FROM reading_listening67.web_job WHERE id=$1',[id])).rows[0],{status:'queued',lease_token:null});
 });
 
 test('Expired-work maintenance retains its 30-second interval and reporting failures cannot stop the runner',async()=>{

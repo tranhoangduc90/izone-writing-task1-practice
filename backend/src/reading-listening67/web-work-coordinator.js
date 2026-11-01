@@ -1,4 +1,5 @@
-/** Shared admission for one product database; native stores retain claims and writes. */
+/** Shared admission and native batch claims for one product database. */
+import {claimWebWorkBatch,releaseUnstartedWebWork} from './web-work-claims.js';
 const intervals = {grading:750,docs:500};
 const scopeKey = scope => JSON.stringify([scope.code,scope.version]);
 
@@ -19,15 +20,16 @@ export function createWebWorkCoordinator({db,clock=Date.now,setTimer=setTimeout,
     lane.timer=setTimer(()=>{lane.timer=null;lane.due=Infinity;void scan(lane);},delay);
     lane.timer?.unref?.();
   }
-  function launch(lane,key,handler) {
-    if(closed||handler.closed||handler.running)return;
+  function launch(lane,key,handler,job) {
+    if(closed||handler.closed||handler.running)return false;
     lane.runs++;
-    handler.running=Promise.resolve().then(handler.run).then(worked=>{
+    handler.running=Promise.resolve().then(()=>handler.run(job)).then(worked=>{
       if(worked)schedule(lane,0);
     }).catch(error=>report(handler,error)).finally(()=>{
       handler.running=null;
       if(lane.wakePending){lane.wakePending=false;schedule(lane,0);}
     });
+    return true;
   }
   async function scan(lane) {
     if(closed||lane.selecting)return;
@@ -40,8 +42,20 @@ export function createWebWorkCoordinator({db,clock=Date.now,setTimer=setTimeout,
       }));
       try {
         lane.scans++;
-        const ready=await selectReadyWebScopes(db,lane.name,eligible.map(([,h])=>h.scope));
-        for(const scope of ready){const key=scopeKey(scope),handler=lane.handlers.get(key);if(handler)launch(lane,key,handler);}
+        const batch=eligible.filter(([,h])=>h.batchClaim),legacy=eligible.filter(([,h])=>!h.batchClaim);
+        if(batch.length){
+          const claimed=await claimWebWorkBatch(db,lane.name,batch.map(([,h])=>h.scope)),unstarted=[];
+          for(const item of claimed){
+            const key=scopeKey(item),handler=lane.handlers.get(key);
+            if(!handler||!launch(lane,key,handler,item.job))unstarted.push(item);
+          }
+          // Shutdown can race a committed batch claim; return only jobs never handed to a worker.
+          if(unstarted.length)await releaseUnstartedWebWork(db,lane.name,unstarted);
+        }
+        if(legacy.length){
+          const ready=await selectReadyWebScopes(db,lane.name,legacy.map(([,h])=>h.scope));
+          for(const scope of ready){const key=scopeKey(scope),handler=lane.handlers.get(key);if(handler)launch(lane,key,handler);}
+        }
       } catch(error) {
         // A selector failure must not strand work. Native scoped claims remain authoritative.
         lane.degraded++;
@@ -53,13 +67,13 @@ export function createWebWorkCoordinator({db,clock=Date.now,setTimer=setTimeout,
       const delay=lane.wakePending?0:intervals[lane.name];lane.wakePending=false;schedule(lane,delay);
     }
   }
-  function register({lane:name,scope,run,maintain,onError=()=>{}}) {
+  function register({lane:name,scope,run,maintain,batchClaim=false,onError=()=>{}}) {
     if(closed||!scope?.code||!scope?.version||typeof run!=='function')throw Error('WORK_REGISTRATION_INVALID');
     const lane=laneFor(name),key=scopeKey(scope);
     if(lane.handlers.has(key))throw Error('WORK_SCOPE_ALREADY_REGISTERED');
-    const handler={scope:{code:scope.code,version:scope.version,validation:!!scope.validation},run,maintain,onError,running:null,closed:false,lastMaintenance:-Infinity};
+    const handler={scope:{code:scope.code,version:scope.version,validation:!!scope.validation},run,maintain,batchClaim,onError,running:null,closed:false,lastMaintenance:-Infinity};
     lane.handlers.set(key,handler);schedule(lane,0);
-    return {async close(){handler.closed=true;lane.handlers.delete(key);if(!lane.handlers.size){clearTimer(lane.timer);lane.timer=null;lane.due=Infinity;}await handler.running;}};
+    return {async close(){handler.closed=true;lane.handlers.delete(key);if(!lane.handlers.size){clearTimer(lane.timer);lane.timer=null;lane.due=Infinity;}await lane.selecting;await handler.running;}};
   }
   return {
     register,

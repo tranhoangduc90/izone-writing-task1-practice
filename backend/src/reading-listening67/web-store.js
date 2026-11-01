@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { sha256, WebGradingError,reading67AnswerFingerprint } from './web-grader.js';
 import {reading67ResultSummary} from './web-result-summary.js';
 import {createValidationStore} from './web-validation-store.js';
+import {gradingWorkView} from './web-work-claims.js';
 const emptyBody=()=>({answers:{},annotations:[],notes:'',flags:[]});
 const values=s=>[s.ownerId,s.courseId,s.code,s.version];
 const where='owner_id=$1 AND course_id=$2 AND assignment_code=$3 AND content_version=$4';
@@ -60,7 +61,7 @@ export function createReading67WebStore({db,grader,homework,resultSummary=readin
       if(!cached){
         await tx.query('INSERT INTO reading_listening67.web_attempt(id,owner_id,course_id,assignment_code,content_version,draft_revision,snapshot,input_hash,grader_hash,completeness,run_no) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10::jsonb,$11)',[attemptId,...args,revision,JSON.stringify(row.body),inputHash,grader.pins.sha256,JSON.stringify(gate.completeness),row.run_no]);
         await tx.query("INSERT INTO reading_listening67.web_job(id,attempt_id,status) VALUES($1,$2,'queued')",[randomUUID(),attemptId]);
-        tx.afterCommit?.(()=>db.workCoordinator?.wake('grading'));
+        tx.afterCommit?.(()=>db.wakeWork?db.wakeWork('grading'):db.workCoordinator?.wake('grading'));
       }
       await tx.query('INSERT INTO reading_listening67.web_request(owner_id,course_id,assignment_code,content_version,request_id,request_hash,attempt_id) VALUES($1,$2,$3,$4,$5,$6,$7)',[...args,requestId,requestHash,attemptId]);
       if(afterSubmit)await afterSubmit(tx,scope,attemptId);
@@ -102,7 +103,7 @@ export function createReading67WebStore({db,grader,homework,resultSummary=readin
     const token=randomUUID();
     await tx.query("UPDATE reading_listening67.web_job SET status='processing',lease_token=$2,lease_until=now()+interval '15 minutes' WHERE id=$1",[job.id,token]);
     const a=(await tx.query('SELECT * FROM reading_listening67.web_attempt WHERE id=$1',[job.attempt_id])).rows[0];
-    return {jobId:job.id,attemptId:a.id,leaseToken:token,answers:a.snapshot.answers,inputHash:a.input_hash,graderHash:a.grader_hash,ownerId:a.owner_id,replayResponse:job.provider_response};
+    return gradingWorkView({...job,lease_token:token},a);
   });}
   async function assertOwner(tx,job){const row=(await tx.query("SELECT j.*,a.course_id,a.assignment_code,a.content_version FROM reading_listening67.web_job j JOIN reading_listening67.web_attempt a ON a.id=j.attempt_id WHERE j.id=$1 AND j.attempt_id=$2 AND j.lease_token=$3 AND a.owner_id=$4 AND j.status='processing' AND j.lease_until>now() FOR UPDATE OF j",[job.jobId,job.attemptId,job.leaseToken,job.ownerId])).rows[0];if(!row)throw new WebGradingError('JOB_LEASE_NOT_OWNED',409);return row;}
   async function recordProvider(job,response){return db.transaction(async tx=>{await assertOwner(tx,job);await tx.query('UPDATE reading_listening67.web_job SET provider_response=$2::jsonb WHERE id=$1',[job.jobId,JSON.stringify(response)]);});}
@@ -136,9 +137,9 @@ export function createReading67WebStore({db,grader,homework,resultSummary=readin
 
 export function createReading67WebWorker({store,grader,onError=()=>{}}){
   let running=null,timer=null,registration=null,closed=false,lastRecovery=0;
-  async function tick(){
+  async function tick(claimedJob){
     if(running||closed)return;
-    running=(async()=>{if(!registration&&Date.now()-lastRecovery>30000){await store.recoverExpired();lastRecovery=Date.now();}const job=await store.claim();if(!job)return false;
+    running=(async()=>{if(!registration&&Date.now()-lastRecovery>30000){await store.recoverExpired();lastRecovery=Date.now();}const job=claimedJob||await store.claim();if(!job)return false;
       try{
         if(job.graderHash!==grader.pins.sha256)throw new WebGradingError('GRADER_PIN_MISMATCH',503);
         const saved=store.validation?await store.validation.load(job):null;
@@ -150,5 +151,5 @@ export function createReading67WebWorker({store,grader,onError=()=>{}}){
     })();
     try{return await running;}catch(error){onError(error);return false;}finally{running=null;}
   }
-  return {tick,start(){if(closed||timer||registration)return;if(store.coordination){const {coordinator,scope}=store.coordination;registration=coordinator.register({lane:'grading',scope,run:tick,maintain:()=>store.recoverExpired(),onError});}else{timer=setInterval(tick,750);timer.unref();tick();}},async close(){closed=true;clearInterval(timer);await registration?.close();await running;}};
+  return {tick,start(){if(closed||timer||registration)return;if(store.coordination){const {coordinator,scope}=store.coordination;registration=coordinator.register({lane:'grading',scope,run:tick,batchClaim:true,maintain:()=>store.recoverExpired(),onError});}else{timer=setInterval(()=>tick(),750);timer.unref();tick();}},async close(){clearInterval(timer);if(registration)await registration.close();closed=true;await running;}};
 }

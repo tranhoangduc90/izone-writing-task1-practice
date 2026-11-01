@@ -4,7 +4,7 @@
  * Lỗi gửi/nghe được ghi trạng thái riêng, không đổi xác nhận lưu thành thất bại.
  */
 import {randomUUID} from 'node:crypto';
-const channel='reading67_work_v1',allowed=new Set(['grading','docs']);
+const channel='reading67_work_v1',allowed=new Set(['grading','docs','practice']);
 
 export function createWebWorkSignals({query,createClient,onWake,onError=()=>{},setTimer=setTimeout,clearTimer=clearTimeout}){
   const sender=randomUUID(),pending=new Set(),disposals=new WeakMap(),disposing=new Set();
@@ -40,7 +40,7 @@ export function createWebWorkSignals({query,createClient,onWake,onError=()=>{},s
       value.workNotification=message=>{
         if(closed||client!==value||message.channel!==channel)return;
         let payload;try{payload=JSON.parse(message.payload);}catch{return;}
-        if(payload?.v!==1||typeof payload.sender!=='string'||payload.sender===sender||!Array.isArray(payload.lanes)||!payload.lanes.length||payload.lanes.length>2||payload.lanes.some(lane=>!allowed.has(lane)))return;
+        if(payload?.v!==1||typeof payload.sender!=='string'||payload.sender===sender||!Array.isArray(payload.lanes)||!payload.lanes.length||payload.lanes.length>allowed.size||payload.lanes.some(lane=>!allowed.has(lane)))return;
         stats.received++;for(const lane of new Set(payload.lanes))wake(lane);
       };
       value.on('error',value.workError);value.on('end',value.workEnd);value.on('notification',value.workNotification);

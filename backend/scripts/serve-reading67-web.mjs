@@ -95,7 +95,7 @@ app.use('/api/reading-skills67',createReading67WebRouter({store,content,grader,i
 const pages=path.resolve(config.pagesPath);
 app.get('/reading-skills67/',(_q,r)=>r.sendFile(path.join(pages,'reading-skills67/index.html')));
 app.use('/reading-skills67',express.static(path.join(pages,'reading-skills67'),{dotfiles:'deny',index:false}));
-for(const name of ['student-identity.js','student-identity-client.js','student-identity-migration.js','course-student-identity.js'])app.get('/shared/'+name,(_q,r)=>r.sendFile(path.join(pages,'shared',name)));
+for(const name of ['student-identity.js','student-identity-client.js','student-identity-migration.js','course-student-identity.js','test-state-observer.mjs'])app.get('/shared/'+name,(_q,r)=>r.sendFile(path.join(pages,'shared',name)));
 for(const name of ['styles.css','annotations.js','explanation-dialog.css','term-style/computer-based.css'])app.get('/reading-practice/'+name,(_q,r)=>r.sendFile(path.join(pages,'reading-practice',name)));
 app.use('/reading-practice/fonts',express.static(path.join(pages,'reading-practice/fonts'),{dotfiles:'deny',index:false}));
 app.get('/health',async(_q,r)=>{try{await db.query('SELECT 1');r.json({ok:true,demo,studentsOpen:classroom?config.studentsOpen===true:true,authority:fixtureAuthority?'fixture':config.demoStudentFixture?'student_fixture_teacher_live':'live_context_read_only',homework:homeworkRuntime?.mode||'disabled',deployment:classroom?'IC2304 Lesson 10':'preview'});}catch{r.sendStatus(503);}});

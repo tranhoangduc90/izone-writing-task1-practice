@@ -16,7 +16,7 @@ const scopeSql=`SELECT code,version,validation,token FROM jsonb_to_recordset($1:
 
 export async function claimWebWorkBatch(db,lane,scopes){
   if(!scopes.length)return [];
-  if(!['grading','docs'].includes(lane))throw Error('WORK_LANE_INVALID');
+  if(!['grading','docs','practice'].includes(lane))throw Error('WORK_LANE_INVALID');
   const seen=new Set();
   const input=scopes.map(scope=>{
     const key=JSON.stringify([scope.code,scope.version]);
@@ -40,6 +40,21 @@ export async function claimWebWorkBatch(db,lane,scopes){
       FROM picked p WHERE j.id=p.id RETURNING j.*,p.code,p.version
     ) SELECT c.*,a.snapshot,a.input_hash,a.grader_hash,a.owner_id FROM claimed c
       JOIN reading_listening67.web_attempt a ON a.id=c.attempt_id`;
+  }else if(lane==='practice'){
+    // Unknown AI outcomes are quarantined; only safe expired leases may be reclaimed.
+    sql=`WITH scopes AS (${scopeSql}), expired_unknown AS (
+      UPDATE reading_listening67.web_share_practice j SET status='needs_review',lease_token=NULL,lease_until=NULL
+      FROM scopes s WHERE j.assignment_code=s.code AND j.content_version=s.version
+        AND j.status='processing' AND j.lease_until<now() AND j.analysis_intent AND j.analysis_response IS NULL RETURNING j.id
+    ), picked AS MATERIALIZED (
+      SELECT s.code,s.version,s.token,p.id FROM scopes s CROSS JOIN LATERAL (
+        SELECT j.id FROM reading_listening67.web_share_practice j
+        WHERE j.assignment_code=s.code AND j.content_version=s.version AND (
+          j.status='queued' OR (j.status='processing' AND j.lease_until<now() AND NOT(j.analysis_intent AND j.analysis_response IS NULL)))
+        ORDER BY j.updated_at,j.id FOR UPDATE OF j SKIP LOCKED LIMIT 1
+      ) p
+    ) UPDATE reading_listening67.web_share_practice j SET status='processing',lease_token=p.token,
+      lease_until=now()+interval '5 minutes',updated_at=now() FROM picked p WHERE j.id=p.id RETURNING j.*,p.code,p.version`;
   }else{
     sql=`WITH scopes AS (${scopeSql}), picked AS MATERIALIZED (
       SELECT s.code,s.version,s.token,p.id FROM scopes s CROSS JOIN LATERAL (
@@ -57,16 +72,18 @@ export async function claimWebWorkBatch(db,lane,scopes){
   }
   return (await db.query(sql,[JSON.stringify(input)])).rows.map(row=>({
     code:row.code,version:row.version,
-    job:lane==='grading'?gradingWorkView(row,{...row,id:row.attempt_id}):homeworkWorkView(row)
+    job:lane==='grading'?gradingWorkView(row,{...row,id:row.attempt_id}):lane==='docs'?homeworkWorkView(row):row
   }));
 }
 
 export async function releaseUnstartedWebWork(db,lane,items){
   if(!items.length)return;
-  if(!['grading','docs'].includes(lane))throw Error('WORK_LANE_INVALID');
-  const claims=items.map(({job})=>({id:lane==='grading'?job.jobId:job.id,token:lane==='grading'?job.leaseToken:job.leaseId}));
+  if(!['grading','docs','practice'].includes(lane))throw Error('WORK_LANE_INVALID');
+  const claims=items.map(({job})=>({id:lane==='grading'?job.jobId:job.id,token:lane==='grading'?job.leaseToken:lane==='docs'?job.leaseId:job.lease_token}));
   const sources=`jsonb_to_recordset($1::jsonb) AS c(id uuid,token uuid)`;
   if(lane==='grading')await db.query(`UPDATE reading_listening67.web_job j SET status='queued',lease_token=NULL,lease_until=NULL
+    FROM ${sources} WHERE j.id=c.id AND j.lease_token=c.token AND j.status='processing'`,[JSON.stringify(claims)]);
+  else if(lane==='practice')await db.query(`UPDATE reading_listening67.web_share_practice j SET status='queued',lease_token=NULL,lease_until=NULL
     FROM ${sources} WHERE j.id=c.id AND j.lease_token=c.token AND j.status='processing'`,[JSON.stringify(claims)]);
   else await db.query(`UPDATE reading_listening67.web_homework_job j SET status='pending',lease_id=NULL,lease_until=NULL,
       attempts=GREATEST(0,attempts-1),available_at=now()

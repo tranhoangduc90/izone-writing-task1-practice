@@ -1,13 +1,15 @@
 /** Đọc gộp trạng thái và phiên đang được theo dõi; không trả đáp án/token ra stream. */
-export const observationKey=s=>JSON.stringify([s.ownerId,s.courseId,s.code,s.version,s.attemptId||null]);
+import {readingPracticeView} from './web-practice-view.js';
+export const observationKey=s=>JSON.stringify([s.ownerId,s.courseId,s.code,s.version,s.attemptId||null,!!s.practice]);
 export const documentKey=d=>JSON.stringify([d.code,d.version,d.documentId]);
 
 export async function readWebObservations(db,{scopes,guards,documents,now=new Date().toISOString()}){
   const unique=new Map(scopes.map(s=>[observationKey(s),{...s,key:observationKey(s),attemptId:s.attemptId||null}]));
   const states=async()=>{
     if(!unique.size)return [];
+    const practice=[...unique.values()].some(s=>s.practice);
     return (await db.query(`WITH scopes AS (
-      SELECT * FROM jsonb_to_recordset($1::jsonb) AS s(key text,"ownerId" text,"courseId" text,code text,version text,"attemptId" uuid)
+      SELECT * FROM jsonb_to_recordset($1::jsonb) AS s(key text,"ownerId" text,"courseId" text,code text,version text,"attemptId" uuid,practice boolean)
     ) SELECT s.key,d.revision AS "draftRevision",d.run_no AS "runNo",a.id AS "attemptId",j.status,j.error_code AS "errorCode",
       md5(COALESCE(r.data::text,'')) AS "resultRevision",md5(COALESCE(v.state::text,'')||COALESCE(v.next_attempt_at::text,'')) AS "validationRevision",
       v.state->>'phase' AS phase,v.state->>'round' AS round,
@@ -15,6 +17,7 @@ export async function readWebObservations(db,{scopes,guards,documents,now=new Da
        FROM reading_listening67.web_validation_event e WHERE e.job_id=j.id AND e.kind='recovery_started') AS "recoveryRevision",
       b.id AS "bindingId",b.sequence AS "documentSequence",b.last_doc_sequence AS "documentVerifiedSequence",b.target IS NOT NULL AS "hasDocumentTarget",COALESCE(h.jobs,'[]'::jsonb) AS jobs,
       s."attemptId" IS NOT NULL AND a.id IS NULL AS "attemptMissing"
+      ${practice?',s.practice AS "practiceEnabled",s."attemptId" IS NOT NULL AS "practiceReadonly",p.value AS practice,ap.value AS "attemptPractice"':''}
     FROM scopes s
     LEFT JOIN reading_listening67.web_draft d ON d.owner_id=s."ownerId" AND d.course_id=s."courseId" AND d.assignment_code=s.code AND d.content_version=s.version
     LEFT JOIN LATERAL (SELECT x.id FROM reading_listening67.web_attempt x
@@ -29,7 +32,11 @@ export async function readWebObservations(db,{scopes,guards,documents,now=new Da
         x.sequence IN (0,b.sequence)
         OR x.id=(SELECT p.id FROM reading_listening67.web_homework_job p WHERE p.binding_id=b.id AND p.status<>'verified' ORDER BY p.sequence LIMIT 1)
         OR x.id=(SELECT p.id FROM reading_listening67.web_homework_job p WHERE p.binding_id=b.id AND p.status='blocked' ORDER BY p.sequence LIMIT 1)
-      )) h ON true`,[JSON.stringify([...unique.values()])])).rows;
+      )) h ON true
+    ${practice?`LEFT JOIN LATERAL (SELECT jsonb_build_object('id',p.id,'share_url',p.share_url,'status',p.status,'updated_at',p.updated_at,'outcome',jsonb_build_object('message',p.outcome->>'message')) AS value
+      FROM reading_listening67.web_share_practice p WHERE s.practice AND p.owner_id=CASE WHEN s.practice THEN s."ownerId"::uuid ELSE NULL END AND p.course_id=s."courseId" AND p.assignment_code=s.code AND p.content_version=s.version) p ON true
+    LEFT JOIN LATERAL (SELECT jsonb_build_object('id',p.data->>'id','share_url',p.data->>'share_url','status',p.data->>'status','updated_at',p.data->>'updated_at','outcome',jsonb_build_object('message',p.data#>>'{outcome,message}')) AS value
+      FROM reading_listening67.web_share_practice_attempt p WHERE s.practice AND s."attemptId" IS NOT NULL AND p.attempt_id=a.id) ap ON true`:''}`,[JSON.stringify([...unique.values()])])).rows.map(({practiceEnabled,practiceReadonly,...row})=>practiceEnabled?{...row,practice:readingPracticeView(row.practice),...(practiceReadonly?{attemptPractice:row.attemptPractice?{...readingPracticeView(row.attemptPractice),readonly:true}:{status:'unavailable',errorCode:'PRACTICE_SNAPSHOT_NOT_FOUND',readonly:true}}:{})}:row);
   };
   const sessions=async()=>{
     const students=[...new Set(guards.filter(g=>g.kind==='student').map(g=>g.hash))],teachers=[...new Set(guards.filter(g=>g.kind==='teacher').map(g=>g.hash))];

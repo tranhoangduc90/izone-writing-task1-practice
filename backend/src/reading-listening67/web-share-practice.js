@@ -3,6 +3,7 @@ import {randomUUID} from 'node:crypto';
 import {readSpeakingShare} from './vendor/speaking-share-reader.js';
 import {analyzeChatbotCompletion,validateCompletion,speakingMessages,speakingFingerprint} from './vendor/speaking-completion-policy.js';
 import {WebGradingError} from './web-grader.js';
+import {readingPracticeView as publicRow} from './web-practice-view.js';
 const args=s=>[s.ownerId,s.courseId,s.code,s.version];
 const where='owner_id=$1 AND course_id=$2 AND assignment_code=$3 AND content_version=$4';
 const policy='reading-skimming-l1-share-20261029-v1';
@@ -30,7 +31,6 @@ export async function verifyReadingPractice(conversation,target,analyze=analyzeC
  return {status:proof?'accepted':'rejected',policy,fingerprint:speakingFingerprint(messages),evidence:proof,acceptanceBasis:completion?'chatbot_completion':proof?'stopping_rule':null,message:proof?'Chatbot đã kết thúc bài luyện; phần luyện được công nhận.':'Chưa thấy chatbot xác nhận hoàn thành toàn bộ bài luyện. Hãy tiếp tục luyện rồi cập nhật link chia sẻ.'};
 }
 export function createReadingSharePractice({db,content,readShare=readSpeakingShare,verify=verifyReadingPractice,onProgress=async()=>{}}){
- const publicRow=row=>row?{id:row.id,url:row.share_url,status:row.status,message:row.outcome?.message||({queued:'Đã lưu link, đang chờ kiểm tra.',processing:'Đang đọc và kiểm tra hội thoại.',needs_review:'Chưa rõ kết quả kiểm. Link đã được giữ để đối soát.',retry:'Chưa đọc được hội thoại. Bạn có thể thử lại.'}[row.status]||''),updatedAt:row.updated_at}: {url:'',status:'not_started',message:'Dán link chia sẻ sau khi luyện xong.'};
  async function status(scope,attemptId){
   if(attemptId){const saved=(await db.query('SELECT p.data FROM reading_listening67.web_share_practice_attempt p JOIN reading_listening67.web_attempt a ON a.id=p.attempt_id WHERE a.owner_id=$1 AND a.course_id=$2 AND a.assignment_code=$3 AND a.content_version=$4 AND a.id=$5',[...args(scope),attemptId])).rows[0];if(!saved)throw new WebGradingError('PRACTICE_SNAPSHOT_NOT_FOUND',404);return {...publicRow(saved.data),readonly:true};}
   return publicRow((await db.query('SELECT * FROM reading_listening67.web_share_practice WHERE '+where,args(scope))).rows[0]);
@@ -46,6 +46,7 @@ export function createReadingSharePractice({db,content,readShare=readSpeakingSha
    if(old)await tx.query('INSERT INTO reading_listening67.web_share_practice_history(id,owner_id,course_id,assignment_code,content_version,request_id,data) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb) ON CONFLICT DO NOTHING',[old.id,...args(scope),old.request_id,JSON.stringify(old)]);
    const id=randomUUID();
    const row=(await tx.query(`INSERT INTO reading_listening67.web_share_practice(id,owner_id,course_id,assignment_code,content_version,share_url,request_id,status) VALUES($1,$2,$3,$4,$5,$6,$7,'queued') ON CONFLICT(owner_id,course_id,assignment_code,content_version) DO UPDATE SET id=EXCLUDED.id,share_url=EXCLUDED.share_url,request_id=EXCLUDED.request_id,status='queued',snapshot=NULL,outcome=NULL,analysis_intent=false,analysis_response=NULL,lease_token=NULL,lease_until=NULL,updated_at=now() RETURNING *`,[id,...args(scope),url,requestId])).rows[0];
+   tx.afterCommit?.(()=>db.wakeWork?db.wakeWork('practice'):db.workCoordinator?.wake('practice'));
    return publicRow(row);
   });
  }
@@ -54,12 +55,16 @@ export function createReadingSharePractice({db,content,readShare=readSpeakingSha
   const row=(await tx.query('SELECT * FROM reading_listening67.web_share_practice WHERE '+where+' FOR UPDATE',args(scope))).rows[0];if(row?.status!=='accepted')throw new WebGradingError('PRACTICE_NOT_ACCEPTED',422);
   await tx.query('INSERT INTO reading_listening67.web_share_practice_attempt(attempt_id,practice_id,data) VALUES($1,$2,$3::jsonb) ON CONFLICT DO NOTHING',[attemptId,row.id,JSON.stringify(row)]);
  }
- async function once(){
+ async function once(preclaimed){
+  if(preclaimed&&(preclaimed.assignment_code!==content.code||preclaimed.content_version!==content.version||preclaimed.status!=='processing'||!preclaimed.lease_token))throw new WebGradingError('SHARE_SCOPE_CHANGED',409);
+  let row=preclaimed;
+  if(!row){
   await db.query(`UPDATE reading_listening67.web_share_practice SET status=CASE WHEN analysis_intent AND analysis_response IS NULL THEN 'needs_review' ELSE 'queued' END,lease_token=NULL,lease_until=NULL WHERE status='processing' AND lease_until<now() AND assignment_code=$1 AND content_version=$2`,[content.code,content.version]);
-  const row=await db.transaction(async tx=>{
+  row=await db.transaction(async tx=>{
    const picked=(await tx.query(`SELECT * FROM reading_listening67.web_share_practice WHERE status='queued' AND assignment_code=$1 AND content_version=$2 ORDER BY updated_at FOR UPDATE SKIP LOCKED LIMIT 1`,[content.code,content.version])).rows[0];if(!picked)return null;
    return (await tx.query("UPDATE reading_listening67.web_share_practice SET status='processing',lease_token=$2,lease_until=now()+interval '5 minutes',updated_at=now() WHERE id=$1 RETURNING *",[picked.id,randomUUID()])).rows[0];
-  });if(!row)return;
+  });
+  }if(!row)return false;
   const guarded='id=$1 AND lease_token=$2 AND status=\'processing\'';
   const update=async(sql,values=[])=>{const result=await db.query('UPDATE reading_listening67.web_share_practice SET '+sql+' WHERE '+guarded+' RETURNING id',[row.id,row.lease_token,...values]);if(result.rows.length!==1)throw new WebGradingError('SHARE_SCOPE_CHANGED',409);};
   let called=false;
@@ -75,7 +80,19 @@ export function createReadingSharePractice({db,content,readShare=readSpeakingSha
     const done=(await tx.query('UPDATE reading_listening67.web_share_practice SET status=$3,outcome=$4::jsonb,lease_token=NULL,lease_until=NULL,updated_at=now() WHERE '+guarded+' RETURNING id',[row.id,row.lease_token,outcome.status,JSON.stringify(outcome)])).rows[0];if(!done)throw new WebGradingError('SHARE_SCOPE_CHANGED',409);
     await onProgress(tx,{ownerId:row.owner_id,courseId:row.course_id,code:row.assignment_code,version:row.content_version},row.id,outcome);
    });
-  }catch(error){if(error.code==='SHARE_SCOPE_CHANGED')return;await update("status=$3,outcome=$4::jsonb,lease_token=NULL,lease_until=NULL,updated_at=now()",[called||error.code==='SHARE_OUTCOME_UNKNOWN'?'needs_review':'retry',JSON.stringify({message:called?'Chưa rõ kết quả kiểm; cần đối soát trước khi gọi lại.':'Chưa đọc được link. Kiểm tra link chia sẻ công khai rồi thử lại.',errorCode:error.code||'SHARE_READ_FAILED'})]);}
+  }catch(error){if(error.code==='SHARE_SCOPE_CHANGED')return true;await update("status=$3,outcome=$4::jsonb,lease_token=NULL,lease_until=NULL,updated_at=now()",[called||error.code==='SHARE_OUTCOME_UNKNOWN'?'needs_review':'retry',JSON.stringify({message:called?'Chưa rõ kết quả kiểm; cần đối soát trước khi gọi lại.':'Chưa đọc được link. Kiểm tra link chia sẻ công khai rồi thử lại.',errorCode:error.code||'SHARE_READ_FAILED'})]);}
+  return true;
  }
- return {status,save,once,requireAccepted,attachAttempt};
+ return {status,save,once,requireAccepted,attachAttempt,coordination:db.workCoordinator?{coordinator:db.workCoordinator,scope:{code:content.code,version:content.version}}:null};
+}
+
+export function createReadingShareWorker({practice,onError=()=>{},setTimer=setTimeout,clearTimer=clearTimeout}){
+ let closed=false,started=false,timer=null,pending=null,registration=null;
+ async function tick(job){
+  if(closed||pending)return false;
+  pending=practice.once(job);
+  try{return await pending;}catch(error){try{onError(error);}catch{}return false;}
+  finally{pending=null;if(!closed&&!registration){timer=setTimer(tick,1000);timer?.unref?.();}}
+ }
+ return {start(){if(closed||started)return;started=true;if(practice.coordination){const {coordinator,scope}=practice.coordination;registration=coordinator.register({lane:'practice',scope,run:tick,batchClaim:true,onError});}else void tick();},async close(){closed=true;clearTimer(timer);await registration?.close();await pending;}};
 }

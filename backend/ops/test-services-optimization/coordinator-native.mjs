@@ -11,6 +11,7 @@ import {createReading67Homework} from '../../src/reading-listening67/web-homewor
 import {claimWebWorkBatch,releaseUnstartedWebWork} from '../../src/reading-listening67/web-work-claims.js';
 import {createReading67WebRouter} from '../../src/reading-listening67/web-routes.js';
 import {registerObservationNativeTests} from './observation-native.mjs';
+import {registerPracticeNativeTests} from './practice-native.mjs';
 const connectionString=process.env.TEST_SERVICES_DATABASE_URL;
 if(!connectionString||new URL(connectionString).pathname!=='/test_services_optimization_20261101')throw Error('ISOLATED_FIXTURE_DATABASE_REQUIRED');
 const db=createReading67Postgres({connectionString,max:4});
@@ -24,6 +25,7 @@ const save=(store,s,tag,baseRevision=0,mutationId=randomUUID())=>store.save(s,{b
 const submit=(store,s,revision=1,requestId=randomUUID())=>store.submit(s,{revision,requestId});
 async function until(predicate,timeout=5000){const end=Date.now()+timeout;while(Date.now()<end){if(await predicate())return;await new Promise(r=>setTimeout(r,10));}throw Error('FIXTURE_WAIT_TIMEOUT');}
 test.after(()=>db.close());
+registerPracticeNativeTests({db,connectionString});
 
 test('Commit callbacks run after durable commit; rollback and lost wake cannot invalidate a saved draft',async()=>{
  const s=scope('commit');let observed;

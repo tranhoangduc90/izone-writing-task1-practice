@@ -1,6 +1,6 @@
 /** Shared admission and native batch claims for one product database. */
 import {claimWebWorkBatch,releaseUnstartedWebWork} from './web-work-claims.js';
-const intervals = {grading:750,docs:500};
+const intervals = {grading:750,docs:500,practice:1000};
 const scopeKey = scope => JSON.stringify([scope.code,scope.version]);
 
 export function createWebWorkCoordinator({db,clock=Date.now,setTimer=setTimeout,clearTimer=clearTimeout}) {
@@ -97,6 +97,11 @@ export async function selectReadyWebScopes(db,lane,scopes) {
       ${validation?'LEFT JOIN reading_listening67.web_validation v ON v.job_id=j.id':''}
       WHERE j.status='queued' ${validation?'AND (NOT s.validation OR v.next_attempt_at IS NULL OR v.next_attempt_at<=now())':''}
       GROUP BY a.assignment_code,a.content_version ORDER BY ready_at,a.assignment_code,a.content_version`;
+  } else if(lane==='practice'){
+    query=`WITH scopes AS (${scopeSql}) SELECT j.assignment_code AS code,j.content_version AS version,min(j.updated_at) AS ready_at
+      FROM reading_listening67.web_share_practice j JOIN scopes s ON s.code=j.assignment_code AND s.version=j.content_version
+      WHERE j.status='queued' OR (j.status='processing' AND j.lease_until<now())
+      GROUP BY j.assignment_code,j.content_version ORDER BY ready_at,j.assignment_code,j.content_version`;
   } else {
     query=`WITH scopes AS (${scopeSql}) SELECT b.assignment_code AS code,b.content_version AS version,min(j.created_at) AS ready_at
       FROM reading_listening67.web_homework_job j JOIN reading_listening67.web_homework_binding b ON b.id=j.binding_id

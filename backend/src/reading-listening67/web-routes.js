@@ -26,7 +26,7 @@ export function createReading67WebRouter({store,content,grader,authenticate,iden
   const saveResponse=(q,value)=>{if(q.query.ack!=='compact-v1')return {ok:true,...value};const {body:_body,...receipt}=value;return {ok:true,...receipt,responseFormat:'draft-ack-v1'};};
   const requireOpen=()=>{if(config.studentsOpen===false)throw new WebGradingError('CLASS_NOT_OPEN',423);};
   const observing=!!(store?.observations&&identity?.observeStudent&&identity?.observeTeacher);
-  const observedScope=(s,q)=>({...s,...(q.query.attemptId?{attemptId:parse(id,q.query.attemptId)}:{})});
+  const observedScope=(s,q)=>({...s,...(practice?{practice:true}:{}),...(q.query.attemptId?{attemptId:parse(id,q.query.attemptId)}:{})});
   async function observedStatus(s,q,r){const value=await store.observations.readOnce(observedScope(s,q));if(value.attemptMissing)throw new WebGradingError('ATTEMPT_NOT_FOUND',404);r.json({ok:true,...value});}
   async function observedStream(s,q,r,guard,document){const selected=observedScope(s,q);if(selected.attemptId)await store.attempt(s,selected.attemptId);openWebObservationStream({request:q,response:r,hub:store.observations,scope:selected,guard,document});}
   if(registerCta){
@@ -39,7 +39,7 @@ export function createReading67WebRouter({store,content,grader,authenticate,iden
     }));
   }
   if(identity){
-    router.get('/config',(_q,r)=>r.json({ok:true,version:4,autoRole:true,title:content.title,code:content.code,lesson:content.lesson||10,type:content.type||'materials',...config,capabilities:{compactDraftAck:true,stateStream:observing},...(ownerEntry?{ownerEntry:ownerEntry.publicPolicy}:{})}));
+    router.get('/config',(_q,r)=>r.json({ok:true,version:4,autoRole:true,title:content.title,code:content.code,lesson:content.lesson||10,type:content.type||'materials',...config,capabilities:{compactDraftAck:true,stateStream:observing,practiceState:observing&&!!practice},...(ownerEntry?{ownerEntry:ownerEntry.publicPolicy}:{})}));
     if(ownerEntry)router.get('/entry',route(async(q,r)=>{requireOpen();const documentId=parse(z.string().regex(/^[A-Za-z0-9_-]{20,200}$/),q.query.documentId);r.set('Cache-Control','no-store').json({ok:true,entry:await ownerEntry.resolve(documentId)});}));
     router.get('/classes',route(async(_q,r)=>r.json({ok:true,classes:await identity.classes()})));
     router.get('/classes/:classId/students',route(async(q,r)=>r.json({ok:true,students:await identity.roster(q.params.classId)})));

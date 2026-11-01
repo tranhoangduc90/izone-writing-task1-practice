@@ -1,0 +1,9 @@
+--- writer/parser.mjs
++++ writer/parser.mjs
+@@ -234,5 +234,5 @@
+     .replace(/^(?:["“”]|&quot;)+|(?:["“”]|&quot;)+$/g, '')
+     .trim();
+-  return sanitizeHtml(`<p>${normalizeStudentVoiceHtml(commentHtml)}</p>`);
++  return sanitizeHtml(`<p>${commentHtml}</p>`);
+ }
+ function validateStructuredCorrection(correction, index) {

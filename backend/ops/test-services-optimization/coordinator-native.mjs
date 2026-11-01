@@ -3,11 +3,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
+import express from 'express';
 import {createReading67Postgres} from '../../src/reading-listening67/web-postgres.js';
 import {createReading67WebStore,createReading67WebWorker} from '../../src/reading-listening67/web-store.js';
 import {createWebWorkCoordinator,selectReadyWebScopes} from '../../src/reading-listening67/web-work-coordinator.js';
 import {createReading67Homework} from '../../src/reading-listening67/web-homework.js';
 import {claimWebWorkBatch,releaseUnstartedWebWork} from '../../src/reading-listening67/web-work-claims.js';
+import {createReading67WebRouter} from '../../src/reading-listening67/web-routes.js';
 const connectionString=process.env.TEST_SERVICES_DATABASE_URL;
 if(!connectionString||new URL(connectionString).pathname!=='/test_services_optimization_20261101')throw Error('ISOLATED_FIXTURE_DATABASE_REQUIRED');
 const db=createReading67Postgres({connectionString,max:4});
@@ -127,6 +129,43 @@ test('A post-commit wake failure preserves the save and submission and a peer fi
   const sent=await submit(store,s);await until(async()=> (await store.attempt(s,sent.attemptId)).status==='done');
   assert.equal((await store.draft(s)).body.answers.answer,'durable');assert.equal((await store.history(s)).length,1);
  }finally{await handle.close();await writer.close();await reader.close();}
+});
+
+test('Native HTTP handoff keeps legacy and compact clients compatible across two service instances',async()=>{
+ const previous=createReading67Postgres({connectionString,max:2}),candidate=createReading67Postgres({connectionString,max:2,workCoordinatorEnabled:true});
+ const s=scope('http-handoff'),other={...s,ownerId:randomUUID()},oldStore=createReading67WebStore({db:previous,grader,jobScope:s}),newStore=createReading67WebStore({db:candidate,grader,jobScope:s});
+ const servers=[];
+ async function endpoint(store){
+  const app=express();app.use('/api',createReading67WebRouter({store,content:{code:s.code,version:s.version},grader,authenticate:q=>q.headers.authorization==='Bearer fixture-A'?s:q.headers.authorization==='Bearer fixture-B'?other:null}));
+  const server=app.listen(0,'127.0.0.1');servers.push(server);await new Promise(resolve=>server.once('listening',resolve));
+  return 'http://127.0.0.1:'+server.address().port+'/api';
+ }
+ async function call(base,path,{method='GET',value,owner='A',status=200}={}){
+  const response=await fetch(base+path,{method,headers:{'Content-Type':'application/json',Authorization:'Bearer fixture-'+owner},...(value?{body:JSON.stringify(value)}:{})});
+  const data=await response.json();assert.equal(response.status,status,JSON.stringify(data));return data;
+ }
+ let worker;
+ try{
+  const oldUrl=await endpoint(oldStore),newUrl=await endpoint(newStore);
+  const first={baseRevision:0,mutationId:randomUUID(),body:body('legacy value')};
+  const oldAck=await call(oldUrl,'/draft',{method:'PUT',value:first});assert.equal(oldAck.revision,1);assert.deepEqual(oldAck.body,first.body);
+  const second={baseRevision:1,mutationId:randomUUID(),body:{...body('candidate value'),notes:'Giữ nguyên qua chuyển bản và thử lại. '.repeat(250)}};
+  const compact=await call(newUrl,'/draft?ack=compact-v1',{method:'PUT',value:second});assert.equal(compact.revision,2);assert.equal(compact.body,undefined);
+  // Retry the same mutation on the other instance, as after a lost response or routing change.
+  const retry=await call(oldUrl,'/draft',{method:'PUT',value:second});assert.equal(retry.revision,2);assert.deepEqual(retry.body,second.body);assert.equal(retry.savedAt,compact.savedAt);
+  const requestId=randomUUID(),sent=await call(oldUrl,'/submit',{method:'POST',value:{revision:2,requestId},status:202});
+  const again=await call(newUrl,'/submit',{method:'POST',value:{revision:2,requestId},status:202});assert.equal(again.attemptId,sent.attemptId);
+  await call(newUrl,'/attempts/'+sent.attemptId,{owner:'B',status:404});await call(newUrl,'/draft',{owner:'unknown',status:401});
+  const grading={...grader,prepareWeb:(_answers,jobId)=>({jobId}),async finish({jobId}){const row=(await candidate.query('SELECT a.input_hash FROM reading_listening67.web_job j JOIN reading_listening67.web_attempt a ON a.id=j.attempt_id WHERE j.id=$1',[jobId])).rows[0];return result({jobId,inputHash:row.input_hash});}};
+  worker=createReading67WebWorker({store:newStore,grader:grading});worker.start();
+  await until(async()=> (await call(oldUrl,'/attempts/'+sent.attemptId)).status==='done');
+  const next={baseRevision:2,mutationId:randomUUID(),body:body('new draft after submit')};
+  const parallel=await Promise.all([call(oldUrl,'/draft',{method:'PUT',value:next}),call(newUrl,'/draft?ack=compact-v1',{method:'PUT',value:next})]);assert.ok(parallel.every(r=>r.revision===3));
+  const saved=await call(newUrl,'/draft');assert.deepEqual(saved.body,next.body);assert.equal(saved.revision,3);
+  const historical=await call(newUrl,'/attempts/'+sent.attemptId);assert.deepEqual(historical.snapshot,second.body);assert.equal((await call(oldUrl,'/attempts')).attempts.length,1);
+ }finally{
+  await worker?.close();await Promise.all(servers.map(server=>new Promise(resolve=>server.close(resolve))));await previous.close();await candidate.close();
+ }
 });
 
 test('Native idle benchmark: six Docs lessons retain 500-ms checks with at least 70 percent fewer database admissions',async()=>{

@@ -21,6 +21,8 @@ export function createReading67WebRouter({store,content,grader,authenticate,iden
   const ref=z.object({classId:z.string().regex(/^-?[1-9]\d{0,18}$/),studentRef:z.uuid()}).strict();
   const makeScope=person=>({ownerId:person.ownerId,courseId:person.courseId,code:content.code,version:content.version});
   const scope=q=>makeScope(q.webIdentity);
+  // Client mới chỉ cần biên nhận; receipt bền và GET nháp vẫn giữ nguyên toàn bộ bài.
+  const saveResponse=(q,value)=>{if(q.query.ack!=='compact-v1')return {ok:true,...value};const {body:_body,...receipt}=value;return {ok:true,...receipt,responseFormat:'draft-ack-v1'};};
   const requireOpen=()=>{if(config.studentsOpen===false)throw new WebGradingError('CLASS_NOT_OPEN',423);};
   if(registerCta){
     const text=z.string().trim().min(1).max(200);
@@ -57,7 +59,7 @@ export function createReading67WebRouter({store,content,grader,authenticate,iden
     router.post('/practice',route(async(q,r)=>r.status(202).json(await practice.save(scope(q),parse(z.object({url:z.string().min(1).max(500),requestId:z.uuid()}).strict(),q.body)))));
   }
   router.get('/homework',route(async(q,r)=>r.json({ok:true,...(homework?await homework.status(scope(q)):{status:'not_applicable'})})));
-  router.put('/draft',route(async(q,r)=>r.json({ok:true,...await store.save(scope(q),parse(lessonSaveInput,q.body))})));
+  router.put('/draft',route(async(q,r)=>r.json(saveResponse(q,await store.save(scope(q),parse(lessonSaveInput,q.body))))));
   router.post('/submit',route(async(q,r)=>r.status(202).json({ok:true,...await store.submit(scope(q),parse(submitInput,q.body))})));
   router.get('/attempts',route(async(q,r)=>r.json({ok:true,attempts:await store.history(scope(q)),archives:await store.archives(scope(q)),firstCompleted:await store.firstCompleted(scope(q))})));
   router.post('/reset',route(async(q,r)=>r.json({ok:true,...await store.reset(scope(q),parse(z.object({baseRevision:z.number().int().nonnegative(),mutationId:z.uuid()}).strict(),q.body))})));

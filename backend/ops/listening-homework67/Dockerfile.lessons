@@ -8,4 +8,8 @@ COPY backend/src/listening-homework67/lesson-router.js /app/src/listening-homewo
 COPY backend/src/reading-listening67/web-store.js /app/src/reading-listening67/web-store.js
 COPY backend/src/reading-listening67/web-homework.js /app/src/reading-listening67/web-homework.js
 COPY backend/src/reading-listening67/web-homework-code-guard.js /app/src/reading-listening67/web-homework-code-guard.js
+COPY backend/src/reading-listening67/web-owner-entry.js /app/src/reading-listening67/web-owner-entry.js
+COPY backend/src/reading-listening67/web-routes.js /app/src/reading-listening67/web-routes.js
+COPY backend/src/reading-listening67/web-homework-runtime.js /app/src/reading-listening67/web-homework-runtime.js
+COPY backend/src/reading-listening67/web-homework-cta.js /app/src/reading-listening67/web-homework-cta.js
 COPY backend/scripts/serve-listening-homework67.mjs /app/scripts/serve-listening-homework67.mjs

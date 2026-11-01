@@ -1,0 +1,10 @@
+# Overlay only the owner-entry integration on the exact Listening image inspected.
+# Keep grader, model/pins, audio, lesson registry, database and worker implementation.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+COPY backend/src/listening-homework67/app.js /app/src/listening-homework67/app.js
+COPY backend/src/reading-listening67/web-owner-entry.js /app/src/reading-listening67/web-owner-entry.js
+COPY backend/src/reading-listening67/web-routes.js /app/src/reading-listening67/web-routes.js
+COPY backend/src/reading-listening67/web-homework-runtime.js /app/src/reading-listening67/web-homework-runtime.js
+COPY backend/src/reading-listening67/web-homework.js /app/src/reading-listening67/web-homework.js
+COPY backend/src/reading-listening67/web-homework-cta.js /app/src/reading-listening67/web-homework-cta.js

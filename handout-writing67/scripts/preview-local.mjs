@@ -22,9 +22,10 @@ const schema=await db.query("SELECT schema_name FROM information_schema.schemata
 if(!schema.rows.length)for(const file of ['001-initial.sql','002-activity-log.sql'])await db.exec(await readFile(new URL('../db/'+file,import.meta.url),'utf8'));
 const render=await promptRenderer(resolve(root,'registry.preview.private.json'));
 const students=[{studentRef:'preview-new',displayName:'Học viên mẫu · Tự làm thử'},{studentRef:'preview-complete',displayName:'Học viên mẫu · Bài minh họa hai thân bài'},{studentRef:'preview-qa',displayName:'Học viên mẫu · Kiểm chức năng'}];
-const roster=async()=>[{classRef:'DEMO-L11',className:'Lesson 11 · Lớp xem thử',students},{classRef:'IC2304',className:'Mẫu hồi quy Lesson 5/7/9 · dữ liệu giả',students}];
+const previewClasses=[...new Set(Object.values(render.lessons).flatMap(l=>l.classes||[]))];
+const roster=async()=>previewClasses.map(classRef=>({classRef,className:classRef+' · Lớp xem thử, dữ liệu giả',students}));
 const store=createStore(db),service=createService({store,roster,secret:secrets.student,renderJob:render,lessons:render.lessons,retryDelays:[0,5000,15000]});
-const actor={email:'preview@izone.test',displayName:'Giảng viên bản xem thử',classes:['DEMO-L11','IC2304']};
+const actor={email:'preview@izone.test',displayName:'Giảng viên bản xem thử',classes:previewClasses};
 const realTeacher=createTeacher({db,store,roster,secret:secrets.teacher,lessons:render.lessons,registry:()=>({clientId:'',teachers:[]}),verifyGoogleToken:async()=>{throw new Error('PREVIEW_ONLY');}});
 // GV mẫu chỉ cho server loopback này. Bộ xác thực runtime/SSO phát hành giữ nguyên.
 const teacher={...realTeacher,authorize:()=>actor};
@@ -51,6 +52,8 @@ const server=createServer(async(req,res)=>{
 await new Promise(r=>server.listen(port,'127.0.0.1',r));
 let active=0,claiming=false;
 setInterval(async()=>{if(claiming||active>=2)return;claiming=true;try{while(active<2){const [job]=await service.claim();if(!job)break;active++;void processor.process(job).catch(e=>console.error('PREVIEW_JOB_ERROR',e.code||e.message)).finally(()=>active--);}}finally{claiming=false;}},500).unref();
-console.log('PREVIEW_READY '+origin+'/writing-handouts/lesson11/');
+const activity=process.env.HANDOUT67_PREVIEW_ACTIVITY||'lesson11';
+if(!Object.hasOwn(render.lessons,activity))throw new Error('PREVIEW_LESSON_INVALID');
+console.log('PREVIEW_READY '+origin+'/writing-handouts/'+activity+'/');
 async function close(){server.close();api.close();processor.close();await db.close();process.exit();}
 process.on('SIGINT',close);process.on('SIGTERM',close);

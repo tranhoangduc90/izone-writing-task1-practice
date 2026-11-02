@@ -2,7 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {dashboardProjection,markDashboardActivity} from '../src/dashboard.mjs';
 import {ORDER} from '../src/service.mjs';
+import {workflowFor} from '../src/workflow.mjs';
 const fixture=()=>({ref:'fixture',responses:{idea1:'Ý 1',idea2:'Ý 2',topicSentence:'Topic',a1:'',x1:'',b1:'',a2:'',x2:'',b2:''},steps:Object.fromEntries(ORDER.map(k=>[k,{status:'draft',history:[]}])),jobs:[],vocabulary:{},commentThreads:[],idea2Open:false});
+
+test('L13-DASH · ô điều kiện tùy chọn không kéo tiến độ hai mức hoàn toàn xuống dưới100%',()=>{
+ const s={...fixture(),workflowMode:'whole-chain-v1',handoutMode:'two-bodies-v1',preparationMode:'ideas-first-v1',preparationKind:'opinion-v1',bodyProgress:{1:{idea2Open:true},2:{idea2Open:true}}};
+ const policy=workflowFor(s);s.steps=Object.fromEntries(policy.order.map(k=>[k,{status:'passed',history:[]}]));s.responses=Object.fromEntries(Object.values(policy.fields).flat().map(k=>[k,'Đã viết']));s.responses.positionLimit='';
+ for(const level of ['Đồng ý hoàn toàn','Phản đối hoàn toàn']){s.responses.agreementLevel=level;const d=dashboardProjection(s);assert.equal(d.filled,20);assert.equal(d.totalFields,20);assert.equal(d.state,'complete');}
+ s.responses.agreementLevel='Đồng ý một phần';assert.equal(dashboardProjection(s).totalFields,21);assert.equal(dashboardProjection(s).filled,20);s.responses.positionLimit='Khi tổ chức cần đổi mới';assert.equal(dashboardProjection(s).filled,21);
+ assert.equal(dashboardProjection(fixture()).totalFields,undefined);
+});
 test('H67-DASH-COUNTS · retries/vocab/attestation không tăng Check; cổng ý2 và nguồn thông qua đúng',()=>{
  const s=fixture();s.jobs=[{jobRef:'g1',kind:'grade',section:'topic',tries:3,status:'failed',createdAt:10},{jobRef:'v1',kind:'vocab',ideaIndex:1,status:'completed',createdAt:20}];
  s.steps.topic.history=[{status:'revision'}];let d=dashboardProjection(s,100);assert.equal(d.checks,1);assert.equal(d.aiComments,1);assert.equal(d.filled,3);assert.equal(d.processing.topic.tries,3);assert.equal(d.stepStates.b1.available,false);

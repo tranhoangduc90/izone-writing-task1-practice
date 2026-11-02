@@ -56,3 +56,13 @@ Trước đổi, giữ image, file rubric, cấu hình runtime và revision Page
 ## Kiểm theo rủi ro
 
 Kiểm cùng học viên ở hai lesson, đúng topic/version trong job, GV lọc đúng activity, token khác phiên bị chặn và class ngoài phạm vi bị chặn. Kiểm prompt pin qua retry và các ca core hiện có. Trên browser, so giao diện với mẫu và kiểm hai ý, vocab, Edit, trao đổi, reload và mobile. Fixture giả chỉ chứng minh UI/contract; ghi riêng bằng chứng AI thật và readback sau phát hành.
+
+## Lesson 13: lập trường trong cùng hành trình hai thân bài
+
+`lesson-definitions/lesson13.json` chỉ chứa cấu hình công khai. Ghép nó với rubric riêng tư trong registry; không dùng file này làm registry độc lập. Lesson 13 dùng `whole-chain-v1`, `two-bodies-v1`, `ideas-first-v1` như Lesson 11, thêm `preparationKind: opinion-v1` và hai `solutionOptions` theo thứ tự phía đồng ý / phía phản đối nhận định của đề.
+
+Outline có `agreementLevel`, `chosenSolution`, `positionLimit` và bốn idea. Ba mức là Đồng ý hoàn toàn, Phản đối hoàn toàn, Đồng ý một phần. Hai mức đầu phải chọn đúng phía tương ứng; mức một phần được nghiêng về mỗi phía nhưng bắt buộc có điều kiện/giới hạn. Body1 luôn đánh giá phía không chọn; body2 luôn bảo vệ phía chọn. Sửa bất kỳ trường outline nào giữ chữ/lịch sử nhưng hủy hiệu lực các phê duyệt, job và từ vựng phụ thuộc. Callback đã cũ không được khôi phục chúng. Các bài không bật biến thể này giữ nguyên schema và prompt.
+
+`rosterScope: lesson` đọc riêng `lessonClasses[activity]` từ nguồn roster. Thiếu nhánh phải báo lỗi nguồn, không lấy nhầm `classes` cũ. Teacher registry có thể cấp `lessonClasses: {lesson13: [mã_lớp]}` bên cạnh `classes` cũ; grant mới không mở Lesson 11. Runtime allowlist và definition của từng lesson vẫn cùng được kiểm. Mã lớp ở definition là ảnh nguồn triển khai, cần đối chiếu lại roster/mapping khi phát hành.
+
+Preview cách ly: `HANDOUT67_PREVIEW_ACTIVITY=lesson13` cùng `HANDOUT67_PREVIEW_DATA` và `HANDOUT67_PREVIEW_PAGES` mở local server tại loopback. Registry/token đặt ngoài Git. Preview dùng PGlite và tài khoản GV mẫu riêng, không được phát hành cơ chế bỏ qua xác thực này. Có thể gọi cổng AI thật nếu runtime preview đã được cấu hình như vậy; nhãn preview phải nói rõ.

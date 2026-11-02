@@ -4,7 +4,7 @@ import {publicThreads, changeThread} from './comments.mjs';
 import {LEGACY_LESSON5,publicLesson} from './lessons.mjs';
 
 export const PRODUCT = 'handout-writing67';
-import {ORDER,FIELDS,workflowFor,isWhole,isMulti,isPrepared,PREPARATION,PLAN_FIELDS,SOLUTIONS,bodyView,bodyKey,bodyIndexOf,localKey,vocabularyKey,jobStateKey,sectionFor,ideaPassed,available,vocabEligible,vocabFields,GUIDED} from './workflow.mjs';
+import {ORDER,FIELDS,workflowFor,isWhole,isMulti,isPrepared,isOpinion,PREPARATION,planFields,solutionsFor,preparationContext,preparationError,requiredFields,AGREEMENT_LEVELS,bodyView,bodyKey,bodyIndexOf,localKey,vocabularyKey,jobStateKey,sectionFor,ideaPassed,available,vocabEligible,vocabFields,GUIDED} from './workflow.mjs';
 export {ORDER,FIELDS} from './workflow.mjs';
 export const TOPIC = LEGACY_LESSON5.topic;
 export const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -17,12 +17,13 @@ const passed = (s,key) => s.steps[key].status==='passed';
 
 
 // Chỉ đối chiếu những trường thật sự được prompt dùng; snapshot đầy đủ vẫn giữ cho audit.
-export function dependencies(section,ideaIndex,workflowMode,bodyIndex,preparationMode){
+export function dependencies(section,ideaIndex,workflowMode,bodyIndex,preparationMode,preparationKind){
   if(preparationMode===PREPARATION){
-    if(section==='outline')return PLAN_FIELDS;
+    const fields=planFields({preparationKind});
+    if(section==='outline')return fields;
     const b=bodyIndexOf(section)||bodyIndex,local=section?localKey(section):null;
     const own=!section?vocabFields(ideaIndex,b):local==='topic'?[bodyKey(b,'topicSentence')]:[bodyKey(b,'topicSentence'),...vocabFields(ideaIndex,b),...(local==='si2'?vocabFields(1,b):[])];
-    return [...new Set([...PLAN_FIELDS,...own])];
+    return [...new Set([...fields,...own])];
   }
   const b=bodyIndexOf(section)||bodyIndex;
   if(b)return dependencies(section?localKey(section):null,ideaIndex,workflowMode).map(k=>bodyKey(b,k));
@@ -31,14 +32,14 @@ export function dependencies(section,ideaIndex,workflowMode,bodyIndex,preparatio
   if(section==='topic')return FIELDS.topic;
   return [...new Set([section,'idea'+ideaIndex,'topicSentence',...(section[0]==='x'?['a'+ideaIndex]:[]),...(['a','x'].includes(section[0])?['b'+ideaIndex]:[]),...(section==='b2'?['b1']:[])])];
 }
-const relevant = (job,responses) => hash(Object.fromEntries(dependencies(job.section,job.ideaIndex,job.workflowMode,job.bodyIndex,job.preparationMode).map(k=>[k,responses[k]])));
+const relevant = (job,responses) => hash(Object.fromEntries(dependencies(job.section,job.ideaIndex,job.workflowMode,job.bodyIndex,job.preparationMode,job.preparationKind).map(k=>[k,responses[k]])));
 // API trả hai nhánh rõ ràng; storage dùng khóa có tiền tố để transaction chỉ hợp nhất trường đổi.
 export function withBodies(value){
   if(!isMulti(value))return value;
   return {...value,bodies:Object.fromEntries([1,2].map(n=>[n,bodyView(value,n)])),completed:workflowFor(value).order.every(k=>value.steps[k]?.status==='passed')};
 }
 function checkBody(s,input,key){
-  if(isMulti(s)&&(!(isPrepared(s)&&key==='outline'||isPrepared(s)&&key==='chosenSolution'?[0]:[1,2]).includes(input.bodyIndex)||bodyIndexOf(key)!==input.bodyIndex))fail('BODY_IDENTITY_MISMATCH',409);
+  if(isMulti(s)&&(!(isPrepared(s)&&(key==='outline'||planFields(s).includes(key))&&bodyIndexOf(key)===0?[0]:[1,2]).includes(input.bodyIndex)||bodyIndexOf(key)!==input.bodyIndex))fail('BODY_IDENTITY_MISMATCH',409);
 }
 
 export function createService({store, roster, secret, clock=Date.now, leaseMs=300000, sessionMs=43200000, maxLeases=null, maxJobMs=1800000, retryDelays=[0,0,0], renderJob, promptVersion='lesson5-rubric-v3',lessons={lesson5:{...LEGACY_LESSON5,promptVersion}}}) {
@@ -52,7 +53,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     // Lấy job cuối của từng bước/ý trước khi lọc, không hiện lỗi cũ sau lượt mới đã đạt.
     const latest=Object.fromEntries(s.jobs.map(j=>[jobStateKey(j),j]));
     const processing=Object.fromEntries(Object.entries(latest).filter(([,j])=>['queued','leased','failed'].includes(j.status)).map(([key,j])=>[key,{jobRef:j.jobRef,status:j.status,tries:j.tries,maxTries:3,createdAt:j.createdAt,deadlineAt:j.deadlineAt??j.createdAt+maxJobMs,leaseUntil:j.leaseUntil,nextAttemptAt:j.nextAttemptAt??null,error:j.error??null}]));
-    return withBodies({ref:s.ref,activity:s.activity,...(isMulti(s)?{handoutMode:s.handoutMode,bodyProgress:s.bodyProgress,...(isPrepared(s)?{preparationMode:s.preparationMode}:{})}:{}),workflowMode:s.workflowMode||GUIDED,workflowVersion:s.workflowVersion||1,body:s.body||2,classRef:s.classRef,studentRef:s.studentRef,responses:s.responses,version:s.version,idea2Open:s.idea2Open,steps:s.steps,vocabulary:s.vocabulary,teacherComments:publicTeacherComments(s),commentThreads:publicThreads(s),commentVersion:s.commentVersion||0,submittedSections:[...new Set(s.jobs.filter(j=>j.kind==='grade').map(j=>j.section))],processing});
+    return withBodies({ref:s.ref,activity:s.activity,...(isMulti(s)?{handoutMode:s.handoutMode,bodyProgress:s.bodyProgress,...(isPrepared(s)?{preparationMode:s.preparationMode,...preparationContext(s)}:{})}:{}),workflowMode:s.workflowMode||GUIDED,workflowVersion:s.workflowVersion||1,body:s.body||2,classRef:s.classRef,studentRef:s.studentRef,responses:s.responses,version:s.version,idea2Open:s.idea2Open,steps:s.steps,vocabulary:s.vocabulary,teacherComments:publicTeacherComments(s),commentThreads:publicThreads(s),commentVersion:s.commentVersion||0,submittedSections:[...new Set(s.jobs.filter(j=>j.kind==='grade').map(j=>j.section))],processing});
   };
   const issue = ref => {const content=`${ref}.${clock()+sessionMs}`;return `${content}.${sign(content)}`;};
   const authorize = (ref,token) => {
@@ -71,9 +72,9 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     const lesson=lessonFor(s.activity),promptVersion=lesson.promptVersion;
     const bodyIndex=isPrepared(s)&&section==='outline'?0:isMulti(s)?bodyIndexOf(section)||selectedBody:null;
     if(isMulti(s)&&!(isPrepared(s)&&section==='outline'?[0]:[1,2]).includes(bodyIndex))fail('BODY_IDENTITY_MISSING');
-    const snapshot = {activity:s.activity,workflowMode:s.workflowMode||GUIDED,body:bodyIndex??s.body??2,...(isMulti(s)?{bodyIndex,handoutMode:s.handoutMode,...(isPrepared(s)?{preparationMode:s.preparationMode}:{})}:{}),topic:lesson.topic,responses:structuredClone(s.responses),history:section?s.steps[section].history.map(h=>({feedback:h.feedback,status:h.status,snapshot:h.snapshot})):[],ideaIndex};
+    const snapshot = {activity:s.activity,workflowMode:s.workflowMode||GUIDED,body:bodyIndex??s.body??2,...(isMulti(s)?{bodyIndex,handoutMode:s.handoutMode,...(isPrepared(s)?{preparationMode:s.preparationMode,...preparationContext(s)}:{})}:{}),topic:lesson.topic,responses:structuredClone(s.responses),history:section?s.steps[section].history.map(h=>({feedback:h.feedback,status:h.status,snapshot:h.snapshot})):[],ideaIndex};
     const job = {productId:PRODUCT,sessionRef:s.ref,jobRef:randomUUID(),kind,section,ideaIndex,workflowMode:s.workflowMode||GUIDED,snapshotHash:hash(snapshot),snapshot,promptVersion,status:'queued',tries:0,createdAt:clock(),deadlineAt:clock()+maxJobMs,leaseUntil:0,leaseToken:null,attempts:[]};
-    if(bodyIndex!==null&&bodyIndex!==undefined)job.bodyIndex=bodyIndex;if(isPrepared(s))job.preparationMode=s.preparationMode;
+    if(bodyIndex!==null&&bodyIndex!==undefined)job.bodyIndex=bodyIndex;if(isPrepared(s)){job.preparationMode=s.preparationMode;if(isOpinion(s))job.preparationKind=s.preparationKind;}
     job.operationKey = `${PRODUCT}:${job.jobRef}:${job.promptVersion}`;
     job.inputHash=relevant(job,s.responses);
     // Ghim nguyên prompt vào job trước ACK; retry/redeploy giữ cùng payload và operationKey.
@@ -89,7 +90,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
   function vocabulary(s,n,delay=0,b){
     if(!vocabEligible(s,n,b))return;
     const vk=vocabularyKey(s,n,b),latest=s.jobs.find(j=>j.jobRef===s.vocabulary[vk]?.jobRef);
-    const current=hash(Object.fromEntries(dependencies(null,n,s.workflowMode,b,s.preparationMode).map(k=>[k,s.responses[k]])));
+    const current=hash(Object.fromEntries(dependencies(null,n,s.workflowMode,b,s.preparationMode,s.preparationKind).map(k=>[k,s.responses[k]])));
     if(latest&&latest.inputHash===current&&['queued','leased','completed'].includes(latest.status))return;
     for(const j of s.jobs)if(j.kind==='vocab'&&j.ideaIndex===n&&(!isMulti(s)||j.bodyIndex===b))supersede(s,j,'content_changed');
     const v=makeJob(s,'vocab',null,n,b);
@@ -140,14 +141,14 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
   const api = {
     authorizeSession(ref,token) {authorize(ref,token);},
     lesson(activity='lesson5'){return publicLesson(lessonFor(activity));},
-    async roster(activity='lesson5') {const lesson=lessonFor(activity);return (await roster()).filter(c=>!lesson.classes||lesson.classes.includes(c.classRef));},
+    async roster(activity='lesson5') {const lesson=lessonFor(activity);return (await roster(activity,lesson.rosterScope)).filter(c=>!lesson.classes||lesson.classes.includes(c.classRef));},
     async open(input) {
       if (!object(input) || !id(input.activity) || !id(input.classRef) || !id(input.studentRef)) fail('IDENTITY_INVALID');
       const rows=await api.roster(input.activity);
       if (!rows.some(c=>c.classRef===input.classRef && c.students.some(s=>s.studentRef===input.studentRef))) fail('STUDENT_OUT_OF_SCOPE',403);
       const key=JSON.stringify([input.activity,input.classRef,input.studentRef]);
       const lesson=lessonFor(input.activity),policy=workflowFor(lesson);
-      const s=await store.open(key,ref=>({ref,activity:input.activity,handoutMode:lesson.handoutMode,...(isPrepared(lesson)?{preparationMode:lesson.preparationMode}:{}),...(isMulti(lesson)?{bodyProgress:{1:{idea2Open:false},2:{idea2Open:false}}}:{}),workflowMode:lesson.workflowMode||GUIDED,workflowVersion:1,body:lesson.body,classRef:input.classRef,studentRef:input.studentRef,responses:Object.fromEntries(Object.values(policy.fields).flat().map(k=>[k,''])),version:0,idea2Open:false,steps:Object.fromEntries(policy.order.map(k=>[k,{status:'draft',history:[],error:null}])),jobs:[],vocabulary:{},saves:{}}));
+      const s=await store.open(key,ref=>({ref,activity:input.activity,handoutMode:lesson.handoutMode,...(isPrepared(lesson)?{preparationMode:lesson.preparationMode,...preparationContext(lesson)}:{}),...(isMulti(lesson)?{bodyProgress:{1:{idea2Open:false},2:{idea2Open:false}}}:{}),workflowMode:lesson.workflowMode||GUIDED,workflowVersion:1,body:lesson.body,classRef:input.classRef,studentRef:input.studentRef,responses:Object.fromEntries(Object.values(policy.fields).flat().map(k=>[k,''])),version:0,idea2Open:false,steps:Object.fromEntries(policy.order.map(k=>[k,{status:'draft',history:[],error:null}])),jobs:[],vocabulary:{},saves:{}}));
       return {session:publicSession(s),token:issue(s.ref)};
     },
     async read(ref,token) {
@@ -184,8 +185,8 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
         if(prior) {if(prior.section!==input.section || prior.requestHash!==hash(input))fail('REQUEST_ID_CONFLICT',409);return {jobRef:prior.jobRef,session:publicSession(s)};}
         if(s.version!==input.baseVersion)fail('VERSION_CONFLICT',409);
         if(!available(s,input.section) || ['passed','pending'].includes(s.steps[input.section].status))fail('STEP_LOCKED',409);
-        if(workflowFor(s).fields[input.section].some(k=>!string(s.responses[k])))fail('EMPTY_RESPONSE');
-        if(isPrepared(s)&&!SOLUTIONS.includes(s.responses.chosenSolution))fail('SOLUTION_INVALID');
+        if(requiredFields(s,input.section).some(k=>!string(s.responses[k])))fail('EMPTY_RESPONSE');
+        if(isPrepared(s)){const error=preparationError(s);if(error)fail(error);}
         const n=input.section==='outline'?0:localKey(input.section)==='topic'?null:Number(input.section.at(-1));
         const job=makeJob(s,'grade',input.section,n);
         job.requestId=input.requestId;job.requestHash=hash(input);
@@ -200,8 +201,8 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
         checkBody(s,input,input.section);
         if(!available(s,input.section)||passed(s,input.section))fail('STEP_LOCKED',409);
         if(!s.jobs.some(j=>j.kind==='grade'&&j.section===input.section))fail('CHECK_REQUIRED',409);
-        if(workflowFor(s).fields[input.section].some(k=>!string(s.responses[k])))fail('EMPTY_RESPONSE');
-        if(isPrepared(s)&&!SOLUTIONS.includes(s.responses.chosenSolution))fail('SOLUTION_INVALID');
+        if(requiredFields(s,input.section).some(k=>!string(s.responses[k])))fail('EMPTY_RESPONSE');
+        if(isPrepared(s)){const error=preparationError(s);if(error)fail(error);}
         for(const j of s.jobs)if(j.kind==='grade'&&j.section===input.section)supersede(s,j,'student_attested_teacher_permission');
         pass(s,input.section,'student_attested_teacher_permission');
       }));
@@ -212,7 +213,8 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
         const section=sectionFor(s,input.field);if(!section)fail('EDIT_INVALID');checkBody(s,input,input.field);
         if(!available(s,section))fail('FIELD_LOCKED',409);
         if(s.responses[input.field]===input.value)return;
-        if(isPrepared(s)&&input.field==='chosenSolution'&&!SOLUTIONS.includes(input.value))fail('SOLUTION_INVALID');
+        if(isPrepared(s)&&input.field==='chosenSolution'&&!solutionsFor(s).includes(input.value))fail('SOLUTION_INVALID');
+        if(isOpinion(s)&&input.field==='agreementLevel'&&!AGREEMENT_LEVELS.includes(input.value))fail('AGREEMENT_INVALID');
         s.responses[input.field]=input.value;s.version++;
         if(isPrepared(s)&&section==='outline'){
           for(const j of s.jobs)supersede(s,j,'outline_changed');
@@ -221,7 +223,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
         }
         s.steps[section].editedAt=new Date(clock()).toISOString();
         if(passed(s,section))s.steps[section].editedAfterApproval=true;
-        for(const j of s.jobs)if(dependencies(j.section,j.ideaIndex,j.workflowMode,j.bodyIndex,j.preparationMode).includes(input.field))supersede(s,j,'content_changed');
+        for(const j of s.jobs)if(dependencies(j.section,j.ideaIndex,j.workflowMode,j.bodyIndex,j.preparationMode,j.preparationKind).includes(input.field))supersede(s,j,'content_changed');
         if(/^[axb][12]$/.test(localKey(input.field)))vocabulary(s,isWhole(s)?0:Number(input.field.at(-1)),1000,bodyIndexOf(input.field));
       }));
     },

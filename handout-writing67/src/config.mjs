@@ -38,15 +38,17 @@ export function rosterAdapter({rosterUrl,classes}, fetcher=fetch) {
     if(!response.ok)throw Object.assign(new Error('ROSTER_UNAVAILABLE'),{status:503});
     const value=await response.json();
     if(value.ok!==true || !Array.isArray(value.classes))throw Object.assign(new Error('ROSTER_CONTRACT_INVALID'),{status:503});
+    return value;
+  }
+  return async (activity,scope)=>{
+    // Cùng ảnh nguồn cho request đang chờ; chọn nhánh lesson sau đọc, không giữ cache quyền.
+    const task=pending||(pending=load());let value;
+    try{value=await task;}finally{if(pending===task)pending=undefined;}
+    const source=scope==='lesson'&&Object.hasOwn(value.lessonClasses||{},activity)?value.lessonClasses[activity]:scope==='lesson'?null:value.classes;
+    if(!Array.isArray(source))throw Object.assign(new Error('ROSTER_CONTRACT_INVALID'),{status:503});
     // Dạng v1 hiện có: classRef/className/students. Không cho học viên provisional vượt PIN.
-    const rows=value.classes.filter(c=>classes.includes(c.classRef) && Array.isArray(c.students)).map(c=>({classRef:c.classRef,className:c.className,students:c.students.filter(s=>!s.requiresAccessCode&&!s.provisional).map(s=>({studentRef:s.studentRef,displayName:s.displayName||s.alias}))}));
+    const rows=source.filter(c=>classes.includes(c.classRef) && Array.isArray(c.students)).map(c=>({classRef:c.classRef,className:c.className,students:c.students.filter(s=>!s.requiresAccessCode&&!s.provisional).map(s=>({studentRef:s.studentRef,displayName:s.displayName||s.alias}))}));
     if(rows.some(c=>typeof c.classRef!=='string'||typeof c.className!=='string'||c.students.some(s=>typeof s.studentRef!=='string'||typeof s.displayName!=='string')))throw Object.assign(new Error('ROSTER_CONTRACT_INVALID'),{status:503});
     return rows;
-  }
-  return async ()=>{
-    // Chỉ gộp lượt đang chờ; không giữ quyền sau khi đọc xong hoặc khi nguồn lỗi.
-    if(pending)return pending;
-    pending=load();
-    try{return await pending;}finally{pending=undefined;}
   };
 }

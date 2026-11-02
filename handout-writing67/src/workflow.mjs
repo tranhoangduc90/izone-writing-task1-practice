@@ -3,13 +3,29 @@ export const GUIDED='guided-bax-v1', WHOLE='whole-chain-v1', MULTI='two-bodies-v
 export const PREPARATION='ideas-first-v1';
 export const SOLUTIONS=['Đường tàu và tàu điện ngầm','Thêm đường và mở rộng đường bộ'];
 export const PLAN_FIELDS=['chosenSolution','body1_idea1','body1_idea2','body2_idea1','body2_idea2'];
+// Lập trường là biến thể cấu hình của cùng hành trình; bài cũ giữ nguyên schema và lựa chọn.
+export const OPINION='opinion-v1';
+export const AGREEMENT_LEVELS=['Đồng ý hoàn toàn','Phản đối hoàn toàn','Đồng ý một phần'];
+export const planFields=s=>s.preparationKind===OPINION?['agreementLevel','chosenSolution','positionLimit',...PLAN_FIELDS.slice(1)]:PLAN_FIELDS;
+export const solutionsFor=s=>s.solutionOptions||SOLUTIONS;
+export const preparationContext=s=>s.preparationKind===OPINION?{preparationKind:OPINION,solutionOptions:[...s.solutionOptions]}:{};
+export const isOpinion=s=>isPrepared(s)&&s.preparationKind===OPINION;
+export function requiredFields(s,section){return workflowFor(s).fields[section].filter(k=>k!=='positionLimit'||s.responses?.agreementLevel===AGREEMENT_LEVELS[2]);}
+export function preparationError(s){
+ if(!solutionsFor(s).includes(s.responses?.chosenSolution))return 'SOLUTION_INVALID';
+ if(!isOpinion(s))return null;
+ const level=s.responses.agreementLevel;
+ if(!AGREEMENT_LEVELS.includes(level))return 'AGREEMENT_INVALID';
+ if(level!==AGREEMENT_LEVELS[2]&&s.responses.chosenSolution!==solutionsFor(s)[AGREEMENT_LEVELS.indexOf(level)])return 'AGREEMENT_SOLUTION_MISMATCH';
+ return null;
+}
 export const ORDER=['topic','b1','a1','x1','b2','a2','x2'];
 export const FIELDS={topic:['idea1','idea2','topicSentence'],b1:['b1'],a1:['a1'],x1:['x1'],b2:['b2'],a2:['a2'],x2:['x2']};
 const whole={order:['topic','si1','si2'],fields:{topic:FIELDS.topic,si1:['a1','x1','b1'],si2:['a2','x2','b2']}};
 export const isMulti=s=>s.handoutMode===MULTI;
 export const isPrepared=s=>isMulti(s)&&s.preparationMode===PREPARATION;
 export const isWhole=s=>s.workflowMode===WHOLE;
-export const bodyIndexOf=key=>['outline','chosenSolution'].includes(key)?0:Number(/^body([12])_/.exec(String(key))?.[1])||null;
+export const bodyIndexOf=key=>['outline','chosenSolution','agreementLevel','positionLimit'].includes(key)?0:Number(/^body([12])_/.exec(String(key))?.[1])||null;
 export const localKey=key=>String(key).replace(/^body[12]_/,'');
 export const bodyKey=(n,key)=>'body'+n+'_'+key;
 export const vocabularyKey=(s,n,b)=>isMulti(s)?'body'+b:n;
@@ -19,7 +35,7 @@ const prepared={order:['outline',...multi.order],fields:{outline:PLAN_FIELDS,...
 export function workflowFor(value={}){
  const mode=value.workflowMode||GUIDED;
  if(![GUIDED,WHOLE].includes(mode))throw new Error('WORKFLOW_INVALID');
- return isPrepared(value)?prepared:isMulti(value)?multi:mode===WHOLE?whole:{order:ORDER,fields:FIELDS};
+ return isPrepared(value)?(isOpinion(value)?{order:prepared.order,fields:{...prepared.fields,outline:planFields(value)}}:prepared):isMulti(value)?multi:mode===WHOLE?whole:{order:ORDER,fields:FIELDS};
 }
 export function bodyView(s,n){
  const prefix='body'+n+'_';
@@ -45,6 +61,7 @@ export const vocabFields=(n,b)=>(n===0?[1,2]:[n]).flatMap(i=>['a','x','b'].map(k
 export function bodyConfig(lesson,s,n){
  const original=lesson.bodies.find(b=>b.body===n);
  if(!isPrepared(lesson))return original;
- const chosen=s.responses?.chosenSolution,valid=SOLUTIONS.includes(chosen),other=SOLUTIONS.find(x=>x!==chosen),solution=valid?(n===2?chosen:other):'';
+ const options=solutionsFor(lesson),chosen=s.responses?.chosenSolution,valid=options.includes(chosen),other=options.find(x=>x!==chosen),solution=valid?(n===2?chosen:other):'';
+ if(isOpinion(lesson))return {...original,title:(n===2?'Bảo vệ phương án ủng hộ':'Đánh giá phương án không ủng hộ')+(solution?' · '+solution:''),focus:original.focus+(s.responses?.agreementLevel?' Mức độ: '+s.responses.agreementLevel+'.':'')+(s.responses?.agreementLevel===AGREEMENT_LEVELS[2]?' Giữ điều kiện đã chốt: '+(s.responses.positionLimit||''):'')};
  return {...original,title:(n===2?'Bảo vệ phương án chọn':'Đánh giá phương án không chọn')+(solution?' · '+solution:''),focus:n===2?'Dùng hai idea đã chốt để làm rõ vì sao phương án bạn chọn tốt hơn.':'Dùng hai idea đã chốt để chỉ ra hạn chế của phương án không chọn; có thể khen mở đầu rồi chuyển sang hạn chế.'};
 }

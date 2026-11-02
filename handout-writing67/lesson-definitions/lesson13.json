@@ -1,0 +1,47 @@
+{
+  "activity": "lesson13",
+  "number": 13,
+  "title": "Lãnh đạo trẻ hay lớn tuổi?",
+  "shortTitle": "Lãnh đạo trẻ hay lớn tuổi?",
+  "topic": "Directors and managers of organisations are often older people. Some people say that it is better for younger people to be leaders.\nTo what extent do you agree or disagree?",
+  "aInstruction": "Bắt đầu từ đặc điểm hoặc tình huống liên quan tới nhóm lãnh đạo đang bàn; giữ đúng mức độ đồng ý đã chốt.",
+  "ideaHint": "Nêu ngắn gọn khía cạnh và hướng đánh giá; chưa cần viết Topic sentence hoặc A/X/B.",
+  "description": "Chốt mức độ đồng ý và bốn idea trước. Thân bài 1 bàn phương án không ủng hộ; thân bài 2 bảo vệ phương án ủng hộ.",
+  "workflowMode": "whole-chain-v1",
+  "workflowVersion": 1,
+  "handoutMode": "two-bodies-v1",
+  "preparationMode": "ideas-first-v1",
+  "preparationKind": "opinion-v1",
+  "rosterScope": "lesson",
+  "solutionOptions": ["Lãnh đạo trẻ tuổi", "Lãnh đạo lớn tuổi"],
+  "objective": "BAX",
+  "helpTitle": "Chốt lập trường và phát triển A → X → B",
+  "helpItems": [
+    "Chọn đồng ý hoàn toàn, phản đối hoàn toàn hoặc đồng ý một phần với nhận định lãnh đạo trẻ tốt hơn. Nếu đồng ý một phần, nêu phía nghiêng về và giới hạn hoặc điều kiện của lựa chọn.",
+    "Thân bài 1 luôn bàn phương án không ủng hộ: có thể nhượng bộ trước rồi chỉ ra hạn chế. Thân bài 2 luôn bảo vệ phương án ủng hộ. Hai idea mỗi thân bài cần có nội dung phân biệt được; đối chiếu cùng khía cạnh là tùy chọn.",
+    "Khi kế hoạch được thông qua, viết Topic sentence từ hai idea đã chốt; sau đó nhập đủ A (điểm đầu), X (cầu nối), B (điểm cuối) và Check chung từng ý."
+  ],
+  "bodies": [
+    {
+      "body": 1,
+      "objective": "BAX",
+      "title": "Đánh giá phương án không ủng hộ",
+      "focus": "Làm rõ hạn chế của phương án không ủng hộ. Có thể nhượng bộ ở ý đầu, sau đó chuyển sang hạn chế; giữ đúng mức đồng ý và điều kiện đã chốt.",
+      "ideaHint": "Dùng hai idea đã chốt trong kế hoạch chung.",
+      "topicInstruction": "Viết Topic sentence bao quát hai idea đã chốt và đúng vai trò của thân bài 1. Nếu muốn đổi idea hoặc lập trường, hãy sửa kế hoạch chung.",
+      "chainInstruction": "Phát triển đúng idea đã chốt. Nhập đủ A → X → B rồi Check chung để kiểm quan hệ giữa ba điểm và vai trò của đoạn.",
+      "comparisonInstruction": "Ý 2 có lập luận phân biệt được với ý 1 và giúp làm rõ hạn chế của phương án không ủng hộ. Không bắt buộc dùng cùng khía cạnh với thân bài 2."
+    },
+    {
+      "body": 2,
+      "objective": "BAX",
+      "title": "Bảo vệ phương án ủng hộ",
+      "focus": "Dùng hai idea để bảo vệ phương án ủng hộ. Khi đồng ý một phần, giữ giới hạn hoặc điều kiện đã chốt; không biến quan điểm có điều kiện thành khẳng định tuyệt đối.",
+      "ideaHint": "Dùng hai idea đã chốt trong kế hoạch chung.",
+      "topicInstruction": "Viết Topic sentence bao quát hai idea đã chốt và bảo vệ phương án ủng hộ trong thân bài 2. Giữ mức độ đồng ý và điều kiện của kế hoạch chung.",
+      "chainInstruction": "Phát triển đúng idea đã chốt. Nhập đủ A → X → B rồi Check chung để kiểm quan hệ giữa ba điểm và việc bảo vệ lựa chọn.",
+      "comparisonInstruction": "Ý 2 có cơ chế hoặc nội dung phân biệt được với ý 1 và cùng bảo vệ phương án ủng hộ. Không bắt buộc đối chiếu trực tiếp từng câu với thân bài 1."
+    }
+  ],
+  "classes": ["IC2213", "IC2228", "IC2238", "IC2262", "IC2270", "IC2273", "IC2304", "IC2314", "IC2340", "IC2353", "IC2363", "IC2376", "IC2404"]
+}

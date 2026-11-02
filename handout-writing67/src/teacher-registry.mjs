@@ -6,8 +6,8 @@ export function teacherRole(account){
   return role;
 }
 
-export function hasTeacherClass(account,classRef){
-  return teacherRole(account)==='admin'||account.classes.includes(classRef);
+export function hasTeacherClass(account,classRef,activity){
+  return teacherRole(account)==='admin'||account.classes.includes(classRef)||!!(activity&&Object.hasOwn(account.lessonClasses||{},activity)&&account.lessonClasses[activity].includes(classRef));
 }
 
 export function validateTeacherRegistry(value,allowedClasses){
@@ -15,6 +15,7 @@ export function validateTeacherRegistry(value,allowedClasses){
   for(const account of value.teachers){
     if(!account||typeof account.email!=='string'||typeof account.displayName!=='string'||typeof account.subject!=='string'||!account.subject.trim()||!Array.isArray(account.classes)||account.classes.some(c=>typeof c!=='string'||!c.trim()))throw new Error('TEACHER_REGISTRY_INVALID');
     if(teacherRole(account)==='teacher'&&account.classes.some(c=>!allowedClasses.includes(c)))throw new Error('TEACHER_REGISTRY_INVALID');
+    if(account.lessonClasses!==undefined&&(!account.lessonClasses||typeof account.lessonClasses!=='object'||Array.isArray(account.lessonClasses)||Object.entries(account.lessonClasses).some(([key,classes])=>!/^lesson[1-9]\d*$/.test(key)||!Array.isArray(classes)||classes.some(c=>!allowedClasses.includes(c)))))throw new Error('TEACHER_REGISTRY_INVALID');
   }
   return value;
 }

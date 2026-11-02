@@ -25,7 +25,7 @@ if(local)await db.exec(await fs.readFile(new URL('../ops/listening-homework67/sc
 const context=local?createListeningContext({url:'http://fixture',key:'fixture',fetcher:async()=>{
  const payload=JSON.parse(await fs.readFile(config.authority.path,'utf8'));
  return new Response(JSON.stringify({...payload,capturedAt:new Date().toISOString(),sourceRevision:sha256(JSON.stringify(payload))}));
-}}):createListeningContext({url:config.authority.url,key:(await fs.readFile(config.authority.keyFile,'utf8')).trim(),allowedClassIds:config.allowedClassIds});
+}}):createListeningContext({url:config.authority.url,key:(await fs.readFile(config.authority.keyFile,'utf8')).trim(),allowedClassIds:config.allowedClassIds,erpHomeworkClassIds:config.erpHomeworkClassIds});
 const classIds=(await context.classes()).map(c=>c.id);
 if(!classIds.length)throw Error('NO_COURSE67_CLASSES');
 const allowedClassIds=local?config.allowedClassIds:classIds;
@@ -47,7 +47,7 @@ if(new Set(definitions.map(d=>d.lesson.code)).size!==definitions.length)throw Er
 const provider=async({prompt,operationId})=>{const response=await fetch(config.ai.endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model_id:config.ai.model||'gemini-3.5-flash',prompt,anh_minh_hoa:'',operation_id:operationId,generation_config:{temperature:0,response_mime_type:'application/json'}}),signal:AbortSignal.timeout(600000)});if(!response.ok)throw Object.assign(Error('AI_HTTP_'+response.status),{code:'AI_HTTP_'+response.status});const text=await response.text();try{return JSON.parse(text);}catch{return {text};}};
 const runtimes=[];
 for(const definition of definitions){
- const lessonContext=definition.allowedClassIds&&!local?createListeningContext({url:config.authority.url,key:(await fs.readFile(config.authority.keyFile,'utf8')).trim(),allowedClassIds:definition.allowedClassIds}):context;
+ const lessonContext=definition.allowedClassIds&&!local?createListeningContext({url:config.authority.url,key:(await fs.readFile(config.authority.keyFile,'utf8')).trim(),allowedClassIds:definition.allowedClassIds,erpHomeworkClassIds:config.erpHomeworkClassIds}):context;
  const lessonIdentity=definition.allowedClassIds?createReading67WebIdentity({db,context:lessonContext,allowedClassIds:definition.allowedClassIds,cookieName:'listening_homework_teacher',cookiePath:(config.publicPath||'')+'/api/listening-homework67',verifyGoogle:local?async credential=>{if(credential!=='fixture-teacher-allowed')throw Error('INVALID_FIXTURE');return {email:'teacher@example.test',sub:'fixture-google',email_verified:true};}:async credential=>(await google.verifyIdToken({idToken:credential,audience:config.googleClientId})).getPayload()}):identity;
  const lessonOwner=definition.allowedClassIds&&config.owner?createReading67OwnerSource({context:lessonContext,allowedClassIds:definition.allowedClassIds,url:config.owner.url,key:(await fs.readFile(config.owner.keyFile,'utf8')).trim()}):ownerSource;
  const homeworkRuntime=definition.homework?.enabled?await createReading67HomeworkRuntime({config:definition.homework,db,content:definition.lesson,identity:lessonIdentity,ownerSource:lessonOwner,contract:DOC_CONTRACT,resultSummary:listeningSummary,progressText:listeningProgressText,completionText:listeningCompletionText}):null;

@@ -14,6 +14,8 @@ export function createReading67WebIdentity({db,context,allowedClassIds,verifyGoo
  if(!/^[a-z0-9_]+$/.test(cookieName))throw Error('COOKIE_NAME_INVALID');
  const cookie=q=>new RegExp('(?:^|;\\s*)'+cookieName+'=([\\w-]{43})(?:;|$)').exec(q.headers.cookie||'')?.[1];
  const allowed=new Set(allowedClassIds.map(String));
+ // Adapter Homework có thể xác minh ERP riêng; các engine khác giữ approved.
+ const studyAllowed=row=>context.isStudyStudent?context.isStudyStudent(row)===true:row.status==='approved';
  const courseAllowed=id=>{if(!allowed.has(String(id)))denied();};
  async function classes(){
   if(includeEmptyClasses)return (await context.snapshot()).classes.filter(c=>allowed.has(c.erp_course_class_id)).map(c=>({id:c.erp_course_class_id,classCode:c.erp_class_name_snapshot})).sort((a,b)=>a.classCode.localeCompare(b.classCode,'vi'));
@@ -23,7 +25,7 @@ export function createReading67WebIdentity({db,context,allowedClassIds,verifyGoo
  async function member(classId,studentRef){
   courseAllowed(classId);
   const snapshot=await context.snapshot();
-  const row=snapshot.students.find(s=>s.public_id===studentRef&&s.erp_course_class_id===String(classId)&&s.status==='approved');
+  const row=snapshot.students.find(s=>s.public_id===studentRef&&s.erp_course_class_id===String(classId)&&studyAllowed(s));
   const active=row&&snapshot.memberships.some(m=>m.erp_course_class_id===String(classId)&&m.erp_student_contact_id===row.erp_student_contact_id&&m.source_state==='active');
   if(!active)denied('STUDENT_ACCESS_DENIED');
   if(ownerSource)await ownerSource.member(String(classId),studentRef);
@@ -32,7 +34,7 @@ export function createReading67WebIdentity({db,context,allowedClassIds,verifyGoo
  }
  async function resolve(input){
   const s=await context.snapshot();
-  let rows=s.students.filter(r=>allowed.has(r.erp_course_class_id)&&r.status==='approved'&&s.memberships.some(m=>m.erp_course_class_id===r.erp_course_class_id&&m.erp_student_contact_id===r.erp_student_contact_id&&m.source_state==='active'));
+  let rows=s.students.filter(r=>allowed.has(r.erp_course_class_id)&&studyAllowed(r)&&s.memberships.some(m=>m.erp_course_class_id===r.erp_course_class_id&&m.erp_student_contact_id===r.erp_student_contact_id&&m.source_state==='active'));
   if(input.studentRef)rows=rows.filter(r=>r.public_id===input.studentRef);
   else rows=rows.filter(r=>r.erp_student_contact_id===input.identity.id);
   if(input.classCode)rows=rows.filter(r=>s.classes.find(c=>c.erp_course_class_id===r.erp_course_class_id)?.erp_class_name_snapshot.toUpperCase()===input.classCode);

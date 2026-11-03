@@ -18,6 +18,38 @@ function snapshot(scopes,guards,status='queued'){
  return {states:new Map(scopes.map(s=>[observationKey(s),{attemptId:s.attemptId||'same-attempt',status,resultRevision:'r1',draftRevision:1,jobs:[]}])) ,sessions:new Map(guards.map(g=>[g.kind+':'+g.hash,{owner_id:g.hash}])),documents:new Map()};
 }
 
+test('REST status batches 50 simultaneous scopes and maps reordered results by immutable owner/class/lesson/attempt keys',async()=>{
+ const time=fakeClock();let reads=0;
+ const input=Array.from({length:50},(_,n)=>({...scope('lesson-'+n%2),courseId:String(1124+n%2),version:'v'+n%3,...(n%2?{attemptId:randomUUID(),practice:true}:{})}));
+ const expected=input.map(s=>({...s}));
+ const hub=createWebObservationHub({db:{},...time,read:async(_db,args)=>{reads++;const value=snapshot([...args.scopes].reverse(),[]);for(const s of args.scopes)value.states.get(observationKey(s)).marker=observationKey(s);return value;}});
+ const requests=input.map(s=>hub.readOnce(s)),result=Promise.all(requests);void result.catch(()=>{});input[0].ownerId='changed-after-request';
+ await time.advance(0);
+ assert.equal(reads,1,'Concurrent REST polls must share the underlying state read');
+ const results=await result;
+ results.forEach((value,n)=>assert.equal(value.marker,observationKey(expected[n])));
+ await hub.close();
+});
+
+test('REST status deduplicates an in-flight scope, propagates SQL errors and reads fresh data after recovery',async()=>{
+ const time=fakeClock(),s=scope();let reads=0,failed=true,version='r1',hold=false,release;const gate=new Promise(r=>release=r);
+ const hub=createWebObservationHub({db:{},...time,read:async(_db,args)=>{reads++;if(failed)throw Error('SQL_DOWN');if(hold)await gate;const value=snapshot(args.scopes,[]);for(const row of value.states.values())row.resultRevision=version;return value;}});
+ const first=Promise.allSettled(Array.from({length:50},()=>hub.readOnce(s)));await time.advance(0);
+ assert.ok((await first).every(x=>x.status==='rejected'&&x.reason.message==='SQL_DOWN'));assert.equal(reads,1);
+ failed=false;hold=true;const recovered=hub.readOnce(s);await time.advance(0);const duplicate=hub.readOnce(s);release();await settle();assert.equal((await recovered).resultRevision,'r1');assert.equal((await duplicate).resultRevision,'r1');assert.equal(reads,2);
+ version='r2';const fresh=hub.readOnce(s);await time.advance(0);assert.equal((await fresh).resultRevision,'r2');assert.equal(reads,3);
+ await hub.close();
+});
+
+test('REST status close drains accepted reads without hanging or accepting new work',async()=>{
+ const time=fakeClock();let release,reads=0;const gate=new Promise(r=>release=r);
+ const hub=createWebObservationHub({db:{},...time,read:async(_db,args)=>{if(++reads===1)await gate;return snapshot(args.scopes,[]);}});
+ const first=hub.readOnce(scope());await time.advance(0);const second=hub.readOnce(scope());let finished=false;
+ const closing=hub.close().then(()=>{finished=true;});await settle();assert.equal(finished,false);
+ release();await closing;assert.ok((await first).revision);assert.ok((await second).revision);
+ await assert.rejects(hub.readOnce(scope()),/STATE_CLOSED/);
+});
+
 test('Observation SQL isolates owners, classes, lesson versions and explicit attempts while detecting result changes in the same attempt',async t=>{
  const db=new PGlite();t.after(()=>db.close());await db.exec(await fs.readFile(new URL('../ops/listening-homework67/schema.sql',import.meta.url),'utf8'));
  const a=scope(),b=scope('fixture'),id=randomUUID(),job=randomUUID();

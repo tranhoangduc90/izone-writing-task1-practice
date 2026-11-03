@@ -9,6 +9,7 @@ const digest=value=>createHash('sha256').update(JSON.stringify(value)).digest('h
 export function createWebObservationHub({db,clock=Date.now,setTimer=setTimeout,clearTimer=clearTimeout,read=readWebObservations,interval=1500,maxConnections=1000}){
  const epoch=randomUUID(),members=new Set(),runningGuards=new Set();
  let closed=false,timer=null,reading=null,wakePending=false,sequence=0;
+ const pendingReads=new Map(),activeReads=new Map();let readTimer=null,readingOnce=null;
  const stats={scans:0,errors:0,emitted:0};
  function schedule(delay=interval){if(closed||!members.size)return;if(reading){if(delay===0)wakePending=true;return;}if(timer){if(delay!==0)return;clearTimer(timer);}timer=setTimer(()=>{timer=null;void scan();},delay);timer?.unref?.();}
  function send(member,event,value){if(closed||member.closed)return;try{member.send(event,value);}catch{member.close();}}
@@ -56,6 +57,22 @@ export function createWebObservationHub({db,clock=Date.now,setTimer=setTimeout,c
   })();
   try{await reading;}finally{reading=null;const delay=wakePending?0:interval;wakePending=false;schedule(delay);}
  }
+ // REST dự phòng dùng cùng phép đọc theo nhóm; chỉ chia sẻ việc đang chờ, không cache snapshot đã trả.
+ function scheduleRead(){
+  if(closed||readTimer||readingOnce||!pendingReads.size)return;
+  readTimer=setTimer(()=>{readTimer=null;void readBatch();},0);readTimer?.unref?.();
+ }
+ async function readBatch(){
+  if(readingOnce||!pendingReads.size)return;
+  const batch=[...pendingReads.values()];pendingReads.clear();for(const item of batch)activeReads.set(item.key,item);
+  readingOnce=(async()=>{
+   try{
+    const snapshot=await read(db,{scopes:batch.map(item=>item.scope),guards:[],documents:[],now:new Date(clock()).toISOString()});
+    for(const item of batch){activeReads.delete(item.key);const value=snapshot.states.get(item.key);if(value)item.resolve(value);else item.reject(Error('STATE_UNAVAILABLE'));}
+   }catch(error){for(const item of batch){activeReads.delete(item.key);item.reject(error);}}
+  })();
+  try{await readingOnce;}finally{readingOnce=null;scheduleRead();}
+ }
  return {
   subscribe({scope,guard,document,send:callback}){
    if(closed)throw Object.assign(Error('STATE_CLOSED'),{code:'STATE_UNAVAILABLE',status:503});
@@ -65,8 +82,13 @@ export function createWebObservationHub({db,clock=Date.now,setTimer=setTimeout,c
    members.add(member);schedule(0);return {close:member.close};
   },
   wake(){schedule(0);},
-  async readOnce(scope){const snapshot=await read(db,{scopes:[scope],guards:[],documents:[],now:new Date(clock()).toISOString()}),value=snapshot.states.get(observationKey(scope));if(!value)throw Error('STATE_UNAVAILABLE');return {epoch,revision:digest(value),...value};},
+  async readOnce(scope){
+   if(closed)throw Error('STATE_CLOSED');
+   const selected={...scope},key=observationKey(selected);let item=pendingReads.get(key)||activeReads.get(key);
+   if(!item){item={key,scope:selected};item.promise=new Promise((resolve,reject)=>Object.assign(item,{resolve,reject}));pendingReads.set(key,item);scheduleRead();}
+   const value=await item.promise;return {epoch,revision:digest(value),...value};
+  },
   snapshot(){return {epoch,closed,connections:members.size,...stats};},
-  async close(){closed=true;clearTimer(timer);for(const member of members){try{member.send('closing',{});}catch{/* A disconnected tab needs no final frame. */}member.close();}await reading;await Promise.all([...runningGuards]);}
+  async close(){closed=true;clearTimer(timer);clearTimer(readTimer);readTimer=null;for(const member of members){try{member.send('closing',{});}catch{/* A disconnected tab needs no final frame. */}member.close();}await reading;await Promise.all([...runningGuards]);while(readingOnce||pendingReads.size){if(readingOnce)await readingOnce;else await readBatch();}}
  };
 }

@@ -70,10 +70,22 @@ export function createReading67WebStore({db,grader,homework,resultSummary=readin
     });
   }
   async function attemptView(executor,scope,attemptId,fromCache=false){
-    const row=(await executor.query('SELECT a.*,j.id AS job_id,j.status,j.error_code,j.finished_at,r.data AS result FROM reading_listening67.web_attempt a JOIN reading_listening67.web_job j ON j.attempt_id=a.id LEFT JOIN reading_listening67.web_result r ON r.attempt_id=a.id WHERE a.id=$5 AND a.owner_id=$1 AND a.course_id=$2 AND a.assignment_code=$3 AND a.content_version=$4',[...values(scope),attemptId])).rows[0];
+    // Cùng một ảnh đọc cho bài, checkpoint và lần phục hồi đầu tiên; không giữ
+    // thêm transaction hoặc tạo ba lượt đi–về khi nhiều học viên cùng cập nhật.
+    const validationColumns=validation?`,v.job_id AS validation_job_id,v.state->>'phase' AS validation_phase,
+      v.state->>'round' AS validation_round,v.state->'serviceError' AS validation_service_error,
+      jsonb_array_length(COALESCE(v.state->'issues','[]'::jsonb)) AS validation_pending,
+      recovery.error_code AS recovery_error_code,recovery.failed_at AS recovery_failed_at,recovery.created_at AS recovery_started_at`:'';
+    const validationJoins=validation?`LEFT JOIN reading_listening67.web_validation v ON v.job_id=j.id
+      LEFT JOIN LATERAL (SELECT data->'previous'->>'error_code' AS error_code,data->'previous'->>'finished_at' AS failed_at,created_at
+        FROM reading_listening67.web_validation_event WHERE job_id=j.id AND kind='recovery_started' ORDER BY created_at LIMIT 1) recovery ON true`:'';
+    const row=(await executor.query(`SELECT a.*,j.id AS job_id,j.status,j.error_code,j.finished_at,r.data AS result${validationColumns}
+      FROM reading_listening67.web_attempt a JOIN reading_listening67.web_job j ON j.attempt_id=a.id
+      LEFT JOIN reading_listening67.web_result r ON r.attempt_id=a.id ${validationJoins}
+      WHERE a.id=$5 AND a.owner_id=$1 AND a.course_id=$2 AND a.assignment_code=$3 AND a.content_version=$4`,[...values(scope),attemptId])).rows[0];
     if(!row)throw new WebGradingError('ATTEMPT_NOT_FOUND',404);
-    const validationProgress=validation?(await executor.query("SELECT state->>'phase' AS phase,state->>'round' AS round,state->'serviceError' AS service_error,jsonb_array_length(COALESCE(state->'issues','[]'::jsonb)) AS pending FROM reading_listening67.web_validation WHERE job_id=$1",[row.job_id])).rows[0]||null:null;
-    const recovery=validation?(await executor.query("SELECT data->'previous'->>'error_code' AS error_code,data->'previous'->>'finished_at' AS failed_at,created_at AS started_at FROM reading_listening67.web_validation_event WHERE job_id=$1 AND kind='recovery_started' ORDER BY created_at LIMIT 1",[row.job_id])).rows[0]||null:null;
+    const validationProgress=validation&&row.validation_job_id?{phase:row.validation_phase,round:row.validation_round,service_error:row.validation_service_error,pending:row.validation_pending}:null;
+    const recovery=validation&&row.recovery_started_at?{error_code:row.recovery_error_code,failed_at:row.recovery_failed_at,started_at:row.recovery_started_at}:null;
     return {attemptId:row.id,jobId:row.job_id,status:row.status,errorCode:row.error_code,createdAt:row.created_at,finishedAt:row.finished_at,runNo:row.run_no,draftRevision:row.draft_revision,snapshot:row.snapshot,completeness:row.completeness,result:row.status==='done'?row.result:null,progress:row.status==='done'?resultSummary(row.result):null,validationProgress,recovery,graderHash:row.grader_hash,fromCache};
   }
   async function attempt(scope,id){return attemptView(db,scope,id);}

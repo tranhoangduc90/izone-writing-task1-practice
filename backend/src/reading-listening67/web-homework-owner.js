@@ -19,6 +19,7 @@ export function createReading67HomeworkOwner({url,key,headerName='x-reading-owne
   const query=new URLSearchParams(reverse?{courseId:input.courseId,googleUserId:input.googleUserId}:{classId:input.classId,studentRef:input.studentRef});
   let response;
   try{response=await fetcher(url.replace(/\/$/,'')+(reverse?'/v1/owner-by-classroom?':'/v1/owner?')+query,{headers:{[headerName]:key},signal:AbortSignal.timeout(5000)});}catch{fail('OWNER_SOURCE_UNAVAILABLE',503);}
+  if(reverse&&response.status===403)fail('OWNER_NOT_MAPPED',403);
   if(!response.ok)fail('OWNER_SOURCE_UNAVAILABLE',503);
   const parsed=sourceSchema.safeParse(await response.json());if(!parsed.success)fail('OWNER_SOURCE_INVALID',503);
   const {capturedAt,sourceRevision,...payload}=parsed.data,age=clock()-Date.parse(capturedAt);

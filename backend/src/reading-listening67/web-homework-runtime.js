@@ -13,6 +13,7 @@ import {createReading67HomeworkOwner} from './web-homework-owner.js';
 import {createReading67Homework} from './web-homework.js';
 import {createReading67CtaRegistrar} from './web-homework-cta.js';
 import {createReading67OwnerEntry} from './web-owner-entry.js';
+import {publisherFromEnv,verifyClassroomCopy} from './cta-confirmation-client.js';
 const run=promisify(execFile);
 const fail=code=>{throw new WebGradingError(code,403);};
 export async function createReading67HomeworkRuntime({config,db,content,identity,ownerSource,contract,resultSummary,progressText,completionText,managedCodes=[]}){
@@ -51,8 +52,11 @@ export async function createReading67HomeworkRuntime({config,db,content,identity
  else throw Error('DOC_OWNER_CONFIG_REQUIRED');
  const ownerEntry=createReading67OwnerEntry({db,identity,ownerSource,metadata,policy:config.ownerEntry});
  const homework=createReading67Homework({db,metadata,pageBase:config.pageBase,owner,docs,planWrite,resultSummary,progressText,completionText,managedCodes,ownerEntry});
+ const product=content.code.startsWith('67-listening-')?'listening-homework':'reading-homework';
+ const publishPending=config.owner.kind==='http'&&ownerEntry?publisherFromEnv(process.env,{product,docs,planWrite}):null;
  const adminKey=(await fs.readFile(config.adminKeyFile,'utf8')).trim();if(adminKey.length<32)throw Error('CTA_ADMIN_KEY_REQUIRED');
  let stopped=false,running=null,timer;
  async function tick(){if(stopped)return;running=homework.once();try{await running;}catch(error){console.error(JSON.stringify({event:'reading67_homework_error',code:error.code||'DOC_RETRY'}));}finally{running=null;if(!stopped)timer=setTimeout(tick,500);}}
- return {homework,docs,owner,ownerEntry,adminKey,registerCta:createReading67CtaRegistrar({homework,owner,docs,identity,metadata,locate,planWrite}),start(){tick();},async close(){stopped=true;clearTimeout(timer);await running;},mode:config.owner.kind};
+ return {homework,docs,owner,ownerEntry,adminKey,registerCta:createReading67CtaRegistrar({homework,owner,docs,identity,metadata,locate,planWrite,ownerEntry,publishPending,
+  verifyClassroomCopy:verifyClassroomCopy(auth)}),start(){tick();},async close(){stopped=true;clearTimeout(timer);await running;},mode:config.owner.kind};
 }

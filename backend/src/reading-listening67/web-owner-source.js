@@ -42,6 +42,7 @@ export function createReading67OwnerSource({context,allowedClassIds,url,key,fetc
  async function resolveClassroom(input){
   const results=[];
   for(const classId of allowed)results.push(...(await roster(classId)).filter(r=>r.courseId===input.courseId&&r.googleUserId===input.googleUserId));
+  if(!results.length)fail('OWNER_NOT_MAPPED');
   if(results.length!==1)fail('OWNER_MISMATCH');
   // Kiểm lại người đã chọn ngay trước nhận event; không dựa vào tên hoặc phần tử đầu.
   const checked=await member(results[0].classId,results[0].studentRef);

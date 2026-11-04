@@ -24,11 +24,11 @@ export function createReading67WebRouter({store,content,grader,authenticate,iden
   const requireOpen=()=>{if(config.studentsOpen===false)throw new WebGradingError('CLASS_NOT_OPEN',423);};
   if(registerCta){
     const text=z.string().trim().min(1).max(200);
-    const ctaEvent=z.object({doc_id:z.string().regex(/^[A-Za-z0-9_-]{20,200}$/),classroom_course_id:text,coursework_id:text,submission_id:text,student_id:text,class_name:text});
+    const ctaEvent=z.object({doc_id:z.string().regex(/^[A-Za-z0-9_-]{20,200}$/),classroom_course_id:text,coursework_id:text,submission_id:text,student_id:text,class_name:text,check_only:z.literal(true).optional()});
     router.post('/admin/register-cta',route(async(q,r)=>{
       const expected=Buffer.from(adminKey||''),actual=Buffer.from(String(q.headers.authorization||'').replace(/^Bearer /,''));
       if(expected.length<32||expected.length!==actual.length||!timingSafeEqual(actual,expected))throw new WebGradingError('WEB_UNAUTHORIZED',401);
-      r.json({ok:true,...await registerCta(parse(ctaEvent,q.body))});
+      r.json({ok:true,...await registerCta(parse(ctaEvent,q.body),{allowPending:config.studentsOpen!==false})});
     }));
   }
   if(identity){

@@ -9,11 +9,14 @@ import { config,rosterAdapter } from '../src/config.mjs';
 
 const sample={idea1:'Gây khó khăn về tài chính',idea2:'Gây hại môi trường',topicSentence:'Unnecessary purchases harm personal finances and the environment.',b1:'Không còn tiền cho nhu cầu thiết yếu',a1:'Mua điện thoại mới khi máy cũ vẫn tốt',x1:'Dùng tiền dành cho thực phẩm để mua máy mới',b2:'Tăng lượng rác điện tử khó phân hủy',a2:'Thay đồ điện tử còn dùng tốt',x2:'Vứt máy cũ vẫn hoạt động để lấy mẫu mới'};
 const groups={A:[{phrase:'buy unnecessary products',meaningVi:'mua đồ không cần thiết'},{phrase:'replace working devices',meaningVi:'thay thiết bị còn dùng tốt'}],X:[{phrase:'spend essential savings',meaningVi:'chi tiền tiết kiệm thiết yếu'},{phrase:'throw old devices away',meaningVi:'vứt thiết bị cũ'}],B:[{phrase:'face financial difficulties',meaningVi:'gặp khó khăn tài chính'},{phrase:'increase electronic waste',meaningVi:'tăng rác điện tử'}]};
-async function setup(t) {
+async function setup(t,{onQueueCommitted,onQueueError,beforeCommit}={}) {
   const db=new PGlite();await db.exec(await readFile(new URL('../db/001-initial.sql',import.meta.url),'utf8'));
   await db.exec(await readFile(new URL('../db/002-activity-log.sql',import.meta.url),'utf8'));
   let now=1000000;
-  const service=createService({store:createStore(db),maxLeases:2,roster:async()=>[{classRef:'c67',className:'Lớp thử 67',students:[{studentRef:'s-a',displayName:'Học viên thử A'},{studentRef:'s-b',displayName:'Học viên thử B'},{studentRef:'s-c',displayName:'Học viên thử C'}]}],secret:'session-fixture-'.padEnd(40,'s'),clock:()=>now});
+  const database=beforeCommit?{query:db.query.bind(db),transaction:work=>db.transaction(async tx=>{
+    const result=await work(tx);beforeCommit();return result;
+  })}:db;
+  const service=createService({store:createStore(database,{onQueueCommitted,onQueueError,clock:()=>now}),maxLeases:2,roster:async()=>[{classRef:'c67',className:'Lớp thử 67',students:[{studentRef:'s-a',displayName:'Học viên thử A'},{studentRef:'s-b',displayName:'Học viên thử B'},{studentRef:'s-c',displayName:'Học viên thử C'}]}],secret:'session-fixture-'.padEnd(40,'s'),clock:()=>now});
   const internalSecret='internal-fixture-'.padEnd(40,'i');
   const server=createApi({service,origins:['http://127.0.0.1:8785'],internalSecret});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -118,6 +121,43 @@ test('T-PART · callback commit rồi mất ACK; readback và replay không nhâ
   const receipt=await h.call(`/internal/jobs/${job.jobRef}`,{token:h.internalSecret});assert.equal(receipt.body.status,'completed');assert.equal(receipt.body.resultHash,first.body.resultHash);
   assert.equal((await h.read(who)).steps.topic.history.length,1);
   assert.equal((await h.complete(job,{...result,feedback:'Nhận xét khác'})).status,409);
+});
+
+test('T-WAKE-COMMIT · báo lượt đã ghi đúng một lần, bỏ yêu cầu lỗi và replay',async t=>{
+  const observed=[];
+  let h;
+  h=await setup(t,{onQueueCommitted:()=>{
+    observed.push(h.db.query("SELECT j->>'jobRef' AS ref FROM handout67.session s CROSS JOIN LATERAL jsonb_array_elements(s.payload->'jobs') j WHERE j->>'status'='queued'"));
+  }});
+  const who=await h.open();
+  assert.equal((await h.check(who,'topic')).status,400);
+  await h.save(who,{idea1:sample.idea1,idea2:sample.idea2,topicSentence:sample.topicSentence});
+  assert.equal(observed.length,0);
+  const request={requestId:'wake-commit-fixture',baseVersion:1};
+  const first=await h.check(who,'topic',request);
+  assert.equal(first.status,202);
+  assert.equal((await h.check(who,'topic',request)).status,202);
+  assert.equal(observed.length,1);
+  assert.deepEqual((await observed[0]).rows,[{ref:first.body.jobRef}]);
+});
+
+test('T-WAKE-ROLLBACK · mất commit không đánh thức, lỗi tín hiệu không đảo commit',async t=>{
+  let failCommit=false,signals=0,errors=0;
+  const h=await setup(t,{beforeCommit(){if(failCommit)throw Error('FIXTURE_COMMIT_FAILED');},
+    onQueueCommitted(){signals++;throw Error('FIXTURE_WAKE_FAILED');},onQueueError(){errors++;}});
+  const who=await h.open();
+  await h.save(who,{idea1:sample.idea1,idea2:sample.idea2,topicSentence:sample.topicSentence});
+  const request={requestId:'wake-rollback-fixture',baseVersion:1};
+  failCommit=true;
+  assert.equal((await h.check(who,'topic',request)).status,500);
+  assert.equal(signals,0);
+  failCommit=false;
+  assert.equal((await h.read(who)).steps.topic.status,'draft');
+  const accepted=await h.check(who,'topic',request);
+  assert.equal(accepted.status,202);
+  assert.equal(signals,1);assert.equal(errors,1);
+  const [claimed]=await h.claim();
+  assert.equal(claimed.jobRef,accepted.body.jobRef);
 });
 
 test('T-IDENTITY · sai học viên/ý/section/hash/version không ghi kết quả',async t=>{

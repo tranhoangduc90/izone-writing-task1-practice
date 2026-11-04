@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile,mkdtemp,rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join,resolve,sep } from 'node:path';
+import {setImmediate as turn,setTimeout as delay} from 'node:timers/promises';
 import { PGlite } from '@electric-sql/pglite';
 import { createWake } from '../src/wake.mjs';
 import { createStore } from '../src/store.mjs';
@@ -33,7 +34,50 @@ test('T-WAKE-BURST · đánh thức mỗi job chờ, không dồn cả lớp và
   work=[];await wake.tick();assert.equal(calls,5);
 });
 
-test('T-DURABLE · đóng/mở kho thật trên đĩa không mất phiên/bài',async()=>{
+test('T-WAKE-PULSE · gộp tín hiệu, vẫn đọc lượt mới đến khi đang đánh thức',async t=>{
+  let work=['a:0'],scans=0,calls=0,releaseFirst,observeFirst,observeSecond;
+  const first=new Promise(resolve=>{observeFirst=resolve;});
+  const second=new Promise(resolve=>{observeSecond=resolve;});
+  const paused=new Promise(resolve=>{releaseFirst=resolve;});
+  const wake=createWake({hasWork:async()=>{scans++;return work;},url:'https://fixture.invalid/wake',
+    secret:'fixture',intervalMs:100000,fetcher:async()=>{
+      calls++;
+      if(calls===1){observeFirst();await paused;}else observeSecond();
+      return {ok:true};
+    }});
+  t.after(()=>{releaseFirst();wake.close();});
+  wake.request();wake.request();await first;
+  work=['a:0','b:0'];wake.request();wake.request();
+  releaseFirst();await second;
+  assert.equal(scans,2);assert.equal(calls,2);
+  await turn();
+  wake.request();wake.close();await turn();
+  assert.equal(scans,2);
+});
+
+test('T-WAKE-LIMIT · chỉ gửi tối đa số webhook đồng thời được đặt',async t=>{
+  let active=0,peak=0,calls=0;
+  const wake=createWake({hasWork:async()=>['a:0','b:0','c:0','d:0','e:0'],
+    url:'https://fixture.invalid/wake',secret:'fixture',intervalMs:100000,maxDispatches:2,fetcher:async()=>{
+      calls++;active++;peak=Math.max(peak,active);
+      await turn();
+      active--;return {ok:true};
+    }});
+  t.after(()=>wake.close());
+  await wake.tick();
+  assert.equal(calls,5);assert.equal(peak,2);
+});
+
+test('T-WAKE-FALLBACK · bộ dò mới đọc hàng bền khi tín hiệu không tới',async t=>{
+  let calls=0;
+  const wake=createWake({hasWork:async()=>['persisted:0'],url:'https://fixture.invalid/wake',
+    secret:'fixture',intervalMs:10,fetcher:async()=>{calls++;return {ok:true};}});
+  t.after(()=>wake.close());
+  for(let i=0;i<10&&!calls;i++)await delay(10);
+  assert.equal(calls,1);
+});
+
+test('T-DURABLE · restart giữ bản bài và nhận lại lượt chấm đã ghi dù mất tín hiệu',async()=>{
   const base=resolve(process.env.HANDOUT67_TEST_ROOT||tmpdir());
   const folder=await mkdtemp(join(base,'handout67-fixture-'));
   const secret='fixture-session'.padEnd(40,'s');
@@ -42,12 +86,35 @@ test('T-DURABLE · đóng/mở kho thật trên đĩa không mất phiên/bài',
   try {
     db=new PGlite(folder);await db.exec(await readFile(new URL('../db/001-initial.sql',import.meta.url),'utf8'));
     await db.exec(await readFile(new URL('../db/002-activity-log.sql',import.meta.url),'utf8'));
-    const service=createService({store:createStore(db),secret,roster});
+    const renderJob=()=> 'Rubric fixture tiếng Việt.';
+    const service=createService({store:createStore(db),secret,roster,renderJob});
     const who=await service.open({activity:'lesson5',classRef:'c',studentRef:'s'});
-    const before=await service.save(who.session.ref,who.token,{baseVersion:0,requestId:'fixture-save',responses:{idea1:'Bài phải còn sau restart'}});
+    await service.save(who.session.ref,who.token,{baseVersion:0,requestId:'fixture-save',responses:{
+      idea1:'Bài phải còn sau restart',idea2:'Luận điểm thứ hai',topicSentence:'A sample topic sentence.',
+    }});
+    const before=await service.check(who.session.ref,who.token,{baseVersion:1,requestId:'fixture-check',section:'topic'});
     await db.close();db=new PGlite(folder);
-    const restarted=createService({store:createStore(db),secret,roster});
-    assert.deepEqual(await restarted.read(who.session.ref,who.token),before);
+    const store=createStore(db),restarted=createService({store,secret,roster,renderJob});
+    assert.deepEqual(await restarted.read(who.session.ref,who.token),before.session);
+    let calls=0;
+    const wake=createWake({hasWork:async()=>{
+      const job=await store.findJob(before.jobRef,who.session.ref);
+      return job?.status==='queued'?[job.jobRef+':'+job.tries]:[];
+    },url:'https://fixture.invalid/wake',secret:'fixture',fetcher:async()=>{
+      calls++;
+      const [job]=await restarted.claim();
+      assert.equal(job.jobRef,before.jobRef);
+      await restarted.complete({...job,result:{resultStatus:'passed',feedback:'Đã chấm fixture.'}});
+      return {ok:true};
+    }});
+    try {
+      await wake.tick();await wake.tick();
+      assert.equal(calls,1);
+      const after=await restarted.read(who.session.ref,who.token);
+      assert.equal(after.responses.idea1,'Bài phải còn sau restart');
+      assert.equal(after.steps.topic.history.length,1);
+      assert.equal(after.steps.topic.status,'passed');
+    } finally {wake.close();}
   } finally {
     if(db)await db.close();
     if(!resolve(folder).startsWith(base+sep))throw new Error('Không xóa fixture ngoài thư mục thử');

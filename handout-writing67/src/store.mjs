@@ -28,7 +28,21 @@ const fullQueue="SELECT ref,payload FROM handout67.session WHERE EXISTS (SELECT 
 
 // Nhận adapter PostgreSQL có transaction; lưu/đọc lại đúng phiên, khóa trước thay đổi.
 // Không biết hoặc truy cập bảng của sản phẩm khác. Lỗi SQL trả về caller, không giả thành công.
-export function createStore(db,{clock=Date.now}={}) {
+export function createStore(db,{clock=Date.now,onQueueCommitted,onQueueError=()=>{}}={}) {
+  function notifyCommitted(ready) {
+    if (ready) void Promise.resolve().then(onQueueCommitted).catch(onQueueError);
+  }
+  async function saveChanged(tx,before,session) {
+    const now=clock();
+    markDashboardActivity(before,session,now);
+    await tx.query('UPDATE handout67.session SET payload=$2::jsonb, updated_at=now() WHERE ref=$1', [before.ref,JSON.stringify(session)]);
+    await auditChange(tx,before,session,now);
+    if (!onQueueCommitted) return false;
+    const ready=job=>job.status==='queued'&&(job.nextAttemptAt??0)<=now
+      &&(job.deadlineAt??Infinity)>now&&(job.tries??0)<3;
+    const previous=new Set(before.jobs.filter(ready).map(job=>job.jobRef));
+    return session.jobs.some(job=>ready(job)&&!previous.has(job.jobRef));
+  }
   return {
     audit:createAudit(db),
     async open(identity, initial) {
@@ -64,18 +78,19 @@ export function createStore(db,{clock=Date.now}={}) {
       return result.rows[0];
     },
     async edit(ref, change) {
-      return db.transaction(async tx => {
+      let ready=false;
+      const result=await db.transaction(async tx => {
         const result = await tx.query('SELECT payload FROM handout67.session WHERE ref=$1 FOR UPDATE', [ref]);
         if (!result.rows[0]) return undefined;
         const session = result.rows[0].payload;
         const before=structuredClone(session);
         const answer = await change(session);
         if(JSON.stringify(before)===JSON.stringify(session))return answer;
-        markDashboardActivity(before,session,clock());
-        await tx.query('UPDATE handout67.session SET payload=$2::jsonb, updated_at=now() WHERE ref=$1', [ref,JSON.stringify(session)]);
-        await auditChange(tx,before,session,clock());
+        ready=await saveChanged(tx,before,session);
         return answer;
       });
+      notifyCommitted(ready);
+      return result;
     },
     async findJob(ref,sessionRef) {
       // Envelope đã có mã phiên: tìm bằng khóa chính, không đọc bài của cả lớp cho mỗi phản hồi.
@@ -89,7 +104,8 @@ export function createStore(db,{clock=Date.now}={}) {
       return result.rows.flatMap(row=>row.payload.jobs).find(job=>job.jobRef===ref);
     },
     async queue(change,select=null) {
-      return db.transaction(async tx => {
+      let ready=false;
+      const answer=await db.transaction(async tx => {
         // Một khóa riêng cho hàng của sản phẩm: hai consumer không cùng vượt trần lease.
         await tx.query('SELECT id FROM handout67.queue_lock WHERE id=1 FOR UPDATE');
         // Chụp giờ sau khi có khóa. Sweep cũ vẫn đọc đủ; claim dùng đúng phiên cần đổi.
@@ -103,9 +119,7 @@ export function createStore(db,{clock=Date.now}={}) {
           const answer = await change(sessions,scope?{now:scope.now,activeLeases}:undefined);
           for (const session of sessions) {
             if(JSON.stringify(session)===originals.get(session.ref))continue;
-            markDashboardActivity(JSON.parse(originals.get(session.ref)),session,clock());
-            await tx.query('UPDATE handout67.session SET payload=$2::jsonb, updated_at=now() WHERE ref=$1', [session.ref,JSON.stringify(session)]);
-            await auditChange(tx,JSON.parse(originals.get(session.ref)),session,clock());
+            if(await saveChanged(tx,JSON.parse(originals.get(session.ref)),session))ready=true;
           }
           if(!scope||!Array.isArray(answer)||answer.length||pass>=16||(scope.maxLeases!==null&&activeLeases>=scope.maxLeases))return answer;
           // Nếu người dùng đổi bài trong lúc chờ khóa dòng, chọn lại; không báo hàng rỗng giả.
@@ -113,6 +127,8 @@ export function createStore(db,{clock=Date.now}={}) {
           if(!pending.rows[0].waiting)return answer;
         }
       });
+      notifyCommitted(ready);
+      return answer;
     }
   };
 }

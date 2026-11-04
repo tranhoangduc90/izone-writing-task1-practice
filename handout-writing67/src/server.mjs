@@ -18,14 +18,15 @@ const pool=new pg.Pool({connectionString:settings.databaseUrl,max:5,connectionTi
 const target=await pool.query('SELECT current_database() AS db, current_user AS role');
 if(target.rows[0].db!=='handout_writing67'||target.rows[0].role!=='handout67_runtime')throw new Error('Database thực tế sai đích.');
 await pool.query('SELECT ref FROM handout67.session LIMIT 1');
-const store=createStore(postgresAdapter(pool));
+const reportWakeError=()=>console.error('Handout Writing 67: chưa đánh thức được đường chấm; job vẫn được giữ.');
+const wake=createWake({url:settings.wakeUrl,secret:settings.wakeSecret,hasWork:async()=>{const result=await pool.query("SELECT (j->>'jobRef') || ':' || COALESCE(j->>'tries','0') AS key FROM handout67.session s, jsonb_array_elements(s.payload->'jobs') j WHERE j->>'status'='queued' AND COALESCE((j->>'nextAttemptAt')::bigint,0)<=$1",[Date.now()]);return result.rows.map(r=>r.key);},onError:reportWakeError});
+const store=createStore(postgresAdapter(pool),{onQueueCommitted:wake.request,onQueueError:reportWakeError});
 await pool.query('SELECT job_ref FROM handout67.grading_attempt LIMIT 1');
 const renderJob=await promptRenderer(settings.promptFile,{classes:settings.classes}),lessons=renderJob.lessons;
 const roster=rosterAdapter(settings);
 const service=createService({store,roster,secret:settings.secret,renderJob,lessons,retryDelays:[0,5000,15000]});
 // Không có pump gọi AI nền; n8n phải chờ endpoint xử lý mỗi attempt để giữ trần chung.
 const processor=createProcessor({service,callAI:gatewayAdapter(settings),onError:code=>console.error('Handout67: '+code)});
-const wake=createWake({url:settings.wakeUrl,secret:settings.wakeSecret,hasWork:async()=>{const result=await pool.query("SELECT (j->>'jobRef') || ':' || COALESCE(j->>'tries','0') AS key FROM handout67.session s, jsonb_array_elements(s.payload->'jobs') j WHERE j->>'status'='queued' AND COALESCE((j->>'nextAttemptAt')::bigint,0)<=$1",[Date.now()]);return result.rows.map(r=>r.key);},onError:()=>console.error('Handout Writing 67: chưa đánh thức được đường chấm; job vẫn được giữ.')});
 // Danh sách quyền lớp do Handout67 sở hữu; không đọc bảng tài khoản của hệ khác.
 const oauth=new OAuth2Client();
 oauth.transporter.defaults={...oauth.transporter.defaults,timeout:5000};

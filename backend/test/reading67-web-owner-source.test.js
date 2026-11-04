@@ -29,7 +29,7 @@ test('V1 loại bảo lưu/thiếu mapping khỏi roster; nguồn lỗi không g
 test('Tra ngược bằng UUID đã duyệt và Google ID, chỉ gọi endpoint V1 thật đang có',async()=>{
  const f=fixture();const result=await f.source.resolveClassroom({courseId:'classroom-IC2304',googleUserId:'google-A'});assert.equal(result.studentRef,A);
  assert(f.calls.every(x=>x.startsWith('/v1/owner?')));
- await assert.rejects(f.source.resolveClassroom({courseId:'other-course',googleUserId:'google-A'}),e=>e.code==='OWNER_MISMATCH');
+ await assert.rejects(f.source.resolveClassroom({courseId:'other-course',googleUserId:'google-A'}),e=>e.code==='OWNER_NOT_MAPPED');
  f.state.denied.clear();f.state.duplicate=true;await assert.rejects(f.source.resolveClassroom({courseId:'classroom-IC2304',googleUserId:'google-A'}),e=>e.code==='OWNER_MISMATCH');
 });
 test('Snapshot chưa duyệt, sai lớp, nguồn cũ/hash hỏng bị chặn trước cấp quyền',async()=>{

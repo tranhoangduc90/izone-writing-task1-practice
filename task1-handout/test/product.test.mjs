@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import request from 'supertest';
 import {setup,queue,feedback,revision,modelResponse} from './helpers.mjs';
 import {createApp} from '../src/app.mjs';
-import {processBatch} from '../src/worker.mjs';
+import {processBatch,runWorker} from '../src/worker.mjs';
 import {renderPrompt,validateFeedback,normalizeFeedback,readModel,sha} from '../src/grading.mjs';
 import {loadConfig} from '../src/config.mjs';
 import fs from 'node:fs/promises';
@@ -44,8 +44,42 @@ test('global capacity survives another worker and expired leases are recovered',
  const first=await x.service.claimJobs({workerId:'a',maxJobs:2,leaseSeconds:420}),second=await x.service.claimJobs({workerId:'b',maxJobs:2,leaseSeconds:420});
  assert.equal(first.length,2);assert.equal(second.length,0);
  await x.pool.query("UPDATE writing_practice.check_attempt SET lease_expires_at=now()-interval '1 second'");await x.service.recoverJobs();
- assert.equal((await x.service.claimJobs({workerId:'b',maxJobs:2,leaseSeconds:420})).length,2);
+ const reclaimed=await x.service.claimJobs({workerId:'b',maxJobs:2,leaseSeconds:420});
+ assert.deepEqual(reclaimed.map(job=>job.jobRef).sort(),first.map(job=>job.jobRef).sort());
+ const job=reclaimed.find(item=>item.section==='overview'),old=first.find(item=>item.jobRef===job.jobRef);
+ assert.notEqual(job.leaseToken,old.leaseToken);
+ const result={jobRef:job.jobRef,resultStatus:'passed',feedback:feedback.overview,artifacts:{productId:'sw-task1',attemptRef:job.jobRef,mode:'socratic-v2',promptSha256:job.gradingContext.promptSha256,snapshotSha256:sha(job.snapshot)}};
+ await assert.rejects(x.service.completeJob({...result,leaseToken:old.leaseToken}),e=>e.code==='LEASE_NOT_OWNED');
+ await x.service.completeJob({...result,leaseToken:job.leaseToken});
+ assert.equal((await x.service.getAttempt(job.jobRef)).comment.feedback,feedback.overview);
  await assert.rejects(x.service.claimJobs({workerId:'x',maxJobs:1,leaseSeconds:420,workerPool:'task2'}),e=>e.code==='WRONG_PRODUCT');
+});
+test('worker discovers every five seconds and recovers independently during a blocked claim',async()=>{
+ const stop=new AbortController(),events=[],timers=new Map();
+ const blocked=Promise.withResolvers(),claiming=Promise.withResolvers();
+ const service={
+  async recoverJobs(){events.push('recover');return [];},
+  async claimJobs(){
+   events.push('claim');
+   if(events.filter(event=>event==='claim').length===2){claiming.resolve();return blocked.promise;}
+   return [];
+  }
+ };
+ const pause=(ms,_value,{signal})=>new Promise((resolve,reject)=>{
+  const abort=()=>reject(new DOMException('Stopped','AbortError'));
+  signal.addEventListener('abort',abort,{once:true});
+  timers.set(ms,()=>{signal.removeEventListener('abort',abort);timers.delete(ms);resolve();});
+ });
+ const worker=runWorker({service,signal:stop.signal,pause,logger:{log(){},error(){assert.fail('unexpected worker failure');}}});
+ try{
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.deepEqual(events,['recover','claim']);
+  assert.deepEqual([...timers.keys()].sort((a,b)=>a-b),[5000,30000]);
+  timers.get(5000)();await claiming.promise;
+  timers.get(30000)();await new Promise(resolve=>setImmediate(resolve));
+  assert.deepEqual(events,['recover','claim','claim','recover']);
+ }finally{stop.abort();blocked.resolve([]);await worker;}
+ assert.deepEqual(events,['recover','claim','claim','recover']);
 });
 test('saved Draft and prerequisites are enforced; conflicting saves preserve original',async t=>{
  const x=await setup(t);

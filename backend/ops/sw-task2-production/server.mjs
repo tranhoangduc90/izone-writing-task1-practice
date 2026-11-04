@@ -13,6 +13,7 @@ import {createTeacherCommentService} from '../../src/teacher-comment-service.js'
 import {createLmsResultService} from '../../src/lms-result-service.js';
 import {createLesson9Service} from './lesson9-service.js';
 import {readLesson9Overview} from './lesson9-overview.js';
+import {readQueueStatus} from './queue-status.mjs';
 import {createTeacherClassAccessService} from '../../src/teacher-class-access.js';
 import {createProvisionalStudentService} from '../../src/provisional-service.js';
 import {createLesson9VocabularyService} from './lesson9-vocabulary.js';
@@ -91,7 +92,12 @@ app.get('/api/v1/admin/sw/lesson9/overview/:slug',teacherAuth.authenticate,safe(
  await access.assertActivityClass(q.reviewer,{activitySlug,classRef});
  r.json({ok:true,activitySlug,classRef,students:await readLesson9Overview(pool,activitySlug,classRef)});
 }));
-app.get('/api/v1/shops/status',safe(async(q,r)=>r.json({ok:true,environment:'production',aiMode:'n8n-task2-connected',database:(await pool.query('SELECT current_database() name')).rows[0].name,queued:Number((await pool.query("SELECT count(*) n FROM writing_practice.check_attempt a JOIN writing_practice.activity_session s ON s.id=a.session_id JOIN writing_practice.activity task ON task.id=s.activity_id WHERE a.status='queued' AND task.grading_pool='task2'")).rows[0].n)})));
+app.get('/api/v1/shops/status',safe(async(q,r)=>{
+ const provided=Buffer.from((q.get('authorization')||'').replace(/^Bearer\s+/i,''));
+ const expected=Buffer.from(config.internalApiToken);
+ const includeRecovery=provided.length===expected.length&&crypto.timingSafeEqual(provided,expected);
+ r.json({ok:true,environment:'production',aiMode:'n8n-task2-connected',...await readQueueStatus(pool,includeRecovery)});
+}));
 
 app.get('/api/v1/sw/status',safe(async(_q,r)=>r.json({ok:true,environment:'production',database:(await pool.query('SELECT current_database() name')).rows[0].name,aiMode:'sw-task2-native',enabledLessons:ENABLED_LESSONS,queued:Number((await pool.query("SELECT count(*) n FROM writing_practice.check_attempt WHERE status='queued'")).rows[0].n)})));
 app.get('/api/v1/activities/:slug/roster',safe(async(q,r)=>{requireLesson(q.params.slug);const data=await service.getRoster(q.params.slug);r.json({...data,ok:true,classes:data.classes.filter(c=>c.className.startsWith('CS.'))});}));

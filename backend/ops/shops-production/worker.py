@@ -1,6 +1,8 @@
 """Bounded concurrent consumer of the independent Shops production queue."""
 import concurrent.futures,datetime,json,os,pathlib,signal,time,urllib.request
 STOP=False
+RECOVER_SECONDS=30
+RECOVER_IDLE_SECONDS=300
 def now():return datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00','Z')
 def stop(*_):
  global STOP
@@ -9,6 +11,9 @@ def request(url,body=None,headers=None,timeout=20):
  q=urllib.request.Request(url,data=json.dumps(body).encode() if body is not None else None,headers={'Content-Type':'application/json',**(headers or {})})
  with urllib.request.urlopen(q,timeout=timeout) as r:
   raw=r.read(1024*1024);return r.status,json.loads(raw) if raw.strip() else None
+def should_recover(status,last_recover,at):
+ # Missing flag means an old API or rollback. Keep the original cadence in that case.
+ return last_recover is None or at-last_recover>=(RECOVER_IDLE_SECONDS if status.get('recoverDue') is False else RECOVER_SECONDS)
 def main():
  signal.signal(signal.SIGTERM,stop);signal.signal(signal.SIGINT,stop)
  c=json.loads(pathlib.Path(os.environ['SHOPS_WORKER_CONFIG']).read_text())
@@ -23,12 +28,12 @@ def main():
   if outcome!='unknown':state.pop('errorType',None)
   temp=directory/'heartbeat.tmp';temp.write_text(json.dumps(state)+'\n');temp.replace(directory/'heartbeat.json')
  def dispatch():return request(c['webhookUrl'],{'source':'shops-production-vps-worker','version':1},{'X-Shops-Worker-Key':c['headerKey']},1250)
- executor=concurrent.futures.ThreadPoolExecutor(max_workers=2);pending=set();last_recover=0
+ executor=concurrent.futures.ThreadPoolExecutor(max_workers=2);pending=set();last_recover=None
  try:
   while not STOP:
    delay=5
    try:
-    _,status=request(c['statusUrl'])
+    _,status=request(c['statusUrl'],headers={'Authorization':'Bearer '+c['apiToken']})
     assert status.get('environment')=='production' and status.get('database')=='shops_writing','WRONG_SHOPS_TARGET'
     queued=status.get('queued');assert type(queued) is int and queued>=0
     for future in list(pending):
@@ -36,7 +41,7 @@ def main():
      pending.remove(future)
      try:future.result()
      except Exception:state['failures']+=1
-    if time.monotonic()-last_recover>=30:
+    if should_recover(status,last_recover,time.monotonic()):
      request(c['recoverUrl'],{}, {'Authorization':'Bearer '+c['apiToken']});last_recover=time.monotonic();state['recoverCalls']+=1
     for _ in range(min(queued,2-len(pending))):
      pending.add(executor.submit(dispatch));state['dispatches']+=1

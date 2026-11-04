@@ -19,13 +19,38 @@ export async function processBatch({service,aiUrl,call,workerId='sw-task1-worker
   }
  }));
 }
+export async function runWorker({service,aiUrl,signal,pause=delay,logger=console}){
+ const log=(level,fields)=>logger[level](JSON.stringify({at:new Date().toISOString(),productId:'sw-task1',...fields}));
+ async function recover(){
+  try{
+   const jobs=await service.recoverJobs();
+   if(jobs.length)log('log',{outcome:'recovered',count:jobs.length});
+  }catch(error){log('error',{outcome:'unknown',stage:'recover',errorType:error.name});}
+ }
+ async function discover(){
+  try{
+   const jobs=await processBatch({service,aiUrl});
+   log('log',{outcome:jobs.length?'processed':'idle',jobs});
+  }catch(error){log('error',{outcome:'unknown',stage:'claim',errorType:error.name});}
+ }
+ async function repeat(interval,task){
+  while(!signal.aborted){
+   try{await pause(interval,undefined,{signal});}
+   catch(error){if(signal.aborted&&error.name==='AbortError')return;throw error;}
+   if(!signal.aborted)await task();
+  }
+ }
+ // Recover expired leases before the first claim, and continue recovery even during a long AI call.
+ await recover();
+ await Promise.all([repeat(30000,recover),(async()=>{
+  if(!signal.aborted)await discover();
+  await repeat(5000,discover);
+ })()]);
+}
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
  const config=loadConfig(),pool=createDatabasePool(config),service=createService({pool,pepper:config.pepper});
- let stop=false;process.on('SIGTERM',()=>{stop=true;});process.on('SIGINT',()=>{stop=true;});
- while(!stop){
-  try{await service.recoverJobs();const outcomes=await processBatch({service,aiUrl:config.aiUrl});console.log(JSON.stringify({at:new Date().toISOString(),productId:'sw-task1',outcome:outcomes.length?'processed':'idle',jobs:outcomes}));}
-  catch(error){console.error(JSON.stringify({at:new Date().toISOString(),productId:'sw-task1',outcome:'unknown',errorType:error.name}));}
-  if(!stop)await delay(5000);
- }
- await pool.end();
+ const stop=new AbortController();
+ process.on('SIGTERM',()=>stop.abort());process.on('SIGINT',()=>stop.abort());
+ try{await runWorker({service,aiUrl:config.aiUrl,signal:stop.signal});}
+ finally{await pool.end();}
 }

@@ -4,7 +4,7 @@ import { createApi } from '../src/http.mjs';
 
 // Fixture chỉ thay DB bằng auth đã xác minh; rủi ro nằm ở HTTP bucket thật sau một proxy.
 test('T-PROXY · hai phiên qua cùng proxy không dùng chung giới hạn học viên; health độc lập',async t=>{
-  const service={authorizeSession(ref,token){assert.equal(token,'capability-'+ref);},read:async ref=>({ref})};
+  const service={authorizeSession(ref,token){assert.equal(token,'capability-'+ref);},readForPoll:async ref=>({session:{ref}})};
   const server=createApi({service,origins:[],internalSecret:'fixture'});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   t.after(()=>new Promise(resolve=>server.close(resolve)));

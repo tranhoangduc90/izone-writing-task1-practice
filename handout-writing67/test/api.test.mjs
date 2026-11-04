@@ -19,9 +19,9 @@ async function setup(t) {
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   t.after(async()=>{await new Promise(resolve=>server.close(resolve));await db.close();});
   const base=`http://127.0.0.1:${server.address().port}/api/handout67/v1`;
-  async function call(path,{method='GET',body,token,origin}={}) {
-    const response=await fetch(base+path,{method,headers:{...(body?{'Content-Type':'application/json'}:{}),...(token?{Authorization:`Bearer ${token}`}:{ }),...(origin?{Origin:origin}:{})},body:body?JSON.stringify(body):undefined});
-    return {status:response.status,body:await response.json()};
+  async function call(path,{method='GET',body,token,origin,headers}={}) {
+    const response=await fetch(base+path,{method,headers:{...(body?{'Content-Type':'application/json'}:{}),...(token?{Authorization:`Bearer ${token}`}:{ }),...(origin?{Origin:origin}:{}),...headers},body:body?JSON.stringify(body):undefined});
+    return {status:response.status,headers:response.headers,body:response.status===304?await response.text():await response.json()};
   }
   const open=async student=>{const r=await call('/sessions',{method:'POST',body:{activity:'lesson5',classRef:'c67',studentRef:student||'s-a'}});assert.equal(r.status,201);return {ref:r.body.session.ref,token:r.body.token,session:r.body.session};};
   const read=async who=>(await call('/sessions/'+who.ref,{token:who.token})).body.session;
@@ -80,6 +80,35 @@ test('T-SEC · token sai người/hết hạn, origin lạ và callback không c
   assert.equal((await h.call('/internal/jobs/claim',{method:'POST',body:{}})).status,401);
   assert.equal((await h.call('/sessions',{method:'POST',body:{activity:'lesson5',classRef:'c67',studentRef:'outsider'}})).status,403);
   h.advance(43200000);assert.equal((await h.call(`/sessions/${a.ref}`,{token:a.token})).status,401);
+});
+
+test('T-POLL · phiên chưa đổi trả rỗng, nhưng quyền, kết quả và hạn lease vẫn có hiệu lực',async t=>{
+  const h=await setup(t),who=await h.open(),other=await h.open('s-b');
+  const path=`/sessions/${who.ref}`, origin='http://127.0.0.1:8785';
+  const get=(etag,token=who.token)=>h.call(path,{token,origin,headers:etag?{'If-None-Match':etag}:{}});
+  const initial=await get(), tag=initial.headers.get('etag');
+  assert.equal(initial.status,200);assert.ok(tag);
+  assert.match(initial.headers.get('access-control-expose-headers'),/etag/i);
+  const unchanged=await get(tag);
+  assert.equal(unchanged.status,304);assert.equal(unchanged.body,'');
+  assert.equal((await get(tag,other.token)).status,401);
+  assert.equal((await get()).status,200);
+  await h.save(who,{idea1:sample.idea1,idea2:sample.idea2,topicSentence:sample.topicSentence});
+  assert.equal((await h.check(who,'topic')).status,202);
+  const [first]=await h.claim(),leased=await get(tag);
+  assert.equal(leased.body.session.processing.topic.status,'leased');
+  const leaseTag=leased.headers.get('etag');
+  h.advance(300001);
+  const expired=await get(leaseTag);
+  assert.equal(expired.status,200);assert.equal(expired.body.session.processing.topic.status,'queued');
+  const [second]=await h.claim();assert.equal(second.operationKey,first.operationKey);
+  const pending=await get(), pendingTag=pending.headers.get('etag');
+  const result={resultStatus:'passed',feedback:'Đã đạt.'};
+  assert.equal((await h.complete(second,result)).status,200);
+  const completed=await get(pendingTag);
+  assert.equal(completed.status,200);
+  assert.equal(completed.body.session.version,pending.body.session.version);
+  assert.equal(completed.body.session.steps.topic.status,'passed');
 });
 
 test('T-PART · callback commit rồi mất ACK; readback và replay không nhân Comment',async t=>{

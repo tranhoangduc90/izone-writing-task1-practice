@@ -37,7 +37,7 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
       const teacherPath=requestUrl.pathname.startsWith(prefix+'/teacher/');
       if(origin && !origins.includes(origin))fail('ORIGIN_NOT_ALLOWED',403);
       if(origin){res.setHeader('Access-Control-Allow-Origin',origin);res.setHeader('Vary','Origin');if(teacherPath)res.setHeader('Access-Control-Allow-Credentials','true');}
-      if(req.method==='OPTIONS') {res.setHeader('Access-Control-Allow-Methods','GET,POST,PUT,DELETE,OPTIONS');res.setHeader('Access-Control-Allow-Headers','Content-Type,Authorization,X-Handout67-CSRF');res.writeHead(204);res.end();return;}
+      if(req.method==='OPTIONS') {res.setHeader('Access-Control-Allow-Methods','GET,POST,PUT,DELETE,OPTIONS');res.setHeader('Access-Control-Allow-Headers','Content-Type,Authorization,X-Handout67-CSRF,If-None-Match');res.writeHead(204);res.end();return;}
       const path=requestUrl.pathname;
       const internal=path.startsWith(prefix+'/internal/');
       if(internal && !equal(req.headers.authorization,`Bearer ${internalSecret}`))fail('INTERNAL_UNAUTHORIZED',401);
@@ -104,7 +104,15 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
         const match=path.match(/^\/api\/handout67\/v1\/sessions\/([^/]+)(?:\/(responses|checks|attest|edit|threads|idea2|vocabulary\/(?:[012]|all)\/retry))?$/);
         if(!match||!uuid.test(match[1]))fail('NOT_FOUND',404);
         const ref=match[1],token=req.headers.authorization?.replace(/^Bearer /,'');
-        if(req.method==='GET'&&!match[2])value={session:await service.read(ref,token)};
+        if(req.method==='GET'&&!match[2]){
+          const result=await service.readForPoll(ref,token,req.headers['if-none-match']);
+          if(result.etag){
+            res.setHeader('ETag',result.etag);
+            if(origin)res.setHeader('Access-Control-Expose-Headers','ETag');
+          }
+          if(result.notModified){res.writeHead(304);res.end();return;}
+          value={session:result.session};
+        }
         else if(req.method==='PUT'&&match[2]==='responses')value={session:await service.save(ref,token,await jsonBody(req))};
         else if(req.method==='POST'&&match[2]==='checks'){value=await service.check(ref,token,await jsonBody(req));status=202;}
         else if(req.method==='POST'&&match[2]==='attest')value={session:await service.attest(ref,token,await jsonBody(req))};

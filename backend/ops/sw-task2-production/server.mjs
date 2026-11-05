@@ -1,4 +1,5 @@
 import express from 'express';
+import {installDeferredVocabularyRoutes} from './deferred-vocabulary.mjs';
 import {ENABLED_LESSONS,requireLesson} from './lesson-config.mjs';
 import {reviewerClassAccessSql} from '../../src/teacher-class-access-sql.js';
 import crypto from 'node:crypto';
@@ -67,6 +68,7 @@ app.post('/api/v1/auth/session/shared-session',async(q,r,next)=>{
 });
 app.get('/api/v1/auth/config',(_q,r)=>r.json({ok:true,googleClientId:config.googleClientId,sharedSession:true,source:'shops'}));
 const safe=fn=>(req,res,next)=>Promise.resolve(fn(req,res)).catch(next);
+installDeferredVocabularyRoutes(app,{pool,config,getSession:lesson9.details});
 app.use((q,r,next)=>{if(q.method!=='GET'&&q.get('origin')&&!config.allowedOrigins.has(q.get('origin')))return r.status(403).json({ok:false,error:'ORIGIN_DENIED'});next();});
 app.post('/api/v1/lesson9/sessions',safe(async(q,r)=>{
  const input=z.object({activitySlug:z.enum(ENABLED_LESSONS),classRef:z.uuid(),studentRef:z.uuid(),accessCode:z.string().regex(/^\d{4}$/).optional()}).parse(q.body);

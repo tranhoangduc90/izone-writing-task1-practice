@@ -8,13 +8,15 @@ import {WebGradingError} from './web-grader.js';
 import {planReading67HomeworkWrite,requireReading67DocsRevision} from './web-homework-docs.js';
 import {reading67ResultSummary,reading67ProgressText} from './web-result-summary.js';
 import {guardReading67HomeworkDocs} from './web-homework-code-guard.js';
+import {createHomeworkDocsJournal} from './web-journal-docs.js';
 const args=s=>[s.ownerId,s.courseId,s.code,s.version];
 const clause='owner_id=$1 AND course_id=$2 AND assignment_code=$3 AND content_version=$4';
 const fail=(code,status=409)=>{throw new WebGradingError(code,status);};
 const scopeFor=b=>({ownerId:b.owner_id,courseId:b.course_id,code:b.assignment_code,version:b.content_version});
 
-export function createReading67Homework({db,metadata,pageBase,owner,docs,managedCodes=[],clock=Date.now,planWrite=planReading67HomeworkWrite,resultSummary=reading67ResultSummary,progressText=reading67ProgressText,completionText,ownerEntry}){
+export function createReading67Homework({db,metadata,pageBase,owner,docs,managedCodes=[],clock=Date.now,planWrite=planReading67HomeworkWrite,resultSummary=reading67ResultSummary,progressText=reading67ProgressText,completionText,ownerEntry,journal=null}){
  docs=guardReading67HomeworkDocs(docs,managedCodes);
+ const diagnostic=createHomeworkDocsJournal({journal,metadata,clock});
  const page=new URL(pageBase);if(page.protocol!=='https:')throw Error('HTTPS_PAGE_BASE_REQUIRED');
  page.searchParams.set('server','1');page.searchParams.set('assignmentCode',metadata.code);
  const entryUrl=page.href;
@@ -31,7 +33,8 @@ export function createReading67Homework({db,metadata,pageBase,owner,docs,managed
   const old=(await tx.query('SELECT * FROM reading_listening67.web_homework_job WHERE binding_id=$1 AND event_key=$2',[b.id,key])).rows[0];if(old)return old;
   const sequence=kind==='cta'?0:b.sequence+1;
   if(kind!=='cta')await tx.query('UPDATE reading_listening67.web_homework_binding SET sequence=$2 WHERE id=$1',[b.id,sequence]);
-  return (await tx.query('INSERT INTO reading_listening67.web_homework_job(id,binding_id,event_key,sequence,kind,payload) VALUES($1,$2,$3,$4,$5,$6::jsonb) RETURNING *',[randomUUID(),b.id,key,sequence,kind,JSON.stringify(payload)])).rows[0];
+  const job=(await tx.query('INSERT INTO reading_listening67.web_homework_job(id,binding_id,event_key,sequence,kind,payload) VALUES($1,$2,$3,$4,$5,$6::jsonb) RETURNING *',[randomUUID(),b.id,key,sequence,kind,JSON.stringify(payload)])).rows[0];
+  if(diagnostic.enabled)tx.afterCommit?.(()=>diagnostic.queued(scopeFor(b),job));return job;
  }
  async function state(tx,s,b){
   const draft=(await tx.query('SELECT run_no,revision FROM reading_listening67.web_draft WHERE '+clause,args(s))).rows[0];
@@ -104,18 +107,23 @@ export function createReading67Homework({db,metadata,pageBase,owner,docs,managed
    return {...j,leaseId,attempts:j.attempts+1};
   });
   if(!job)return false;
+  let capture;
   try{
    const b=(await db.query('SELECT * FROM reading_listening67.web_homework_binding WHERE id=$1',[job.binding_id])).rows[0],s=scopeFor(b);
+   capture=diagnostic.start(s,job);
    const target=await owner.resolve(s,b.target);
    if(target.classId!==s.courseId||target.studentRef!==s.ownerId||target.code!==s.code||target.version!==s.version)fail('DOC_IDENTITY_MISMATCH');
    if(b.target&&['courseId','courseWorkId','submissionId','documentId','tabId'].some(k=>b.target[k]!==target[k]))fail('DOC_TARGET_CHANGED');
    await db.query('UPDATE reading_listening67.web_homework_binding SET target=$2::jsonb WHERE id=$1',[b.id,JSON.stringify(target)]);
+   capture?.resolved(target);
    const effective={...b,document_id:target.documentId,tab_id:target.tabId,code:s.code};
    const effectiveJob=job.kind==='cta'?{...job,payload:{...job.payload,url:entryFor(s,target)}}:job;
-   let plan=planWrite(await docs.read(target.documentId),effective,effectiveJob);
+   capture?.read();let plan=planWrite(await docs.read(target.documentId),effective,effectiveJob);
    if(!plan.verified){
     requireReading67DocsRevision(plan);
+    capture?.write(plan);
     await docs.write(target.documentId,plan);
+    capture?.emit('write_received');capture?.read();
     plan=planWrite(await docs.read(target.documentId),{...effective,last_doc_text:job.kind==='status'?job.payload.text:b.last_doc_text},effectiveJob);
    }
    if(!plan.verified)fail('DOC_READBACK_FAILED');
@@ -124,6 +132,7 @@ export function createReading67Homework({db,metadata,pageBase,owner,docs,managed
     if(!row)fail('DOC_LEASE_LOST');
     if(job.kind==='status')await tx.query('UPDATE reading_listening67.web_homework_binding SET last_doc_sequence=$2,last_doc_text=$3,last_doc_link=$4 WHERE id=$1 AND last_doc_sequence<$2',[b.id,job.sequence,job.payload.text,job.payload.link]);
    });
+   capture?.finish('verified');
   }catch(error){
    const code=error.name==='TimeoutError'?'DOC_TIMEOUT':typeof error.code==='string'?error.code:'DOC_RETRY';
    const missing=code==='HOMEWORK_NOT_FOUND';
@@ -132,6 +141,7 @@ export function createReading67Homework({db,metadata,pageBase,owner,docs,managed
    const blocked=hard||(!missing&&!recoverable&&job.attempts>=8);
    const delay=missing?300:recoverable?([60,300,900][job.attempts-1]||3600):Math.min(300,2**job.attempts);
    const updated=await db.query("UPDATE reading_listening67.web_homework_job SET status=$3,error_code=$4,available_at=now()+$5*interval '1 second',lease_until=NULL WHERE id=$1 AND lease_id=$2 AND status='processing' RETURNING id",[job.id,job.leaseId,blocked?'blocked':'pending',code,delay]);
+   capture?.finish(updated.rows.length?(blocked?'blocked':'retry'):'outcome_unknown',code,updated.rows.length?delay:undefined);
    if(recoverable&&job.attempts===4&&updated.rows.length)console.warn(JSON.stringify({event:'reading67_docs_recovery_delayed',code,assignmentCode:metadata.code,jobId:job.id}));
   }
   return true;

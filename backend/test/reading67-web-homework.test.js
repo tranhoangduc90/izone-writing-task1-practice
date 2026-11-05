@@ -137,6 +137,27 @@ test('Hai người xen kẽ và Google chưa có Homework hơn tám lần: pendi
  f.control.missing=false;await f.due();await f.drain();assert.ok((await f.jobs()).every(j=>j.status==='verified'));
  assert.ok(f.docs.values.has(f.target(scope).documentId));assert.ok(f.docs.values.has(f.target(other).documentId));assert.equal((await f.store.draft(other)).body.notes,'Người B');
 });
+test('A missing Docs revision pauses writing and replays saved results once permission returns',async t=>{
+ const f=await fixture(t);
+ await f.store.save(scope,{baseRevision:0,mutationId:randomUUID(),body});
+ await f.homework.once(); // CTA was verified before the temporary loss of write access.
+ const submission=await f.store.submit(scope,{revision:1,requestId:randomUUID()});
+ const grading=await f.store.claim();await f.store.finish(grading,result(grading));
+ const saved=await f.store.attempt(scope,submission.attemptId),read=f.docs.read;
+ f.docs.read=async id=>{const doc=await read(id);delete doc.revisionId;return doc;};
+ const writes=f.docs.calls.write;
+ await f.homework.once();
+ const stuck=(await f.jobs())[1];
+ assert.equal(stuck.status,'pending');assert.equal(stuck.error_code,'DOC_WRITE_UNAVAILABLE');
+ assert.equal(await f.homework.once(),false);
+ assert.equal(f.docs.calls.write,writes);
+ f.docs.read=read;await f.due();await f.drain();
+ const jobs=await f.jobs(),last=jobs.at(-1);
+ assert.ok(jobs.every(j=>j.status==='verified'));
+ assert.equal(new URL(last.payload.link).searchParams.get('attemptId'),submission.attemptId);
+ assert.equal(f.docs.get(f.target(scope).documentId).chars.map(c=>c.text).join('').split(HOMEWORK_PREFIX).length-1,1);
+ assert.deepEqual(await f.store.attempt(scope,submission.attemptId),saved);
+});
 test('Sai UUID bị blocked trước đọc Docs; job sau cùng người không vượt qua; bài đã lưu vẫn nguyên',async t=>{
  const f=await fixture(t);await f.store.save(scope,{baseRevision:0,mutationId:randomUUID(),body});const before=await f.store.draft(scope);f.control.wrong=true;
  await f.homework.once();assert.equal(f.docs.calls.read,0);const jobs=await f.jobs();assert.equal(jobs[0].status,'blocked');assert.equal(jobs[0].error_code,'DOC_IDENTITY_MISMATCH');assert.equal(await f.homework.once(),false);assert.deepEqual(await f.store.draft(scope),before);

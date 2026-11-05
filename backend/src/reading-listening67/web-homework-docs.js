@@ -43,7 +43,7 @@ function linked(rs,start,end,url){return charsBetween(rs,start,end).every(c=>c.s
 // Hai bài Reading có thể cùng tab: CTA phải đứng ngay trước mã, ô trạng thái
 // lấy trong bảng gần nhất bao quanh mã. Thiếu ranh giới chắc chắn thì không đoán.
 export function locateReading67Homework(document,binding,contract={}){
- if(document.documentId!==binding.document_id||!document.revisionId)fail('DOC_IDENTITY_MISMATCH');
+ if(document.documentId!==binding.document_id)fail('DOC_IDENTITY_MISMATCH');
  if(!binding.code)fail('DOC_CODE_MISMATCH');
  const tab=allTabs(document.tabs).find(t=>t.tabProperties?.tabId===binding.tab_id);
  if(!tab)fail('DOC_TAB_NOT_FOUND');
@@ -99,8 +99,15 @@ export function createReading67GoogleDocs(auth,{fetcher=fetch}={}){
  async function call(documentId,suffix,body){
   const access=await auth.getAccessToken(),token=typeof access==='string'?access:access.token;
   const response=await fetcher('https://docs.googleapis.com/v1/documents/'+encodeURIComponent(documentId)+suffix,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(10000)});
-  if(!response.ok){const code=[401,403,404].includes(response.status)?'DOC_HTTP_'+response.status:'DOC_RETRY';throw new WebGradingError(code,503);}
+  if(!response.ok){const code=[401,403,404,429].includes(response.status)||response.status>=500?'DOC_HTTP_'+response.status:'DOC_RETRY';throw new WebGradingError(code,503);}
   return response.json();
  }
- return {read:id=>call(id,'?includeTabsContent=true'),write:(id,plan)=>call(id,':batchUpdate',{requests:plan.requests,writeControl:{requiredRevisionId:plan.revisionId}})};
+ return {read:id=>call(id,'?includeTabsContent=true'),write:(id,plan)=>{
+  requireReading67DocsRevision(plan);
+  return call(id,':batchUpdate',{requests:plan.requests,writeControl:{requiredRevisionId:plan.revisionId}});
+ }};
+}
+
+export function requireReading67DocsRevision(plan){
+ if(typeof plan.revisionId!=='string'||!plan.revisionId.trim())fail('DOC_WRITE_UNAVAILABLE');
 }

@@ -133,11 +133,12 @@ export function createReading67WebStore({db,grader,homework,resultSummary=readin
   return {draft,save,submit,attempt,history,archives,reset,firstCompleted,claim,recordProvider,finish,fail,recoverExpired,validation};
 }
 
-export function createReading67WebWorker({store,grader,onError=()=>{}}){
+export function createReading67WebWorker({store,grader,onError=()=>{},onStart=null}){
   let running=null,timer=null,closed=false,lastRecovery=0;
   async function tick(){
     if(running||closed)return;
     running=(async()=>{if(Date.now()-lastRecovery>30000){await store.recoverExpired();lastRecovery=Date.now();}const job=await store.claim();if(!job)return;
+      try{onStart?.(job);}catch{}
       try{
         if(job.graderHash!==grader.pins.sha256)throw new WebGradingError('GRADER_PIN_MISMATCH',503);
         const saved=store.validation?await store.validation.load(job):null;

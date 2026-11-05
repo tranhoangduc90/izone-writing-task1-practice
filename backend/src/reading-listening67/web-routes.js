@@ -24,7 +24,7 @@ export function createReading67WebRouter({store,content,grader,authenticate,iden
   const scope=q=>makeScope(q.webIdentity);
   function draftReceipt(q,r,value){
     const readingJournal=journal?.context(scope(q),value.runNo);
-    if(readingJournal){r.set('Cache-Control','no-store');return {ok:true,...value,readingJournal};}
+    if(readingJournal){r.set('Cache-Control','no-store');return {ok:true,...value,[config.journalField==='listeningJournal'?'listeningJournal':'readingJournal']:readingJournal};}
     return {ok:true,...value};
   }
   const requireOpen=()=>{if(config.studentsOpen===false)throw new WebGradingError('CLASS_NOT_OPEN',423);};

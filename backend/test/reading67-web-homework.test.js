@@ -4,10 +4,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
+import {DOC_CONTRACT as LISTENING_DOC_CONTRACT} from '../src/listening-homework67/app.js';
 import {PGlite} from '@electric-sql/pglite';
 import {createReading67WebStore} from '../src/reading-listening67/web-store.js';
 import {createReading67Homework} from '../src/reading-listening67/web-homework.js';
-import {HOMEWORK_CTA,HOMEWORK_STATUS,HOMEWORK_PREFIX} from '../src/reading-listening67/web-homework-docs.js';
+import {HOMEWORK_CTA,HOMEWORK_STATUS,HOMEWORK_PREFIX,planReading67HomeworkWrite} from '../src/reading-listening67/web-homework-docs.js';
 const A='11111111-1111-4111-8111-111111111111',B='22222222-2222-4222-8222-222222222222';
 const code='67-reading-materials-beyond-concrete-matching-information-nen-cap-1',version='fixture-v1';
 const scope={ownerId:A,courseId:'1124',code,version},targets=[...'ABCDEFGH'].map(x=>'p.'+x).concat([1,2,3,4].flatMap(n=>['radar','evidence_l1','section'].map(x=>'q.'+n+'.'+x)));
@@ -35,12 +36,12 @@ function memoryDocs(){
   state.revision++;if(loseAck){loseAck=false;throw Error('Mất ACK sau khi Google đã ghi');}
  }};
 }
-async function fixture(t,{managedCodes=[],ownerEntry}={}){
+async function fixture(t,{managedCodes=[],ownerEntry,journal}={}){
  const db=new PGlite();t.after(()=>db.close());for(const name of ['web','identity','homework'])await db.exec(await fs.readFile(new URL('../../docs/migrations/2026-10-22-reading67-'+name+'.sql',import.meta.url),'utf8'));
  const docs=memoryDocs(),control={missing:false,wrong:false,failQueue:false};
  const target=s=>({classId:s.courseId,studentRef:s.ownerId,code:s.code,version:s.version,courseId:'classroom',courseWorkId:'work78',submissionId:'sub-'+s.ownerId,documentId:'doc-'+s.ownerId,tabId:'child'});
  const owner={verify:async t=>t,resolve:async s=>{if(control.missing)throw Object.assign(Error('Chưa giao'),{code:'HOMEWORK_NOT_FOUND'});const value=target(s);return control.wrong?{...value,studentRef:B}:value;}};
- const homework=createReading67Homework({db,docs,owner,managedCodes,ownerEntry,metadata:{code,version,homeworkLesson:78},pageBase:'https://page.test/reading-skills67/'});
+ const homework=createReading67Homework({db,docs,owner,managedCodes,ownerEntry,journal,metadata:{code,version,homeworkLesson:78},pageBase:'https://page.test/reading-skills67/'});
  const store=createReading67WebStore({db,grader,homework});
  const jobs=async()=> (await db.query('SELECT * FROM reading_listening67.web_homework_job ORDER BY sequence')).rows;
  const due=()=>db.query('UPDATE reading_listening67.web_homework_job SET available_at=now()');
@@ -175,4 +176,87 @@ test('Chấm lỗi hoặc worker hết hạn không ghi hoàn thành; kết qu�
   else await f.store.fail(job,{code:'AI_OUTCOME_UNKNOWN'});
   const last=(await f.jobs()).at(-1);assert.match(last.payload.text,/chưa có kết quả chấm/);assert.doesNotMatch(last.payload.text,/Đã hoàn thành/);assert.equal(await f.store.claim(),null);
  }
+});
+
+const docsReceipts=[];
+const docsJournal={docs(scope,receipt){docsReceipts.push(structuredClone({scope,receipt}));return Promise.resolve({ok:true,persisted:true});}};
+const settleDocsJournal=()=>new Promise(resolve=>setImmediate(resolve));
+test('Docs journal follows immutable queued runs across Reset and verifies the exact destination after SQL commit',async t=>{
+ const start=docsReceipts.length,f=await fixture(t,{journal:docsJournal});
+ await f.store.save(scope,{baseRevision:0,mutationId:randomUUID(),body});
+ const submission=await f.store.submit(scope,{revision:1,requestId:randomUUID()});
+ await f.store.reset(scope,{baseRevision:1,mutationId:randomUUID()});await f.drain();await settleDocsJournal();
+ const rows=docsReceipts.slice(start),jobs=await f.jobs();assert.ok(rows.length>0);
+ for(const row of rows){
+  const job=jobs.find(j=>j.id===row.receipt.jobId);assert.ok(job);
+  assert.equal(row.scope.ownerId,scope.ownerId);assert.equal(row.scope.courseId,scope.courseId);
+  assert.equal(row.scope.runNo,job.kind==='cta'?0:job.payload.runNo);
+  if(row.receipt.data.phase==='verified'){assert.equal(job.status,'verified');assert.match(row.receipt.data.targetHash,/^[a-f0-9]{64}$/);assert.ok(row.receipt.data.readCalls>=1);}
+ }
+ assert.ok(rows.some(r=>r.scope.runNo===1&&r.receipt.attemptId===submission.attemptId));assert.ok(rows.some(r=>r.scope.runNo===2));
+ assert.equal((await f.store.draft(scope)).runNo,2);
+ assert.equal(JSON.stringify(rows).includes('documentId'),false);assert.equal(JSON.stringify(rows).includes('https://'),false);
+ assert.equal(JSON.stringify(rows).includes('payload'),false);
+});
+
+test('Docs journal distinguishes missing Homework, denied identity and lost write ACK without inventing verified',async t=>{
+ const start=docsReceipts.length,f=await fixture(t,{journal:docsJournal});
+ await f.store.save(scope,{baseRevision:0,mutationId:randomUUID(),body});f.control.missing=true;
+ await f.homework.once();await settleDocsJournal();
+ let rows=docsReceipts.slice(start);assert.ok(rows.some(r=>r.receipt.data.phase==='retry'&&r.receipt.data.errorCode==='HOMEWORK_NOT_FOUND'));
+ assert.equal(rows.some(r=>r.receipt.data.phase==='verified'),false);
+ f.control.missing=false;await f.due();f.docs.loseNextAck();await f.homework.once();await settleDocsJournal();
+ rows=docsReceipts.slice(start);assert.ok(rows.some(r=>r.receipt.data.phase==='write_attempt'));assert.ok(rows.some(r=>r.receipt.data.phase==='retry'));
+ const writes=f.docs.calls.write;await f.due();await f.homework.once();await settleDocsJournal();
+ assert.equal(f.docs.calls.write,writes);assert.ok(docsReceipts.slice(start).some(r=>r.receipt.data.phase==='verified'&&r.receipt.data.writeCalls===0));
+ const deniedStart=docsReceipts.length,g=await fixture(t,{journal:docsJournal});await g.store.save(scope,{baseRevision:0,mutationId:randomUUID(),body});g.control.wrong=true;
+ await g.homework.once();await settleDocsJournal();
+ const denied=docsReceipts.slice(deniedStart);assert.ok(denied.some(r=>r.receipt.data.phase==='blocked'&&r.receipt.data.errorCode==='DOC_IDENTITY_MISMATCH'));
+ assert.equal(denied.some(r=>['write_attempt','verified'].includes(r.receipt.data.phase)),false);assert.equal(g.docs.calls.write,0);
+ const queued=rows.filter(r=>r.receipt.data.phase==='queued');
+ for(const row of queued){const same=queued.filter(r=>r.receipt.receiptId===row.receipt.receiptId);assert.ok(same.every(r=>JSON.stringify(r)===JSON.stringify(row)));}
+});
+
+test('A stalled Docs logger cannot delay native work or change its verified result',async t=>{
+ const f=await fixture(t,{journal:{docs(){return new Promise(()=>{});}}});await f.store.save(scope,{baseRevision:0,mutationId:randomUUID(),body});
+ await f.drain();assert.ok((await f.jobs()).every(job=>job.status==='verified'));
+});
+
+test('Docs queued observation waits for the native afterCommit callback and ignores a rolled back queue',async t=>{
+ const start=docsReceipts.length,f=await fixture(t,{journal:docsJournal}),transaction=f.db.transaction.bind(f.db);
+ f.db.transaction=async action=>{const callbacks=[];const value=await transaction(async tx=>{tx.afterCommit=fn=>callbacks.push(fn);return action(tx);});for(const fn of callbacks)fn();return value;};
+ await assert.rejects(f.db.transaction(async tx=>{await f.homework.start(tx,scope);throw Error('ROLLBACK_QUEUE');}),/ROLLBACK_QUEUE/);
+ await settleDocsJournal();assert.equal(docsReceipts.length,start);
+ await f.store.save(scope,{baseRevision:0,mutationId:randomUUID(),body});await settleDocsJournal();
+ const rows=docsReceipts.slice(start);assert.ok(rows.length>0);assert.ok(rows.every(r=>r.receipt.data.phase==='queued'));
+ const jobs=await f.jobs();assert.ok(rows.every(r=>jobs.some(j=>j.id===r.receipt.jobId&&j.status==='pending')));
+});
+
+test('Reading and Listening Docs interleave owners without sharing their destination or native label',async t=>{
+ const start=docsReceipts.length,f=await fixture(t,{journal:docsJournal}),listening={ownerId:B,courseId:scope.courseId,code:'67-listening-journal-fixture',version:'listening-fixture-v1'};
+ const listeningDocs={read:async id=>JSON.parse(JSON.stringify(await f.docs.read(id)).replaceAll(HOMEWORK_CTA,LISTENING_DOC_CONTRACT.cta).replaceAll(HOMEWORK_STATUS,LISTENING_DOC_CONTRACT.status).replaceAll(code,listening.code)),write:f.docs.write};
+ const homework=createReading67Homework({db:f.db,metadata:{code:listening.code,version:listening.version,homeworkLesson:78},pageBase:'https://page.test/listening-homework/',
+  owner:{resolve:async s=>f.target(s)},docs:listeningDocs,journal:docsJournal,planWrite:(doc,binding,job)=>planReading67HomeworkWrite(doc,binding,job,LISTENING_DOC_CONTRACT)});
+ const listeningStore=createReading67WebStore({db:f.db,grader,homework});
+ await f.store.save(scope,{baseRevision:0,mutationId:randomUUID(),body});await listeningStore.save(listening,{baseRevision:0,mutationId:randomUUID(),body});
+ for(let i=0;i<5;i++){const a=await homework.once(),b=await f.homework.once();if(!a&&!b)break;}
+ await settleDocsJournal();const rows=docsReceipts.slice(start).filter(r=>r.receipt.data.phase==='verified');
+ const reading=rows.filter(r=>r.scope.ownerId===A),listen=rows.filter(r=>r.scope.ownerId===B);
+ assert.ok(reading.length>0&&listen.length>0);assert.ok(reading.every(r=>r.scope.code===code));assert.ok(listen.every(r=>r.scope.code===listening.code));
+ assert.notEqual(reading[0].receipt.data.targetHash,listen[0].receipt.data.targetHash);
+ assert.ok(f.docs.get(f.target(scope).documentId).chars.map(c=>c.text).join('').includes(HOMEWORK_PREFIX));
+ assert.ok(f.docs.get(f.target(listening).documentId).chars.map(c=>c.text).join('').includes(LISTENING_DOC_CONTRACT.prefix));
+});
+
+test('A Google write 403 is blocked in the native queue and cannot become a verified Docs log',async t=>{
+ const start=docsReceipts.length,f=await fixture(t,{journal:docsJournal});await f.store.save(scope,{baseRevision:0,mutationId:randomUUID(),body});
+ f.docs.write=async()=>{throw Object.assign(Error('PRIVATE-GOOGLE-ERROR'),{code:'DOC_HTTP_403'});};
+ await f.homework.once();await settleDocsJournal();const rows=docsReceipts.slice(start);
+ assert.ok(rows.some(r=>r.receipt.data.phase==='blocked'&&r.receipt.data.errorCode==='DOC_HTTP_403'));
+ assert.equal(rows.some(r=>['verified','write_received'].includes(r.receipt.data.phase)),false);
+ assert.equal(JSON.stringify(rows).includes('PRIVATE-GOOGLE-ERROR'),false);
+});
+
+test.after(async()=>{
+ if(process.env.HOMEWORK_DOCS_RECEIPTS){const file=process.env.HOMEWORK_DOCS_RECEIPTS;if(!file.match(/^[A-Za-z]:[\\/]/))throw Error('PRIVATE_DOCS_RECEIPTS_PATH_REQUIRED');await fs.writeFile(file,JSON.stringify(docsReceipts,null,2)+'\n',{flag:'wx'});}
 });

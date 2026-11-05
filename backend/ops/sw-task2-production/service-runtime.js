@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import {vocabularyCompletionReplay,enqueueVocabulary,rememberVocabularyReceipt,claimVocabulary,recoverVocabulary} from './deferred-vocabulary.mjs';
 import { withTransaction } from '../../src/db.js';
 
 import {ApiError} from '../../src/service.js';
@@ -216,6 +217,10 @@ export function createWritingPracticeService({ pool, provisionalService = null }
   }
   async function claimJobs({ workerId, maxJobs, leaseSeconds, workerPool = 'task1' }) {
     return withTransaction(pool, async client => {
+      if(workerPool==='task2'){
+        const vocabulary=await claimVocabulary(client,{workerId,leaseSeconds});
+        if(vocabulary)return [vocabulary];
+      }
       const result = await client.query(`WITH picked AS (SELECT attempt.id FROM writing_practice.check_attempt attempt
         JOIN writing_practice.activity_session session ON session.id=attempt.session_id
         JOIN writing_practice.activity activity ON activity.id=session.activity_id
@@ -279,9 +284,14 @@ export function createWritingPracticeService({ pool, provisionalService = null }
     const rawLmsUrl = artifacts?.lmsUrl;
     const lmsUrl = rawLmsUrl ? normalizeLmsUrl(rawLmsUrl) : null;
     if (rawLmsUrl && !lmsUrl) throw new ApiError(400, 'INVALID_LMS_URL', 'Link kết quả LMS không hợp lệ.');
-    const storedArtifacts = lmsUrl ? { ...artifacts, lmsUrl } : artifacts;
+    const baseArtifacts = lmsUrl ? { ...artifacts, lmsUrl } : artifacts;
+    const storedArtifacts = rawModelMeta.deferredVocabulary
+      ? {...baseArtifacts,vocabularyStatus:'pending',vocabularyTaskVersion:'deferred-v1'} : baseArtifacts;
     const storedFeedback = lmsUrl || feedback;
     return withTransaction(pool, async client => {
+      const completionInput={jobRef,leaseToken,resultStatus,feedback,artifacts,rawModelMeta};
+      const replay=await vocabularyCompletionReplay(client,completionInput);
+      if(replay)return replay;
       let attempt = await client.query(`UPDATE writing_practice.check_attempt
         SET status='completed',result_status=$3,feedback=$4,result_artifacts=$5::jsonb,grading_meta=$6::jsonb,
           completed_at=now(),worker_id=NULL,lease_token=NULL,lease_expires_at=NULL,
@@ -331,12 +341,16 @@ export function createWritingPracticeService({ pool, provisionalService = null }
 
       const row=attempt.rows[0];
       if(row.section_key==='draft' && (resultStatus!=='passed' || !lmsUrl)) throw new ApiError(400,'DRAFT_LMS_RESULT_REQUIRED','Draft chỉ hoàn tất khi có link LMS hợp lệ.');
+      const vocabularyJobRef=await enqueueVocabulary(client,row,completionInput);
       await client.query(`UPDATE writing_practice.comment SET status='completed',content=$2 WHERE attempt_id=$1`,[row.id,storedFeedback]);
       if(resultStatus==='passed') await client.query(`UPDATE writing_practice.session_section SET locked=true,fail_streak=0,updated_at=now() WHERE session_id=$1 AND section_key=$2`,[row.session_id,row.section_key]);
       else await client.query(`UPDATE writing_practice.session_section SET fail_streak=fail_streak+1,updated_at=now() WHERE session_id=$1 AND section_key=$2`,[row.session_id,row.section_key]);
       const state=await client.query(`SELECT fail_streak FROM writing_practice.session_section WHERE session_id=$1 AND section_key=$2`,[row.session_id,row.section_key]);
-      return {attemptRef:row.public_id,sourceAttemptRef:jobRef,status:'completed',resultStatus,version:row.version,
-        adoptedLateResult,supportWarning:resultStatus==='needs_revision' && state.rows[0].fail_streak%3===0};
+      const receipt={attemptRef:row.public_id,sourceAttemptRef:jobRef,status:'completed',resultStatus,version:row.version,
+        adoptedLateResult,supportWarning:resultStatus==='needs_revision' && state.rows[0].fail_streak%3===0,
+        ...(vocabularyJobRef?{vocabularyJobRef}:{})};
+      await rememberVocabularyReceipt(client,vocabularyJobRef,receipt);
+      return receipt;
     });
   }
   async function failJob({ jobRef,leaseToken,errorCode,retryable: _retryable }) {
@@ -355,7 +369,7 @@ export function createWritingPracticeService({ pool, provisionalService = null }
       return { attemptRef: row.public_id,...row,canRetry: row.retry_count < 3 };
     });
   }
-  async function recoverJobs() { return withTransaction(pool, async client => { const r=await client.query(`UPDATE writing_practice.check_attempt SET status=CASE WHEN retry_count<3 THEN 'queued' ELSE 'failed' END,lease_token=NULL,lease_expires_at=NULL,version=version+1,updated_at=now() WHERE status='leased' AND lease_expires_at<=now() RETURNING id,public_id,status,retry_count`); await client.query(`UPDATE writing_practice.comment comment SET status='technical_error',content=CASE WHEN attempt.retry_count<3 THEN 'Tạm thời chưa thể chấm. Hãy nhấn Thử lại.' ELSE 'Hệ thống chưa thể chấm sau ba lần thử. Vui lòng báo giảng viên.' END FROM writing_practice.check_attempt attempt WHERE comment.attempt_id=attempt.id AND attempt.status='failed' AND comment.status='queued'`); return r.rows.map(x=>({attemptRef:x.public_id,status:x.status,canRetry:x.status==='failed'&&x.retry_count<3})); }); }
+  async function recoverJobs() { return withTransaction(pool, async client => { await recoverVocabulary(client); const r=await client.query(`UPDATE writing_practice.check_attempt SET status=CASE WHEN retry_count<3 THEN 'queued' ELSE 'failed' END,lease_token=NULL,lease_expires_at=NULL,version=version+1,updated_at=now() WHERE status='leased' AND lease_expires_at<=now() RETURNING id,public_id,status,retry_count`); await client.query(`UPDATE writing_practice.comment comment SET status='technical_error',content=CASE WHEN attempt.retry_count<3 THEN 'Tạm thời chưa thể chấm. Hãy nhấn Thử lại.' ELSE 'Hệ thống chưa thể chấm sau ba lần thử. Vui lòng báo giảng viên.' END FROM writing_practice.check_attempt attempt WHERE comment.attempt_id=attempt.id AND attempt.status='failed' AND comment.status='queued'`); return r.rows.map(x=>({attemptRef:x.public_id,status:x.status,canRetry:x.status==='failed'&&x.retry_count<3})); }); }
   async function retryAttempt(attemptRef) {
     return withTransaction(pool, async client => {
       const prior = await client.query(`SELECT attempt.id,attempt.public_id,attempt.session_id,

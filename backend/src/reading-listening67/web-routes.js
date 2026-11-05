@@ -11,7 +11,8 @@ import {READING_ENTRY_HEADER} from './web-owner-entry.js';
 const makeSaveInput=(flagCount=4)=>z.object({baseRevision:z.number().int().nonnegative(),mutationId:z.uuid(),body:z.object({answers:z.record(z.string(),z.string().max(12000)),annotations:z.array(z.record(z.string(),z.unknown())).max(300),notes:z.string().max(16000),flags:z.array(z.number().int().min(1).max(flagCount)).max(flagCount)}).strict()}).strict();
 const submitInput=z.object({revision:z.number().int().positive(),requestId:z.uuid()}).strict();
 const id=z.uuid();
-export function createReading67WebRouter({store,content,grader,authenticate,identity,config={},homework,registerCta,adminKey,practice,ownerEntry}){
+export function createReading67WebRouter({store,content,grader,authenticate,identity,config={},homework,registerCta,adminKey,practice,ownerEntry,journal}){
+  if(journal)store=journal.observe(store);
   const saveInput=makeSaveInput(config.flagCount||4);
   const questionNumbers=content.questions?.map(q=>q.number)||[1,2,3,4];
   const lessonSaveInput=['tfng','green-roofs','matching_people','sentence_completion'].includes(content.type)?saveInput.extend({body:saveInput.shape.body.extend({flags:z.array(z.number().int().refine(n=>questionNumbers.includes(n))).max(questionNumbers.length)})}):saveInput;
@@ -21,6 +22,11 @@ export function createReading67WebRouter({store,content,grader,authenticate,iden
   const ref=z.object({classId:z.string().regex(/^-?[1-9]\d{0,18}$/),studentRef:z.uuid()}).strict();
   const makeScope=person=>({ownerId:person.ownerId,courseId:person.courseId,code:content.code,version:content.version});
   const scope=q=>makeScope(q.webIdentity);
+  function draftReceipt(q,r,value){
+    const readingJournal=journal?.context(scope(q),value.runNo);
+    if(readingJournal){r.set('Cache-Control','no-store');return {ok:true,...value,readingJournal};}
+    return {ok:true,...value};
+  }
   const requireOpen=()=>{if(config.studentsOpen===false)throw new WebGradingError('CLASS_NOT_OPEN',423);};
   if(registerCta){
     const text=z.string().trim().min(1).max(200);
@@ -49,9 +55,17 @@ export function createReading67WebRouter({store,content,grader,authenticate,iden
     router.get('/teacher/work/:classId/:studentRef/attempts/:id',route(async(q,r)=>{const p=await teacherScope(q,r);r.json({ok:true,...await store.attempt(p.scope,parse(id,q.params.id))});}));
     if(practice)router.get('/teacher/work/:classId/:studentRef/practice',route(async(q,r)=>{const p=await teacherScope(q,r);r.json(await practice.status(p.scope,q.query.attemptId?parse(id,q.query.attemptId):undefined));}));
   }
+  if(journal){
+    const collect=route(async(q,r)=>{
+      const reply=await journal.collect({method:q.method,headers:q.headers,body:q.body});
+      r.set(reply.headers).status(reply.status).json(reply.body);
+    });
+    router.options('/journal-events',collect);
+    router.post('/journal-events',collect);
+  }
   router.use(async(q,r,next)=>{try{requireOpen();q.webIdentity=await authenticate(q);if(!q.webIdentity)throw new WebGradingError('WEB_UNAUTHORIZED',401);if(ownerEntry&&q.headers[READING_ENTRY_HEADER])await ownerEntry.assert(q.headers[READING_ENTRY_HEADER],q.webIdentity);next();}catch(error){next(error);}});
   router.get('/lesson',route(async(q,r)=>r.json({ok:true,content,identity:q.webIdentity,grader:{hash:grader.pins.sha256,version:grader.pins.workflowVersion},mode:'local_test_real_grading'})));
-  router.get('/draft',route(async(q,r)=>r.json({ok:true,...await store.draft(scope(q))})));
+  router.get('/draft',route(async(q,r)=>r.json(draftReceipt(q,r,await store.draft(scope(q))))));
   if(practice){
     router.get('/practice',route(async(q,r)=>r.json(await practice.status(scope(q),q.query.attemptId?parse(id,q.query.attemptId):undefined))));
     router.post('/practice',route(async(q,r)=>r.status(202).json(await practice.save(scope(q),parse(z.object({url:z.string().min(1).max(500),requestId:z.uuid()}).strict(),q.body)))));
@@ -60,7 +74,7 @@ export function createReading67WebRouter({store,content,grader,authenticate,iden
   router.put('/draft',route(async(q,r)=>r.json({ok:true,...await store.save(scope(q),parse(lessonSaveInput,q.body))})));
   router.post('/submit',route(async(q,r)=>r.status(202).json({ok:true,...await store.submit(scope(q),parse(submitInput,q.body))})));
   router.get('/attempts',route(async(q,r)=>r.json({ok:true,attempts:await store.history(scope(q)),archives:await store.archives(scope(q)),firstCompleted:await store.firstCompleted(scope(q))})));
-  router.post('/reset',route(async(q,r)=>r.json({ok:true,...await store.reset(scope(q),parse(z.object({baseRevision:z.number().int().nonnegative(),mutationId:z.uuid()}).strict(),q.body))})));
+  router.post('/reset',route(async(q,r)=>r.json(draftReceipt(q,r,await store.reset(scope(q),parse(z.object({baseRevision:z.number().int().nonnegative(),mutationId:z.uuid()}).strict(),q.body))))));
   router.get('/attempts/:id',route(async(q,r)=>r.json({ok:true,...await store.attempt(scope(q),parse(id,q.params.id))})));
   router.use((error,_q,r,_next)=>{
     const known=error instanceof WebGradingError;

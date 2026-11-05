@@ -3,6 +3,7 @@ import {readFile} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import vm from 'node:vm';
 import {sha256,WebGradingError,reading67AnswerFingerprint} from './web-grader.js';
+import {checkedItems} from './web-checked-items.js';
 const DEFAULT_VERSION='reading-headings-validation-20261029-v1';
 const clone=v=>JSON.parse(JSON.stringify(v));
 const canonical=v=>JSON.stringify(v,(_k,x)=>x&&typeof x==='object'&&!Array.isArray(x)?Object.fromEntries(Object.entries(x).sort(([a],[b])=>a.localeCompare(b))):x);
@@ -76,7 +77,13 @@ export async function loadReading67CtaGrader({snapshotPath,expectedSha256,provid
   const sourceDigest=reading67AnswerFingerprint(prepared.gate.parsed),inputFingerprint=digest({sourceDigest,grader:pins.sha256,operationId:prepared.operationId});
   const state=clone(options.validationState||{version:VERSION,inputFingerprint,phase:'initial',round:0,issues:[],approved:{}});
   if(state.version!==VERSION||state.inputFingerprint!==inputFingerprint)fail('VALIDATION_INPUT_MISMATCH',409);
-  const checkpoint=()=>options.onCheckpoint?.(state);
+  const checkpoint=()=>options.onCheckpoint?.({...state,itemProgress:checkedItems(
+    prepared.gate.parsed.targets.map(target=>target.target_id),ids,state.issues,
+    id=>{
+      const row=state.value?.results?.find(row=>row.target_id===id);
+      return Boolean(row&&state.approved[id]===digest(row));
+    }
+  )});
   async function pending(){const hash=digest({value:state.value,approved:state.approved});state.stalledRounds=hash===state.lastProgressHash?(state.stalledRounds||0)+1:0;state.lastProgressHash=hash;await checkpoint();throw new WebGradingError('AI_REPAIR_PENDING',202,{state});}
   const ids=prepared.graded.semantic_targets.map(t=>t.target_id);
   if(!prepared.prompt){state.phase='complete';state.reviewedHash=digest([]);await checkpoint();}

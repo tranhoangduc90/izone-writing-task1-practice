@@ -4,7 +4,7 @@
   "patches": "raw diff bytes preserve CRLF native contexts; Git -text required",
   "products": {
     "reading-homework": {
-      "nativeImage": "sha256:dfe1a32b9b81874d137e693d56e1717c265574d58d9e85f638033efea47d5e0d",
+      "nativeImage": "sha256:5c89d8f74a834daceee97fb0eee1f87dc0f14de74cd219148e3d3c33b14f690d",
       "changedFiles": {
         "src/reading-listening67/web-additional-lessons.js": {
           "baseSha256": "1d3cb67ff573cd0e68f6eac32d28ec5670fbd417a8a8855ab42c47069d1f92e4",
@@ -25,10 +25,10 @@
           "patchSha256": "9aed11b1410bea4dbd4429386134ab988920ba76aa331af7b97da368745742ed"
         },
         "src/reading-listening67/web-homework.js": {
-          "baseSha256": "402854b7890a1c21549c838ca9bfc1b29cc90c502953822f17a31d95016f3958",
-          "candidateSha256": "bb1259fcff603ab418afffabb952aaf67952b48667b7b1f11b07dba10ea98a82",
-          "bytes": 15705,
-          "patchSha256": "b7618bb4608366fb94e17e9b5f1117e848597aa975df4482cb927b81775864bb"
+          "baseSha256": "6dc24ab381362ad9e84494051676d0ead8f53c27e820bcd8fd9ad31052335d96",
+          "candidateSha256": "b0d029d84afd614c4d9a85403e5ec388cde37f0f9b9305f8bfb68b1be18b8e43",
+          "bytes": 15863,
+          "patchSha256": "5a718bb4e5e1eae8d8e0e447625f989598b506e5726a13e5a1dbf40115f99a85"
         },
         "src/reading-listening67/web-routes.js": {
           "baseSha256": "0c181642993b7a990f0eaa4567bb2dd8cdcf0b9e55ce2ae90cfcf6c7438a6249",
@@ -101,7 +101,7 @@
         "src/reading-listening67/web-practice-view.js": "6ed01edb212651c397e54b59e72783c1c0726ec44efa03eb299844ce5c8f7ae4",
         "src/reading-listening67/web-result-summary.js": "e4d3395b6ecf37c681046bda99f719271d62018cc06b56847fc43920c3eacc8f",
         "src/reading-listening67/web-sentence-grader.js": "3e12cc003d50873d8f0e8f716f6bc9e38c5292091306e7c27e5605f9f9578297",
-        "src/reading-listening67/web-share-practice.js": "2e57fcb645c47e01b3a27f9f1cb5b1e3702908a8444983aedd0e0b6edf5074f4",
+        "src/reading-listening67/web-share-practice.js": "a23e2657275ed84a5a79f27c2311cfd328748dc8f5234098679ea054c49904a4",
         "src/reading-listening67/web-tfng-grader.js": "8014b66c4edc58c5e992a856bd48dfc30604b24ab88dc248ccef45853165b346",
         "src/reading-listening67/web-validation-runner.js": "2af889de8ac1ea724a21180e45f86b45b4a7fc057c7ec7c7eb7fd0a487713c56",
         "src/reading-listening67/web-validation-store.js": "33934e6cca6cfc05b3d961e3712adac114351b5ce719b9e8670b3f33441d891e",
@@ -123,9 +123,9 @@
           "qualified": "972dc00d5aa9c134989ca6323c9b7734c82aa20487e4a62ff3a0b69a04e482e5"
         },
         "src/reading-listening67/web-homework.js": {
-          "native": "402854b7890a1c21549c838ca9bfc1b29cc90c502953822f17a31d95016f3958",
-          "base": "0ccce05c7dc9b4037a5f96982ac99909ca07da18c5accf5700be17a1d6634957",
-          "qualified": "8c0961ff0aa279d2ea0ccc356aef112fba7773879597307466d7dcb68f0ec26a"
+          "native": "6dc24ab381362ad9e84494051676d0ead8f53c27e820bcd8fd9ad31052335d96",
+          "base": "402854b7890a1c21549c838ca9bfc1b29cc90c502953822f17a31d95016f3958",
+          "qualified": "bb1259fcff603ab418afffabb952aaf67952b48667b7b1f11b07dba10ea98a82"
         }
       }
     },

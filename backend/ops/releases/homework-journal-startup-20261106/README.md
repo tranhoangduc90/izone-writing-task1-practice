@@ -22,6 +22,12 @@ Native SQL PGlite/worker/Docs Reading23ca, Listening27ca có bằng chứng riê
 
 Runner check-native-startup.mjs nhận ba đường dẫn: Reading native root, Listening native root, shared exam-journal library root. Chạy Node với --experimental-vm-modules. Runner thực thi đúng script/factory/Docs runtime, cấm mạng ngoài fixture, trả JSON mode/hash/thứ tự đóng hoặc exit khác0 khi assertion lỗi. Chỉ dùng kiểm composition, không thay native SQL hoặc nghiệm thu server thật.
 
+## Reading ghép lại theo nguồn live R3
+
+Reading đã đổi image thành `sha256:5c89d8f74a834daceee97fb0eee1f87dc0f14de74cd219148e3d3c33b14f690d` trong lúc thử Agent. Delta logger đã ghép lại ba phía trên source mới, giữ hai thông báo tiến độ Docs và giữ nguyên byte module Share parse JSON mới. Manifest/patch đã cập nhật nền; Listening không đổi.
+
+Áp lại đủ mười patch Reading lên R3 khớp hash, 42 file ngoài logger giữ nguyên. Bốn ca SQL/Docs bị tác động chạy lại đạt: đúng đích, thiếu Homework/mất ACK, callback sau COMMIT và drain hàng nguồn. Bằng chứng startup/helper và các ca không đổi được dùng lại; không nhận là đã kiểm toàn bộ tính năng Share của thay đổi bên ngoài. Chưa phát sản phẩm.
+
 ## Phát và quay lui còn lại
 
 Trước phát chụp source/route/container/hoạt động mới, so hash nền và ghép lại nếu có drift. Còn Agent8 trong128MiB, ngân sách backup, registry/config/mount/flag/canary/rollback. Không phát trong lượt thi. Rollback dùng cờ tắt/image tương thích, giữ registry/khóa/dữ liệu đã công bố; không restore DB cũ. Collector giữ0,50CPU/512MiB, Agent0,05CPU/128MiB và quota4GB.

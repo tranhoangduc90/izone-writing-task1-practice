@@ -35,18 +35,33 @@ function memoryDocs(){
   state.revision++;if(loseAck){loseAck=false;throw Error('Mất ACK sau khi Google đã ghi');}
  }};
 }
-async function fixture(t,{managedCodes=[],ownerEntry}={}){
+async function fixture(t,{managedCodes=[],ownerEntry,practiceRequired=false}={}){
  const db=new PGlite();t.after(()=>db.close());for(const name of ['web','identity','homework'])await db.exec(await fs.readFile(new URL('../../docs/migrations/2026-10-22-reading67-'+name+'.sql',import.meta.url),'utf8'));
  const docs=memoryDocs(),control={missing:false,wrong:false,failQueue:false};
  const target=s=>({classId:s.courseId,studentRef:s.ownerId,code:s.code,version:s.version,courseId:'classroom',courseWorkId:'work78',submissionId:'sub-'+s.ownerId,documentId:'doc-'+s.ownerId,tabId:'child'});
  const owner={verify:async t=>t,resolve:async s=>{if(control.missing)throw Object.assign(Error('Chưa giao'),{code:'HOMEWORK_NOT_FOUND'});const value=target(s);return control.wrong?{...value,studentRef:B}:value;}};
- const homework=createReading67Homework({db,docs,owner,managedCodes,ownerEntry,metadata:{code,version,homeworkLesson:78},pageBase:'https://page.test/reading-skills67/'});
+ if(practiceRequired)await db.exec(await fs.readFile(new URL('../../docs/migrations/2026-10-29-reading67-share-practice.sql',import.meta.url),'utf8'));
+ const homework=createReading67Homework({db,docs,owner,managedCodes,ownerEntry,metadata:{code,version,homeworkLesson:78,practiceRequired},pageBase:'https://page.test/reading-skills67/'});
  const store=createReading67WebStore({db,grader,homework});
  const jobs=async()=> (await db.query('SELECT * FROM reading_listening67.web_homework_job ORDER BY sequence')).rows;
  const due=()=>db.query('UPDATE reading_listening67.web_homework_job SET available_at=now()');
  const drain=async()=>{for(let i=0;i<30;i++)if(!await homework.once())return;throw Error('Queue did not drain');};
  return {db,docs,control,homework,store,target,jobs,due,drain};
 }
+
+test('Share before Reading starts writes a valid teacher link to Docs without claiming a Reading attempt',async t=>{
+ const f=await fixture(t,{practiceRequired:true});await f.homework.register(scope,f.target(scope));await f.drain();
+ const id=randomUUID();await f.db.query('INSERT INTO reading_listening67.web_share_practice(id,owner_id,course_id,assignment_code,content_version,share_url,request_id,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[id,scope.ownerId,scope.courseId,scope.code,scope.version,'https://chatgpt.com/share/'+id,randomUUID(),'rejected']);
+ for(const status of ['rejected','accepted']){
+  await f.db.query('UPDATE reading_listening67.web_share_practice SET status=$1 WHERE id=$2',[status,id]);
+  await f.db.transaction(tx=>f.homework.practiceChanged(tx,scope,id,{status}));await f.drain();
+  const job=(await f.jobs()).at(-1);assert.equal(job.status,'verified');
+  assert.match(job.payload.text,/Chưa bắt đầu làm bài Reading/);assert.match(job.payload.text,/Giảng viên nhấn vào đây/);
+  assert.equal(new URL(job.payload.link).searchParams.get('studentRef'),scope.ownerId);assert.equal(job.payload.attemptId,null);
+ }
+ assert.equal((await f.db.query('SELECT count(*)::int n FROM reading_listening67.web_attempt')).rows[0].n,0);
+ assert.match(f.docs.get(f.target(scope).documentId).chars.map(c=>c.text).join(''),/^Chữ tay giữ nguyên\n/);
+});
 test('Owner-bound CTA is written and verified per document, without creating answers or changing status text',async t=>{
  const ownerEntry={url(base,s,target){if(!target)return base;const u=new URL(base);u.searchParams.set('mode','student');u.searchParams.set('documentId',target.documentId);return u.href;}};
  const f=await fixture(t,{ownerEntry}),target=f.target(scope);

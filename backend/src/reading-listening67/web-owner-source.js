@@ -7,10 +7,10 @@ import {z} from 'zod';
 import {sha256,WebGradingError} from './web-grader.js';
 const schema=z.object({apiVersion:z.literal(1),classId:z.string(),studentRef:z.uuid(),courseId:z.string().min(1),googleUserId:z.string().min(1),capturedAt:z.iso.datetime(),sourceRevision:z.string().regex(/^[a-f0-9]{64}$/)}).strict();
 const fail=(code,status=403)=>{throw new WebGradingError(code,status);};
-export function createReading67OwnerSource({context,allowedClassIds,url,key,fetcher=fetch,clock=Date.now}){
- const allowed=new Set(allowedClassIds.map(String));
+export function createReading67OwnerSource({context,allowedClassIds,url,key,fetcher=fetch,clock=Date.now,classScope=context.classScope}){
+ const allowed=async()=>classScope?classScope.allowed(allowedClassIds):new Set(allowedClassIds.map(String));
  async function candidates(classId){
-  classId=String(classId);if(!allowed.has(classId))fail('STUDENT_ACCESS_DENIED');
+  classId=String(classId);if(!(await allowed()).has(classId))fail('STUDENT_ACCESS_DENIED');
   const s=await context.snapshot();
   return s.students.filter(r=>r.erp_course_class_id===classId&&r.status==='approved'&&s.memberships.some(m=>m.erp_course_class_id===classId&&m.erp_student_contact_id===r.erp_student_contact_id&&m.source_state==='active'));
  }
@@ -41,7 +41,7 @@ export function createReading67OwnerSource({context,allowedClassIds,url,key,fetc
  }
  async function resolveClassroom(input){
   const results=[];
-  for(const classId of allowed)results.push(...(await roster(classId)).filter(r=>r.courseId===input.courseId&&r.googleUserId===input.googleUserId));
+  for(const classId of await allowed())results.push(...(await roster(classId)).filter(r=>r.courseId===input.courseId&&r.googleUserId===input.googleUserId));
   if(!results.length)fail('OWNER_NOT_MAPPED');
   if(results.length!==1)fail('OWNER_MISMATCH');
   // Kiểm lại người đã chọn ngay trước nhận event; không dựa vào tên hoặc phần tử đầu.

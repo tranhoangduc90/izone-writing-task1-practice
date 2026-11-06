@@ -72,6 +72,7 @@ export function createReading67Homework({db,metadata,pageBase,owner,docs,managed
  }
  async function outcome(tx,s,jobId){const b=await ensure(tx,s);return append(tx,b,'outcome:'+jobId,'status',await state(tx,s,b));}
  async function register(s,target,{documentGuard}={}){
+  await ownerEntry?.refresh?.();
   if(target.classId!==s.courseId||target.studentRef!==s.ownerId||target.code!==s.code||target.version!==s.version)fail('DOC_IDENTITY_MISMATCH');
   const verified=await owner.verify(target);
   const document=await docs.read(verified.documentId);documentGuard?.(document);
@@ -88,6 +89,7 @@ export function createReading67Homework({db,metadata,pageBase,owner,docs,managed
   return status(s);
  }
  async function status(s){
+  await ownerEntry?.refresh?.();
   const b=(await db.query('SELECT * FROM reading_listening67.web_homework_binding WHERE '+clause,args(s))).rows[0];
   if(!b)return {status:'not_started',cta:'pending',entryUrl};
   const jobs=(await db.query('SELECT id,sequence,kind,status,error_code AS "errorCode",verified_at AS "verifiedAt" FROM reading_listening67.web_homework_job WHERE binding_id=$1 ORDER BY sequence',[b.id])).rows;
@@ -107,6 +109,7 @@ export function createReading67Homework({db,metadata,pageBase,owner,docs,managed
   try{
    const b=(await db.query('SELECT * FROM reading_listening67.web_homework_binding WHERE id=$1',[job.binding_id])).rows[0],s=scopeFor(b);
    const target=await owner.resolve(s,b.target);
+   await ownerEntry?.refresh?.();
    if(target.classId!==s.courseId||target.studentRef!==s.ownerId||target.code!==s.code||target.version!==s.version)fail('DOC_IDENTITY_MISMATCH');
    if(b.target&&['courseId','courseWorkId','submissionId','documentId','tabId'].some(k=>b.target[k]!==target[k]))fail('DOC_TARGET_CHANGED');
    await db.query('UPDATE reading_listening67.web_homework_binding SET target=$2::jsonb WHERE id=$1',[b.id,JSON.stringify(target)]);
@@ -127,7 +130,7 @@ export function createReading67Homework({db,metadata,pageBase,owner,docs,managed
   }catch(error){
    const code=error.name==='TimeoutError'?'DOC_TIMEOUT':typeof error.code==='string'?error.code:'DOC_RETRY';
    const missing=code==='HOMEWORK_NOT_FOUND';
-   const recoverable=/^(?:DOC_WRITE_UNAVAILABLE|DOC_TIMEOUT|OWNER_SOURCE_UNAVAILABLE|(?:DOC|HOMEWORK)_HTTP_(?:429|5\d\d)|HOMEWORK_LOOKUP_TIMEOUT)$/.test(code);
+   const recoverable=/^(?:DOC_WRITE_UNAVAILABLE|DOC_TIMEOUT|OWNER_SOURCE_UNAVAILABLE|COURSE67_SCOPE_UNAVAILABLE|(?:DOC|HOMEWORK)_HTTP_(?:429|5\d\d)|HOMEWORK_LOOKUP_TIMEOUT)$/.test(code);
    const hard=/^(?:DOC_(?:IDENTITY|TAB|CODE|STATUS|CTA|MANUAL|LINK|RANGE|TARGET)|OWNER_MISMATCH|DOCUMENT_OWNER_MISMATCH|HOMEWORK_LESSON_MISMATCH|DOC_HTTP_40[134]|HOMEWORK_HTTP_40[134])/.test(code);
    const blocked=hard||(!missing&&!recoverable&&job.attempts>=8);
    const delay=missing?300:recoverable?([60,300,900][job.attempts-1]||3600):Math.min(300,2**job.attempts);

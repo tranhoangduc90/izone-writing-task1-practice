@@ -1,0 +1,252 @@
+--- a/scripts/serve-reading67-web.mjs
++++ b/scripts/serve-reading67-web.mjs
+@@ -20,6 +20,7 @@
+ import {createReading67HomeworkRuntime} from '../src/reading-listening67/web-homework-runtime.js';
+ import {createReading67CtaDispatcher} from '../src/reading-listening67/web-homework-cta.js';
+ import {createReading67OwnerSource} from '../src/reading-listening67/web-owner-source.js';
++import {createCourse67Scope} from '../src/reading-listening67/web-course67-scope.js';
+ const run=promisify(execFile),config=JSON.parse(await fs.readFile(process.argv[2],'utf8'));
+ if(!['local_test','https_test','https_classroom'].includes(config.mode)||!path.isAbsolute(config.dataDir))throw Error('TEST_CONFIG_REQUIRED');
+ const classroom=config.mode==='https_classroom',https=config.mode!=='local_test';
+@@ -43,8 +44,10 @@
+  }
+  const result=await run(config.authority.command,config.authority.args,{timeout:25000,maxBuffer:2097152,windowsHide:true});return JSON.parse(result.stdout);
+ }
++const classScope=classroom&&config.autoOpenCourse67!==false?createCourse67Scope({url:config.authority.url,key:(await fs.readFile(config.authority.keyFile,'utf8')).trim()}):null;
+ let first=await source();
+-const context=createContext({url:'http://private-authority',key:'not-forwarded',allowDiscoveredClasses:!!config.additionalLessons?.length,fetcher:async()=>{const value=first||await source();first=null;return new Response(JSON.stringify(value.context));}});
++const context=createContext({url:'http://private-authority',key:'not-forwarded',allowDiscoveredClasses:!!classScope||!!config.additionalLessons?.length,fetcher:async()=>{const value=first||await source();first=null;return new Response(JSON.stringify(value.context));}});
++context.classScope=classScope;
+ const initial=await context.snapshot();
+ const googleClientId=fixtureAuthority?'':(await source()).googleClientId;
+ const oauth=new OAuth2Client(googleClientId);
+--- a/src/reading-listening67/web-additional-lessons.js
++++ b/src/reading-listening67/web-additional-lessons.js
+@@ -21,8 +21,8 @@
+   if(!['tfng','green-roofs','sentence_completion','matching_people'].includes(content.type)||content.code!==grader.config.code||content.version!==grader.config.version||content.targets.length!==grader.profile.expected_target_ids.length||new Set(content.targets.map(t=>t.id)).size!==content.targets.length||content.targets.some(t=>!grader.profile.expected_target_ids.includes(t.id)))throw Error('LESSON_DEFINITION_MISMATCH');
+   const allowedClassIds=config.allowedClassIds;
+   if(!Array.isArray(allowedClassIds)||!allowedClassIds.length||allowedClassIds.some(id=>!initial.classes.some(c=>c.erp_course_class_id===String(id))))throw Error('LESSON_CLASSES_INVALID');
+-  const ownerSource=config.homework?.owner?.kind==='http'?createReading67OwnerSource({context,allowedClassIds,url:config.homework.owner.url,key:(await readFile(config.homework.owner.keyFile,'utf8')).trim()}):null;
+-  const identity=createReading67WebIdentity({db,context,allowedClassIds,verifyGoogle,ownerSource,cookiePath,includeEmptyClasses:true});
++  const ownerSource=config.homework?.owner?.kind==='http'?createReading67OwnerSource({context,classScope:config.autoOpenCourse67===false?null:context.classScope,allowedClassIds,url:config.homework.owner.url,key:(await readFile(config.homework.owner.keyFile,'utf8')).trim()}):null;
++  const identity=createReading67WebIdentity({db,context,classScope:config.autoOpenCourse67===false?null:context.classScope,allowedClassIds,verifyGoogle,ownerSource,cookiePath,includeEmptyClasses:true});
+   const homeworkRuntime=config.homework?.enabled?await createReading67HomeworkRuntime({config:config.homework,db,content,identity,ownerSource,managedCodes}):null;
+   const store=createReading67WebStore({db,grader,homework:homeworkRuntime?.homework,jobScope:{code:content.code,version:content.version}});
+   await store.recoverExpired();
+--- /dev/null
++++ b/src/reading-listening67/web-course67-scope.js
+@@ -0,0 +1,24 @@
++// Read-only class metadata. Student/teacher authorization remains in live context.
++import {z} from 'zod';
++import {sha256,WebGradingError} from './web-grader.js';
++const row=z.object({classId:z.string().regex(/^[1-9]\d*$/),classCode:z.string().trim().min(1).max(100),courseId:z.string().min(1).max(100)}).strict();
++const schema=z.object({apiVersion:z.literal(1),erpCourseId:z.literal('5'),classes:z.array(row).max(1000),capturedAt:z.iso.datetime(),sourceRevision:z.string().regex(/^[a-f0-9]{64}$/)}).strict();
++export function createCourse67Scope({url,key,fetcher=fetch,clock=Date.now}){
++ let cached,pending;
++ const fail=()=>{throw new WebGradingError('COURSE67_SCOPE_UNAVAILABLE',503);};
++ async function load(){
++  const response=await fetcher(url.replace(/\/$/,'')+'/v1/homework/class-scope',{headers:{'x-k67-context-key':key},signal:AbortSignal.timeout(5000)});
++  if(!response.ok)fail();const text=await response.text();if(Buffer.byteLength(text)>262144)fail();
++  const parsed=schema.safeParse(JSON.parse(text));if(!parsed.success)fail();
++  const {capturedAt,sourceRevision,...payload}=parsed.data,age=clock()-Date.parse(capturedAt);
++  if(age< -5000||age>120000||sha256(JSON.stringify(payload))!==sourceRevision||new Set(payload.classes.map(c=>c.classId)).size!==payload.classes.length||new Set(payload.classes.map(c=>c.classCode.toUpperCase())).size!==payload.classes.length||new Set(payload.classes.map(c=>c.courseId)).size!==payload.classes.length)fail();
++  cached={at:clock(),capturedAt,classes:payload.classes};return cached.classes;
++ }
++ async function classes(){
++  if(cached&&clock()-cached.at<30000&&clock()-Date.parse(cached.capturedAt)<120000)return cached.classes;
++  if(pending)return pending;
++  pending=load();try{return await pending;}catch{fail();}finally{pending=undefined;}
++ }
++ async function allowed(ids){return new Set([...ids.map(String),...(await classes()).map(c=>c.classId)]);}
++ return {classes,allowed};
++}
+--- a/src/reading-listening67/web-headings-lesson.js
++++ b/src/reading-listening67/web-headings-lesson.js
+@@ -12,8 +12,8 @@
+  const grader=await loadReading67HeadingsGrader({snapshotPath:config.graderPath,expectedSha256:config.graderSha256});
+  if(content.type!=='matching_headings'||content.code!=='67-reading-the-desolenator'||content.targets.length!==15||new Set(content.targets.map(t=>t.id)).size!==15||content.targets.some(t=>!grader.profile.expected_target_ids.includes(t.id)))throw Error('LESSON_DEFINITION_MISMATCH');
+  if(!Array.isArray(config.allowedClassIds)||!config.allowedClassIds.length||config.allowedClassIds.some(id=>!initial.classes.some(c=>c.erp_course_class_id===String(id))))throw Error('LESSON_CLASSES_INVALID');
+- const ownerSource=config.homework?.owner?.kind==='http'?createReading67OwnerSource({context,allowedClassIds:config.allowedClassIds,url:config.homework.owner.url,key:(await readFile(config.homework.owner.keyFile,'utf8')).trim()}):null;
+- const identity=createReading67WebIdentity({db,context,allowedClassIds:config.allowedClassIds,verifyGoogle,ownerSource,cookiePath,includeEmptyClasses:true});
++ const ownerSource=config.homework?.owner?.kind==='http'?createReading67OwnerSource({context,classScope:config.autoOpenCourse67===false?null:context.classScope,allowedClassIds:config.allowedClassIds,url:config.homework.owner.url,key:(await readFile(config.homework.owner.keyFile,'utf8')).trim()}):null;
++ const identity=createReading67WebIdentity({db,context,classScope:config.autoOpenCourse67===false?null:context.classScope,allowedClassIds:config.allowedClassIds,verifyGoogle,ownerSource,cookiePath,includeEmptyClasses:true});
+  const homeworkRuntime=config.homework?.enabled?await createReading67HomeworkRuntime({config:config.homework,db,content,identity,ownerSource,managedCodes}):null;
+  const practice=createReadingSharePractice({db,content,onProgress:(tx,scope,id,outcome)=>homeworkRuntime?.homework.practiceChanged(tx,scope,id,outcome)});
+  const store=createReading67WebStore({db,grader,homework:homeworkRuntime?.homework,jobScope:{code:content.code,version:content.version},beforeWrite:practice.requireAccepted,beforeSubmit:practice.requireAccepted,afterSubmit:practice.attachAttempt});
+--- a/src/reading-listening67/web-identity.js
++++ b/src/reading-listening67/web-identity.js
+@@ -11,17 +11,19 @@
+ const bearer=q=>/^Bearer ([\w-]{43})$/.exec(q.headers.authorization||'')?.[1];
+ const cookie=q=>/(?:^|;\s*)reading67_teacher=([\w-]{43})(?:;|$)/.exec(q.headers.cookie||'')?.[1];
+ 
+-export function createReading67WebIdentity({db,context,allowedClassIds,verifyGoogle,ownerSource,clock=Date.now,cookiePath='/api/reading-skills67',includeEmptyClasses=false}){
+- const allowed=new Set(allowedClassIds.map(String));
++export function createReading67WebIdentity({db,context,allowedClassIds,verifyGoogle,ownerSource,clock=Date.now,cookiePath='/api/reading-skills67',includeEmptyClasses=false,classScope=context.classScope}){
++ const scopeClasses=async()=>classScope?classScope.classes():[];
++ const allowed=async()=>classScope?classScope.allowed(allowedClassIds):new Set(allowedClassIds.map(String));
+  const observationId=randomUUID();
+- const courseAllowed=id=>{if(!allowed.has(String(id)))denied();};
++ const courseAllowed=async id=>{if(!(await allowed()).has(String(id)))denied();};
+  async function classes(){
+-  if(includeEmptyClasses)return (await context.snapshot()).classes.filter(c=>allowed.has(c.erp_course_class_id)).map(c=>({id:c.erp_course_class_id,classCode:c.erp_class_name_snapshot})).sort((a,b)=>a.classCode.localeCompare(b.classCode,'vi'));
+-  return (await context.classes()).filter(c=>allowed.has(c.id));
++  const permitted=await allowed();
++  if(includeEmptyClasses)return (await context.snapshot()).classes.filter(c=>permitted.has(c.erp_course_class_id)).map(c=>({id:c.erp_course_class_id,classCode:c.erp_class_name_snapshot})).sort((a,b)=>a.classCode.localeCompare(b.classCode,'vi'));
++  return (await context.classes()).filter(c=>permitted.has(c.id));
+  }
+- async function roster(classId){courseAllowed(classId);return (await (ownerSource?ownerSource.roster(classId):context.roster(classId))).map(s=>({studentRef:s.studentRef,name:s.name}));}
++ async function roster(classId){await courseAllowed(classId);return (await (ownerSource?ownerSource.roster(classId):context.roster(classId))).map(s=>({studentRef:s.studentRef,name:s.name}));}
+  async function memberDetails(classId,studentRef){
+-  courseAllowed(classId);
++  await courseAllowed(classId);
+   const snapshot=await context.snapshot();
+   const row=snapshot.students.find(s=>s.public_id===studentRef&&s.erp_course_class_id===String(classId)&&s.status==='approved');
+   const active=row&&snapshot.memberships.some(m=>m.erp_course_class_id===String(classId)&&m.erp_student_contact_id===row.erp_student_contact_id&&m.source_state==='active');
+@@ -32,8 +34,8 @@
+  }
+  async function member(classId,studentRef){return (await memberDetails(classId,studentRef)).person;}
+  async function resolve(input){
+-  const s=await context.snapshot();
+-  let rows=s.students.filter(r=>allowed.has(r.erp_course_class_id)&&r.status==='approved'&&s.memberships.some(m=>m.erp_course_class_id===r.erp_course_class_id&&m.erp_student_contact_id===r.erp_student_contact_id&&m.source_state==='active'));
++  const permitted=await allowed(),s=await context.snapshot();
++  let rows=s.students.filter(r=>permitted.has(r.erp_course_class_id)&&r.status==='approved'&&s.memberships.some(m=>m.erp_course_class_id===r.erp_course_class_id&&m.erp_student_contact_id===r.erp_student_contact_id&&m.source_state==='active'));
+   if(input.studentRef)rows=rows.filter(r=>r.public_id===input.studentRef);
+   else rows=rows.filter(r=>r.erp_student_contact_id===input.identity.id);
+   if(input.classCode)rows=rows.filter(r=>s.classes.find(c=>c.erp_course_class_id===r.erp_course_class_id)?.erp_class_name_snapshot.toUpperCase()===input.classCode);
+@@ -77,7 +79,7 @@
+   if(!row)denied('TEACHER_LOGIN_REQUIRED',401);return {...row,token};
+  }
+  async function authorizeTeacher(q,r,classId){
+-  courseAllowed(classId);const session=await readTeacher(q);
++  await courseAllowed(classId);const session=await readTeacher(q);
+   if(!await context.teacher(String(classId),session.email,session.google_subject))denied();
+   if(session.remembered){session.expires_at=new Date(Math.min(Date.parse(session.absolute_expires_at),clock()+90*DAY)).toISOString();await db.query('UPDATE reading_listening67.web_teacher_session SET expires_at=$2 WHERE token_hash=$1',[sha256(session.token),session.expires_at]);}
+   writeCookie(q,r,session.token,session);return session;
+@@ -92,10 +94,10 @@
+    assertCurrent(row,value){check(row,value.person);}};
+  }
+  function observeTeacher(q,classId){
+-  courseAllowed(classId);const token=cookie(q);if(!token)denied('TEACHER_LOGIN_REQUIRED',401);const hash=sha256(token);
++  const token=cookie(q);if(!token)denied('TEACHER_LOGIN_REQUIRED',401);const hash=sha256(token);
+   return {kind:'teacher',hash,key:JSON.stringify([observationId,'teacher',hash,String(classId)]),
+-   async verify(row){if(!row||Math.min(Date.parse(row.expires_at),Date.parse(row.absolute_expires_at))<=clock())denied('TEACHER_LOGIN_REQUIRED',401);if(!await context.teacher(String(classId),row.email,row.google_subject))denied();return {email:row.email,subject:row.google_subject};},
++   async verify(row){await courseAllowed(classId);if(!row||Math.min(Date.parse(row.expires_at),Date.parse(row.absolute_expires_at))<=clock())denied('TEACHER_LOGIN_REQUIRED',401);if(!await context.teacher(String(classId),row.email,row.google_subject))denied();return {email:row.email,subject:row.google_subject};},
+    assertCurrent(row,value){if(!row||Math.min(Date.parse(row.expires_at),Date.parse(row.absolute_expires_at))<=clock())denied('TEACHER_LOGIN_REQUIRED',401);if(row.email!==value.email||row.google_subject!==value.subject)denied();}};
+  }
+- return {classes,roster,member,resolve,loginStudent,authenticate,logoutStudent,loginTeacher,authorizeTeacher,teacherClasses,logoutTeacher,observeStudent,observeTeacher};
++ return {scopeClasses,classes,roster,member,resolve,loginStudent,authenticate,logoutStudent,loginTeacher,authorizeTeacher,teacherClasses,logoutTeacher,observeStudent,observeTeacher};
+ }
+--- a/src/reading-listening67/web-owner-entry.js
++++ b/src/reading-listening67/web-owner-entry.js
+@@ -10,8 +10,15 @@
+  if(!classes.length||new Set(classes.map(c=>c.classId)).size!==classes.length||classes.some(c=>!/^\d+$/.test(c.classId)||typeof c.classCode!=='string'||!c.classCode.trim()||typeof c.courseId!=='string'||!c.courseId))throw Error('OWNER_ENTRY_SCOPE_INVALID');
+  const byClass=new Map(classes.map(c=>[c.classId,c]));
+  const pendingOwners=new Map();
++ async function refresh(){
++  const rows=await identity.scopeClasses?.()||[];
++  const next=new Map(classes.map(c=>[c.classId,c]));
++  for(const row of rows){const old=next.get(row.classId);if(old&&(old.classCode!==row.classCode||old.courseId&&old.courseId!==row.courseId))throw new WebGradingError('OWNER_ENTRY_SCOPE_MISMATCH',503);if(!old)next.set(row.classId,row);}
++  byClass.clear();for(const [id,row] of next)byClass.set(id,row);
++ }
+  const matches=(s,t)=>{const c=byClass.get(s.courseId);return !!c&&s.code===metadata.code&&s.version===metadata.version&&t?.classId===s.courseId&&t.studentRef===s.ownerId&&t.code===s.code&&t.version===s.version&&t.courseId===c.courseId&&(!c.courseWorkId||t.courseWorkId===c.courseWorkId);};
+  async function binding(documentId){
++  await refresh();
+   if(typeof documentId!=='string'||!/^[A-Za-z0-9_-]{20,200}$/.test(documentId))fail('HOMEWORK_ENTRY_NOT_FOUND');
+   const rows=(await db.query('SELECT owner_id,course_id,assignment_code,content_version,target FROM reading_listening67.web_homework_binding WHERE assignment_code=$1 AND content_version=$2 AND target->>\'documentId\'=$3',[metadata.code,metadata.version,documentId])).rows;
+   if(rows.length!==1)fail('HOMEWORK_ENTRY_NOT_FOUND');
+@@ -25,12 +32,13 @@
+   if(ownerSource){const source=await ownerSource.member(scope.courseId,scope.ownerId);if(source.courseId!==target.courseId||source.googleUserId!==target.googleUserId)fail('HOMEWORK_ENTRY_NOT_FOUND');}
+   return p;
+  }
+- return {publicPolicy:{classes:classes.map(({classId,classCode})=>({classId,classCode}))},
++ return {refresh,get publicPolicy(){return {classes:[...byClass.values()].map(({classId,classCode})=>({classId,classCode}))};},
+   url(base,scope,target){if(!matches(scope,target))return base;const u=new URL(base);u.searchParams.set('mode','student');u.searchParams.set('class',byClass.get(scope.courseId).classCode);u.searchParams.set('documentId',target.documentId);return u.href;},
+   async resolve(documentId){const {scope,target}=await binding(documentId);const p=await current(scope,target);return {documentId,classId:scope.courseId,studentRef:scope.ownerId,name:p.name,classCode:p.className,code:metadata.code,version:metadata.version};},
+   async assert(documentId,person){const {scope,target}=await binding(documentId);if(person.ownerId!==scope.ownerId||person.courseId!==scope.courseId)fail('HOMEWORK_ENTRY_OWNER_MISMATCH');await current(scope,target);},
+   observation(documentId,person){return {code:metadata.code,version:metadata.version,documentId,
+    async prepare(checked){
++    await refresh();
+     if(!ownerSource||checked.owner)return checked;
+     const key=JSON.stringify([person.courseId,person.ownerId]);
+     if(!pendingOwners.has(key))pendingOwners.set(key,Promise.resolve().then(()=>ownerSource.member(person.courseId,person.ownerId)).finally(()=>pendingOwners.delete(key)));
+--- a/src/reading-listening67/web-owner-source.js
++++ b/src/reading-listening67/web-owner-source.js
+@@ -7,10 +7,10 @@
+ import {sha256,WebGradingError} from './web-grader.js';
+ const schema=z.object({apiVersion:z.literal(1),classId:z.string(),studentRef:z.uuid(),courseId:z.string().min(1),googleUserId:z.string().min(1),capturedAt:z.iso.datetime(),sourceRevision:z.string().regex(/^[a-f0-9]{64}$/)}).strict();
+ const fail=(code,status=403)=>{throw new WebGradingError(code,status);};
+-export function createReading67OwnerSource({context,allowedClassIds,url,key,fetcher=fetch,clock=Date.now}){
+- const allowed=new Set(allowedClassIds.map(String));
++export function createReading67OwnerSource({context,allowedClassIds,url,key,fetcher=fetch,clock=Date.now,classScope=context.classScope}){
++ const allowed=async()=>classScope?classScope.allowed(allowedClassIds):new Set(allowedClassIds.map(String));
+  async function candidates(classId){
+-  classId=String(classId);if(!allowed.has(classId))fail('STUDENT_ACCESS_DENIED');
++  classId=String(classId);if(!(await allowed()).has(classId))fail('STUDENT_ACCESS_DENIED');
+   const s=await context.snapshot();
+   return s.students.filter(r=>r.erp_course_class_id===classId&&r.status==='approved'&&s.memberships.some(m=>m.erp_course_class_id===classId&&m.erp_student_contact_id===r.erp_student_contact_id&&m.source_state==='active'));
+  }
+@@ -41,7 +41,7 @@
+  }
+  async function resolveClassroom(input){
+   const results=[];
+-  for(const classId of allowed)results.push(...(await roster(classId)).filter(r=>r.courseId===input.courseId&&r.googleUserId===input.googleUserId));
++  for(const classId of await allowed())results.push(...(await roster(classId)).filter(r=>r.courseId===input.courseId&&r.googleUserId===input.googleUserId));
+   if(!results.length)fail('OWNER_NOT_MAPPED');
+   if(results.length!==1)fail('OWNER_MISMATCH');
+   // Kiểm lại người đã chọn ngay trước nhận event; không dựa vào tên hoặc phần tử đầu.
+--- a/src/reading-listening67/web-routes.js
++++ b/src/reading-listening67/web-routes.js
+@@ -39,7 +39,7 @@
+     }));
+   }
+   if(identity){
+-    router.get('/config',(_q,r)=>r.json({ok:true,version:4,autoRole:true,title:content.title,code:content.code,lesson:content.lesson||10,type:content.type||'materials',...config,capabilities:{compactDraftAck:true,stateStream:observing,practiceState:observing&&!!practice},...(ownerEntry?{ownerEntry:ownerEntry.publicPolicy}:{})}));
++    router.get('/config',route(async(_q,r)=>{await ownerEntry?.refresh?.();r.json({ok:true,version:4,autoRole:true,title:content.title,code:content.code,lesson:content.lesson||10,type:content.type||'materials',...config,capabilities:{compactDraftAck:true,stateStream:observing,practiceState:observing&&!!practice},...(ownerEntry?{ownerEntry:ownerEntry.publicPolicy}:{})});}));
+     if(ownerEntry)router.get('/entry',route(async(q,r)=>{requireOpen();const documentId=parse(z.string().regex(/^[A-Za-z0-9_-]{20,200}$/),q.query.documentId);r.set('Cache-Control','no-store').json({ok:true,entry:await ownerEntry.resolve(documentId)});}));
+     router.get('/classes',route(async(_q,r)=>r.json({ok:true,classes:await identity.classes()})));
+     router.get('/classes/:classId/students',route(async(q,r)=>r.json({ok:true,students:await identity.roster(q.params.classId)})));
+--- a/src/reading-listening67/web-homework.js
++++ b/src/reading-listening67/web-homework.js
+@@ -73,6 +73,7 @@
+  }
+  async function outcome(tx,s,jobId){const b=await ensure(tx,s);return append(tx,b,'outcome:'+jobId,'status',await state(tx,s,b));}
+  async function register(s,target,{documentGuard}={}){
++  await ownerEntry?.refresh?.();
+   if(target.classId!==s.courseId||target.studentRef!==s.ownerId||target.code!==s.code||target.version!==s.version)fail('DOC_IDENTITY_MISMATCH');
+   const verified=await owner.verify(target);
+   const document=await docs.read(verified.documentId);documentGuard?.(document);
+@@ -89,6 +90,7 @@
+   return status(s);
+  }
+  async function status(s){
++  await ownerEntry?.refresh?.();
+   const b=(await db.query('SELECT * FROM reading_listening67.web_homework_binding WHERE '+clause,args(s))).rows[0];
+   if(!b)return {status:'not_started',cta:'pending',entryUrl};
+   const jobs=(await db.query('SELECT id,sequence,kind,status,error_code AS "errorCode",verified_at AS "verifiedAt" FROM reading_listening67.web_homework_job WHERE binding_id=$1 ORDER BY sequence',[b.id])).rows;
+@@ -108,6 +110,7 @@
+   try{
+    const b=(await db.query('SELECT * FROM reading_listening67.web_homework_binding WHERE id=$1',[job.binding_id])).rows[0],s=scopeFor(b);
+    const target=await owner.resolve(s,b.target);
++   await ownerEntry?.refresh?.();
+    if(target.classId!==s.courseId||target.studentRef!==s.ownerId||target.code!==s.code||target.version!==s.version)fail('DOC_IDENTITY_MISMATCH');
+    if(b.target&&['courseId','courseWorkId','submissionId','documentId','tabId'].some(k=>b.target[k]!==target[k]))fail('DOC_TARGET_CHANGED');
+    await db.query('UPDATE reading_listening67.web_homework_binding SET target=$2::jsonb WHERE id=$1',[b.id,JSON.stringify(target)]);
+@@ -128,7 +131,7 @@
+   }catch(error){
+    const code=error.name==='TimeoutError'?'DOC_TIMEOUT':typeof error.code==='string'?error.code:'DOC_RETRY';
+    const missing=code==='HOMEWORK_NOT_FOUND';
+-   const recoverable=/^(?:DOC_WRITE_UNAVAILABLE|DOC_TIMEOUT|OWNER_SOURCE_UNAVAILABLE|(?:DOC|HOMEWORK)_HTTP_(?:429|5\d\d)|HOMEWORK_LOOKUP_TIMEOUT)$/.test(code);
++   const recoverable=/^(?:DOC_WRITE_UNAVAILABLE|DOC_TIMEOUT|OWNER_SOURCE_UNAVAILABLE|COURSE67_SCOPE_UNAVAILABLE|(?:DOC|HOMEWORK)_HTTP_(?:429|5\d\d)|HOMEWORK_LOOKUP_TIMEOUT)$/.test(code);
+    const hard=/^(?:DOC_(?:IDENTITY|TAB|CODE|STATUS|CTA|MANUAL|LINK|RANGE|TARGET)|OWNER_MISMATCH|DOCUMENT_OWNER_MISMATCH|HOMEWORK_LESSON_MISMATCH|DOC_HTTP_40[134]|HOMEWORK_HTTP_40[134])/.test(code);
+    const blocked=hard||(!missing&&!recoverable&&job.attempts>=8);
+    const delay=missing?300:recoverable?([60,300,900][job.attempts-1]||3600):Math.min(300,2**job.attempts);
+--- a/src/reading-listening67/web-homework-cta.js
++++ b/src/reading-listening67/web-homework-cta.js
+@@ -25,6 +25,7 @@
+ }
+ export function createReading67CtaRegistrar({homework,owner,docs,identity,metadata,ownerEntry,publishPending,verifyClassroomCopy,waitMs=12000,sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms)),locate=locateReading67Homework,planWrite=planReading67HomeworkWrite}){
+  return async (event,{documentGuard,allowPending=true}={})=>{
++  await ownerEntry?.refresh?.();
+   const document=await docs.read(event.doc_id);
+   if(document.documentId!==event.doc_id)fail('DOC_IDENTITY_MISMATCH');
+   documentGuard?.(document);

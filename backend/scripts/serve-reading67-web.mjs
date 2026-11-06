@@ -20,6 +20,7 @@ import {createReading67Postgres} from '../src/reading-listening67/web-postgres.j
 import {createReading67HomeworkRuntime} from '../src/reading-listening67/web-homework-runtime.js';
 import {createReading67CtaDispatcher} from '../src/reading-listening67/web-homework-cta.js';
 import {createReading67OwnerSource} from '../src/reading-listening67/web-owner-source.js';
+import {createCourse67Scope} from '../src/reading-listening67/web-course67-scope.js';
 const run=promisify(execFile),config=JSON.parse(await fs.readFile(process.argv[2],'utf8'));
 if(!['local_test','https_test','https_classroom'].includes(config.mode)||!path.isAbsolute(config.dataDir))throw Error('TEST_CONFIG_REQUIRED');
 const classroom=config.mode==='https_classroom',https=config.mode!=='local_test';
@@ -43,8 +44,10 @@ async function source(){
  }
  const result=await run(config.authority.command,config.authority.args,{timeout:25000,maxBuffer:2097152,windowsHide:true});return JSON.parse(result.stdout);
 }
+const classScope=classroom&&config.autoOpenCourse67!==false?createCourse67Scope({url:config.authority.url,key:(await fs.readFile(config.authority.keyFile,'utf8')).trim()}):null;
 let first=await source();
-const context=createContext({url:'http://private-authority',key:'not-forwarded',allowDiscoveredClasses:!!config.additionalLessons?.length,fetcher:async()=>{const value=first||await source();first=null;return new Response(JSON.stringify(value.context));}});
+const context=createContext({url:'http://private-authority',key:'not-forwarded',allowDiscoveredClasses:!!classScope||!!config.additionalLessons?.length,fetcher:async()=>{const value=first||await source();first=null;return new Response(JSON.stringify(value.context));}});
+context.classScope=classScope;
 const initial=await context.snapshot();
 const googleClientId=fixtureAuthority?'':(await source()).googleClientId;
 const oauth=new OAuth2Client(googleClientId);

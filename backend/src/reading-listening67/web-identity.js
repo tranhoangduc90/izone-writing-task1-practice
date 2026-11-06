@@ -10,18 +10,20 @@ const secret=()=>randomBytes(32).toString('base64url');
 const denied=(code='ACCESS_DENIED',status=403)=>{throw new WebGradingError(code,status);};
 const bearer=q=>/^Bearer ([\w-]{43})$/.exec(q.headers.authorization||'')?.[1];
 
-export function createReading67WebIdentity({db,context,allowedClassIds,verifyGoogle,ownerSource,clock=Date.now,cookiePath='/api/reading-skills67',cookieName='reading67_teacher',includeEmptyClasses=false}){
+export function createReading67WebIdentity({db,context,allowedClassIds,verifyGoogle,ownerSource,clock=Date.now,cookiePath='/api/reading-skills67',cookieName='reading67_teacher',includeEmptyClasses=false,classScope=context.classScope}){
  if(!/^[a-z0-9_]+$/.test(cookieName))throw Error('COOKIE_NAME_INVALID');
  const cookie=q=>new RegExp('(?:^|;\\s*)'+cookieName+'=([\\w-]{43})(?:;|$)').exec(q.headers.cookie||'')?.[1];
- const allowed=new Set(allowedClassIds.map(String));
- const courseAllowed=id=>{if(!allowed.has(String(id)))denied();};
+ const scopeClasses=async()=>classScope?classScope.classes():[];
+ const allowed=async()=>classScope?classScope.allowed(allowedClassIds):new Set(allowedClassIds.map(String));
+ const courseAllowed=async id=>{if(!(await allowed()).has(String(id)))denied();};
  async function classes(){
-  if(includeEmptyClasses)return (await context.snapshot()).classes.filter(c=>allowed.has(c.erp_course_class_id)).map(c=>({id:c.erp_course_class_id,classCode:c.erp_class_name_snapshot})).sort((a,b)=>a.classCode.localeCompare(b.classCode,'vi'));
-  return (await context.classes()).filter(c=>allowed.has(c.id));
+  const permitted=await allowed();
+  if(includeEmptyClasses)return (await context.snapshot()).classes.filter(c=>permitted.has(c.erp_course_class_id)).map(c=>({id:c.erp_course_class_id,classCode:c.erp_class_name_snapshot})).sort((a,b)=>a.classCode.localeCompare(b.classCode,'vi'));
+  return (await context.classes()).filter(c=>permitted.has(c.id));
  }
- async function roster(classId){courseAllowed(classId);return (await (ownerSource?ownerSource.roster(classId):context.roster(classId))).map(s=>({studentRef:s.studentRef,name:s.name}));}
+ async function roster(classId){await courseAllowed(classId);return (await (ownerSource?ownerSource.roster(classId):context.roster(classId))).map(s=>({studentRef:s.studentRef,name:s.name}));}
  async function member(classId,studentRef){
-  courseAllowed(classId);
+  await courseAllowed(classId);
   const snapshot=await context.snapshot();
   const row=snapshot.students.find(s=>s.public_id===studentRef&&s.erp_course_class_id===String(classId)&&s.status==='approved');
   const active=row&&snapshot.memberships.some(m=>m.erp_course_class_id===String(classId)&&m.erp_student_contact_id===row.erp_student_contact_id&&m.source_state==='active');
@@ -31,8 +33,8 @@ export function createReading67WebIdentity({db,context,allowedClassIds,verifyGoo
   return {ownerId:row.public_id,courseId:String(classId),erpId:row.erp_student_contact_id,name:row.erp_student_name_snapshot,className:c.erp_class_name_snapshot};
  }
  async function resolve(input){
-  const s=await context.snapshot();
-  let rows=s.students.filter(r=>allowed.has(r.erp_course_class_id)&&r.status==='approved'&&s.memberships.some(m=>m.erp_course_class_id===r.erp_course_class_id&&m.erp_student_contact_id===r.erp_student_contact_id&&m.source_state==='active'));
+  const permitted=await allowed(),s=await context.snapshot();
+  let rows=s.students.filter(r=>permitted.has(r.erp_course_class_id)&&r.status==='approved'&&s.memberships.some(m=>m.erp_course_class_id===r.erp_course_class_id&&m.erp_student_contact_id===r.erp_student_contact_id&&m.source_state==='active'));
   if(input.studentRef)rows=rows.filter(r=>r.public_id===input.studentRef);
   else rows=rows.filter(r=>r.erp_student_contact_id===input.identity.id);
   if(input.classCode)rows=rows.filter(r=>s.classes.find(c=>c.erp_course_class_id===r.erp_course_class_id)?.erp_class_name_snapshot.toUpperCase()===input.classCode);
@@ -76,12 +78,12 @@ export function createReading67WebIdentity({db,context,allowedClassIds,verifyGoo
   if(!row)denied('TEACHER_LOGIN_REQUIRED',401);return {...row,token};
  }
  async function authorizeTeacher(q,r,classId){
-  courseAllowed(classId);const session=await readTeacher(q);
+  await courseAllowed(classId);const session=await readTeacher(q);
   if(!await context.teacher(String(classId),session.email,session.google_subject))denied();
   if(session.remembered){session.expires_at=new Date(Math.min(Date.parse(session.absolute_expires_at),clock()+90*DAY)).toISOString();await db.query('UPDATE reading_listening67.web_teacher_session SET expires_at=$2 WHERE token_hash=$1',[sha256(session.token),session.expires_at]);}
   writeCookie(q,r,session.token,session);return session;
  }
  async function teacherClasses(q){const session=await readTeacher(q),list=await classes(),result=[];for(const c of list)if(await context.teacher(c.id,session.email,session.google_subject))result.push(c);if(!result.length)denied();return result;}
  async function logoutTeacher(q,r){const token=cookie(q);if(token)await db.query('DELETE FROM reading_listening67.web_teacher_session WHERE token_hash=$1',[sha256(token)]);writeCookie(q,r,'');}
- return {classes,roster,member,resolve,loginStudent,authenticate,logoutStudent,loginTeacher,authorizeTeacher,teacherClasses,logoutTeacher};
+ return {scopeClasses,classes,roster,member,resolve,loginStudent,authenticate,logoutStudent,loginTeacher,authorizeTeacher,teacherClasses,logoutTeacher};
 }

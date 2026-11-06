@@ -25,6 +25,7 @@ export function createReading67CtaDispatcher({docs,registrars}){
 }
 export function createReading67CtaRegistrar({homework,owner,docs,identity,metadata,ownerEntry,publishPending,verifyClassroomCopy,waitMs=12000,sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms)),locate=locateReading67Homework,planWrite=planReading67HomeworkWrite}){
  return async (event,{documentGuard,allowPending=true}={})=>{
+  await ownerEntry?.refresh?.();
   const document=await docs.read(event.doc_id);
   if(document.documentId!==event.doc_id)fail('DOC_IDENTITY_MISMATCH');
   documentGuard?.(document);

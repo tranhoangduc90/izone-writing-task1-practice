@@ -32,7 +32,7 @@ export function createReading67WebRouter({store,content,grader,authenticate,iden
     }));
   }
   if(identity){
-    router.get('/config',(_q,r)=>r.json({ok:true,version:4,autoRole:true,title:content.title,code:content.code,lesson:content.lesson||10,type:content.type||'materials',...config,...(ownerEntry?{ownerEntry:ownerEntry.publicPolicy}:{})}));
+    router.get('/config',route(async(_q,r)=>{await ownerEntry?.refresh?.();r.json({ok:true,version:4,autoRole:true,title:content.title,code:content.code,lesson:content.lesson||10,type:content.type||'materials',...config,...(ownerEntry?{ownerEntry:ownerEntry.publicPolicy}:{})});}));
     if(ownerEntry)router.get('/entry',route(async(q,r)=>{requireOpen();const documentId=parse(z.string().regex(/^[A-Za-z0-9_-]{20,200}$/),q.query.documentId);r.set('Cache-Control','no-store').json({ok:true,entry:await ownerEntry.resolve(documentId)});}));
     router.get('/classes',route(async(_q,r)=>r.json({ok:true,classes:await identity.classes()})));
     router.get('/classes/:classId/students',route(async(q,r)=>r.json({ok:true,students:await identity.roster(q.params.classId)})));

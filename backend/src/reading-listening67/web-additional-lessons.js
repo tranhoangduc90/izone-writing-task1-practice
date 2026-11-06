@@ -22,8 +22,8 @@ export async function createAdditionalReading67Lessons({configs=[],db,context,in
   if(!['tfng','green-roofs','matching_people','sentence_completion'].includes(content.type)||content.code!==grader.config.code||content.version!==grader.config.version||content.targets.length!==grader.profile.expected_target_ids.length||new Set(content.targets.map(t=>t.id)).size!==content.targets.length||content.targets.some(t=>!grader.profile.expected_target_ids.includes(t.id)))throw Error('LESSON_DEFINITION_MISMATCH');
   const allowedClassIds=config.allowedClassIds;
   if(!Array.isArray(allowedClassIds)||!allowedClassIds.length||allowedClassIds.some(id=>!initial.classes.some(c=>c.erp_course_class_id===String(id))))throw Error('LESSON_CLASSES_INVALID');
-  const ownerSource=config.homework?.owner?.kind==='http'?createReading67OwnerSource({context,allowedClassIds,url:config.homework.owner.url,key:(await readFile(config.homework.owner.keyFile,'utf8')).trim()}):null;
-  const identity=createReading67WebIdentity({db,context,allowedClassIds,verifyGoogle,ownerSource,cookiePath,includeEmptyClasses:true});
+  const ownerSource=config.homework?.owner?.kind==='http'?createReading67OwnerSource({context,classScope:config.autoOpenCourse67===false?null:context.classScope,allowedClassIds,url:config.homework.owner.url,key:(await readFile(config.homework.owner.keyFile,'utf8')).trim()}):null;
+  const identity=createReading67WebIdentity({db,context,classScope:config.autoOpenCourse67===false?null:context.classScope,allowedClassIds,verifyGoogle,ownerSource,cookiePath,includeEmptyClasses:true});
   const homeworkRuntime=config.homework?.enabled?await createReading67HomeworkRuntime({config:config.homework,db,content,identity,ownerSource,managedCodes}):null;
   const store=createReading67WebStore({db,grader,homework:homeworkRuntime?.homework,jobScope:{code:content.code,version:content.version}});
   await store.recoverExpired();

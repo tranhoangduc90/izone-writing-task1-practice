@@ -53,6 +53,8 @@ export function createReading67Homework({db,metadata,pageBase,owner,docs,managed
   }
   if(metadata.practiceRequired){
    const practice=(await tx.query('SELECT status FROM reading_listening67.web_share_practice WHERE '+clause,args(s))).rows[0];
+   if(!draft&&!attempt)text='Chưa bắt đầu làm bài Reading.';
+   if(!attempt)text+=' Giảng viên nhấn vào đây để xem tiến độ luyện.';
    text='Luyện ChatGPT: '+(practice?.status==='accepted'?'đã được công nhận. ':['queued','processing'].includes(practice?.status)?'đang kiểm tra link. ':'chưa hoàn thành. ')+text;
   }
   return {text,link:attempt?teacherUrl(s,attempt.id):metadata.practiceRequired?teacherUrl(s):'',runNo:no,attemptId:attempt?.id||null,code:s.code,version:s.version};

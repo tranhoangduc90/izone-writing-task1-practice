@@ -88,6 +88,19 @@ test('AI Share không rõ outcome: không tự gọi lại; người khác khôn
  const db=await database(t);let calls=0;const service=createReadingSharePractice({db,content:{code:a.code,version:a.version,practice:{target:'Nén cấp 1'}},readShare:async()=>({messages:[{role:'user',text:'Dữ liệu giả'}]}),verify:async()=>{calls++;throw Error('network');}});
  await service.save(a,{url:url(a.ownerId),requestId:randomUUID()});await service.once();assert.equal((await service.status(a)).status,'needs_review');await service.save(a,{url:url(a.ownerId),requestId:randomUUID()});await service.once();assert.equal(calls,1);assert.equal((await service.status(b)).status,'not_started');
 });
+test('Recovered rejected Share response finishes native progress without AI and keeps the Reading gate closed',async t=>{
+ const db=await database(t);let calls=0,events=[];
+ const service=createReadingSharePractice({db,content:{code:a.code,version:a.version,practice:{target:'Nén cấp 1'}},readShare:async()=>{calls++;throw Error('NO_EXTERNAL_CALL');},verify:async()=>{calls++;throw Error('NO_EXTERNAL_CALL');},onProgress:async(tx,scope,id,outcome)=>events.push({scope,id,status:outcome.status})});
+ const saved=await service.save(a,{url:url(a.ownerId),requestId:randomUUID()});
+ const outcome={status:'rejected',policy:'reading-skimming-l1-share-20261029-v1',evidence:null,message:'Hãy tiếp tục luyện rồi cập nhật link chia sẻ.'};
+ await db.query('UPDATE reading_listening67.web_share_practice SET snapshot=$1::jsonb,analysis_intent=true,analysis_response=$2::jsonb WHERE id=$3',[JSON.stringify({messages:[{role:'user',text:'Nháp nguyên vẹn'}]}),JSON.stringify(outcome),saved.id]);
+ await service.once();await service.once();
+ assert.equal(calls,0);assert.deepEqual(events,[{scope:a,id:saved.id,status:'rejected'}]);
+ assert.equal((await service.status(a)).status,'rejected');
+ await assert.rejects(()=>db.transaction(tx=>service.requireAccepted(tx,a)),{code:'PRACTICE_NOT_ACCEPTED'});
+ assert.equal((await service.status(b)).status,'not_started');
+ assert.equal((await db.query('SELECT snapshot FROM reading_listening67.web_share_practice WHERE id=$1',[saved.id])).rows[0].snapshot.messages[0].text,'Nháp nguyên vẹn');
+});
 sourceTest('Nộp Reading yêu cầu Share accepted; bản gửi giữ 15 ô đúng scope',async t=>{
  const db=await database(t);await db.exec(await fs.readFile(new URL('../../docs/migrations/2026-10-22-reading67-web.sql',import.meta.url),'utf8'));await db.exec(await fs.readFile(new URL('../../docs/migrations/2026-10-26-reading67-validation.sql',import.meta.url),'utf8'));
  const g=await grader(),service=createReadingSharePractice({db,content:{code:a.code,version:a.version}}),store=createReading67WebStore({db,grader:g,beforeSubmit:service.requireAccepted,afterSubmit:service.attachAttempt});

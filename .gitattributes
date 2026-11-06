@@ -1,0 +1,2 @@
+# Keep the applied additive migration byte-stable across Windows checkouts.
+docs/migrations/2026-11-06-homework-cta-recovery.sql text eol=lf

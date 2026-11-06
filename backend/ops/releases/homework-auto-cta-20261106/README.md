@@ -1,0 +1,17 @@
+# Homework CTA recovery — 06/11/2026
+
+This release changes only the separate `reading-listening67-api` source/dispatch store and internal routes. It does not rebuild or restart Reading/Listening Homework, Speaking, practice, Writing, or teacher SSO services.
+
+Apply the additive migration `docs/migrations/2026-11-06-homework-cta-recovery.sql` before deploying these two files on the exact live API base. Migration SHA256: `1784c81c949a4cd67eedba6c79b3bc3f6aee3c1c7101634e36a26b9d0444d243`. Runtime base was `641f2212076c34029de4605c42a020727479e3ea300410fc185806b7e6789d0b`; final overlay is `15453f4380fbd0ad5fea90aca719191b50d658f01476f1dab3964b4fdd49d17e`. Environment, mounts and ports were preserved. Do not rebuild another product from a potentially older checkout.
+
+The matching n8n release is `n8n-workflows/workflows/homework-auto-cta-20261106/` in izone-AI-team. Deploy the source child, all-product consumer, existing Speaking registrar entry routing, and separate Error Trigger as a coordinated group. The source master keeps its existing 15-minute schedule. Do not activate the ExecuteWorkflow-only source child. Consumer and Speaking remain active; Error Trigger is selected by the consumer and needs no scheduled activation.
+
+Leases bind Doc/course/coursework/submission/token/execution; missing or wrong identities fail closed. Full completion requires six product acknowledgements. Worker errors back off 15/30/60/120 minutes, at most eight attempts; abandoned 45-minute leases recover on the source scan. Terminal historical rows are baselined without replay and retain NULL proof. New copies and changed coursework versions dispatch independently. A known Google student ID is immutable.
+
+Evidence: 535 backend tests passed (31 skipped); final source recovery and dynamic-scope integration suite 45 passed. Native canaries verified real Lesson 3 Docs for both classes. A controlled integrated failure automatically invoked Error Trigger and scheduled retry after 15 minutes; only its test retry clock was advanced, then the consumer succeeded with a fresh token. Source discovery through Rabbit and the production consumer was also verified. Exact execution receipts stay in the private operations report. No student open/start/login/submit/grade APIs were called. Binding/verifiedAt metadata can change during registrar readback; answer, score and receipt data are preserved.
+
+The additional cost is Docs/Classroom API traffic during discovery and bounded retries; no AI grading calls are introduced. A brief API restart is covered by HTTP retries. Do not interpret queue ACK as completed Docs writes, or historical NULL proof as complete verification. Permanent template/identity conflicts stop for review; ambiguous owners keep the existing self-selection flow.
+
+Rollback: preserve current database and student work. Restore the exact API backup container `reading-listening67-api-before-auto-cta-20261106-r2` together with the corresponding n8n backups, after pausing new dispatch and checking current writers. Keep additive columns/index; never restore old student/database snapshots. The old discovery/retry limitations return on rollback. Do not undo the independent dynamic class-scope release from thread IC2363.
+
+Private exact backups and receipts: `E:/Codex-Data/n8n-workflow-versions/<workflow-id>/homework-auto-cta-20261106/` and `E:/Codex-Data/homework-auto-cta-20261106/`. Source versions in Git are sanitized, not deployable credential-bearing snapshots.

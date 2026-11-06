@@ -56,17 +56,44 @@ export function createReadingListening67Store({ pool }) {
       return transaction(async c=>{
         await c.query('SELECT pg_advisory_xact_lock(hashtext($1))',['rl67:'+documentId]);
         const b=classroom;
+        const previous=(await c.query(`SELECT * FROM reading_listening67.source_document WHERE document_id=$1 AND course_id=$2 AND coursework_id=$3 AND submission_id=$4 FOR UPDATE`,[documentId,b.courseId,b.courseworkId,b.submissionId])).rows[0];
+        if(previous?.student_id&&previous.student_id!==b.studentId)fail('SOURCE_STUDENT_IDENTITY_CHANGED');
         if(b.classCode)await c.query(`INSERT INTO reading_listening67.course_registry(course_id,class_code,classroom_name,source_ref)
           VALUES($1,$2,$3,'google-classroom') ON CONFLICT(course_id) DO UPDATE SET class_code=excluded.class_code,classroom_name=excluded.classroom_name,updated_at=now()`,[b.courseId,b.classCode,b.classroomName||b.classCode]);
         const saved=(await c.query(`INSERT INTO reading_listening67.source_document(source_id,document_id,course_id,coursework_id,submission_id,student_id,class_code,homework_title,source_event_id)
           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(document_id,course_id,coursework_id,submission_id)
-          DO UPDATE SET student_id=excluded.student_id,class_code=excluded.class_code,homework_title=excluded.homework_title,source_event_id=excluded.source_event_id,updated_at=now() RETURNING source_id,cta_state,cta_enqueued_at`,
+          DO UPDATE SET student_id=excluded.student_id,class_code=excluded.class_code,homework_title=excluded.homework_title,source_event_id=excluded.source_event_id,updated_at=now() RETURNING *`,
         [randomUUID(),documentId,b.courseId,b.courseworkId,b.submissionId,b.studentId||null,b.classCode||null,b.homeworkTitle||null,b.sourceEventId])).rows[0];
         const units=(await c.query('SELECT * FROM reading_listening67.document_unit WHERE document_id=$1',[documentId])).rows;
         for(const unit of units)await bind(c,unit,b);
-        const ctaNeeded=['pending','error'].includes(saved.cta_state)&&!saved.cta_enqueued_at;
-        const dispatchToken=ctaNeeded?randomUUID():null;
-        if(ctaNeeded)await c.query("UPDATE reading_listening67.source_document SET cta_state='pending',cta_error_code=NULL,cta_dispatch_token=$2 WHERE source_id=$1",[saved.source_id,dispatchToken]);
+        // The scanner may retry a partial batch. Reuse an unpublished lease/token;
+        // queue delivery and worker completion have different acknowledgements.
+        const revision=String(classroom.sourceVersion||'');
+        // Adopt a baseline for historical terminal sources; do not replay 20,000
+        // old Docs at rollout. Null proof remains explicitly historical/unverified.
+        if(previous&&saved.cta_pipeline_version<2&&['ready','review'].includes(saved.cta_state)){
+          await c.query('UPDATE reading_listening67.source_document SET source_version=$2,cta_pipeline_version=2 WHERE source_id=$1',[saved.source_id,revision]);
+          return {saved:true,documentId,courseId:b.courseId,courseworkId:b.courseworkId,submissionId:b.submissionId,linkedUnits:units.length,ctaNeeded:false};
+        }
+        const versionChanged=saved.source_version!==revision;
+        const activeLease=saved.cta_lease_until && new Date(saved.cta_lease_until).getTime()>Date.now();
+        const due=!saved.cta_retry_at||new Date(saved.cta_retry_at).getTime()<=Date.now();
+        const needsUpgrade=saved.cta_pipeline_version<2;
+        let dispatchToken=null,ctaNeeded=false;
+        if(activeLease){
+          if(!saved.cta_execution_id&&!saved.cta_enqueued_at){ctaNeeded=true;dispatchToken=saved.cta_dispatch_token;}
+        } else if((needsUpgrade||versionChanged||['pending','error'].includes(saved.cta_state))&&due){
+          if(!versionChanged&&!needsUpgrade&&saved.cta_attempts>=8){
+            await c.query("UPDATE reading_listening67.source_document SET cta_state='review',cta_error_code='CTA_RETRY_EXHAUSTED',cta_lease_until=NULL WHERE source_id=$1",[saved.source_id]);
+          }else{
+            ctaNeeded=true;dispatchToken=randomUUID();
+            await c.query(`UPDATE reading_listening67.source_document SET source_version=$3,cta_pipeline_version=2,
+              cta_attempts=CASE WHEN source_version<>$3 OR cta_pipeline_version<2 THEN 1 ELSE cta_attempts+1 END,
+              cta_state='pending',cta_error_code=NULL,cta_dispatch_token=$2,cta_enqueued_at=NULL,
+              cta_execution_id=NULL,cta_lease_until=now()+interval '45 minutes',cta_retry_at=NULL,cta_proof=NULL
+              WHERE source_id=$1`,[saved.source_id,dispatchToken,revision]);
+          }
+        }
         return {saved:true,documentId,courseId:b.courseId,courseworkId:b.courseworkId,submissionId:b.submissionId,linkedUnits:units.length,ctaNeeded,...(dispatchToken?{dispatchToken}:{})};
       });
     },
@@ -76,14 +103,53 @@ export function createReadingListening67Store({ pool }) {
       for(const source of sources)results.push(await api.source(source));
       return {sources:results};
     },
-    async sourceCtaResult({documentId,state,errorCode}) {
-      const rows=(await pool.query('UPDATE reading_listening67.source_document SET cta_state=$2,cta_error_code=$3,cta_enqueued_at=NULL,updated_at=now() WHERE document_id=$1 RETURNING source_id',[documentId,state,errorCode||null])).rows;
-      return {saved:true,documentId,changed:rows.length};
+    async sourceCtaResult({documentId,state,errorCode,courseId,courseworkId,submissionId,dispatchToken,executionId,proof}) {
+      return transaction(async c=>{
+        // Old callers cannot finish a new leased pipeline after only one product.
+        if(!dispatchToken){
+          const rows=(await c.query(`UPDATE reading_listening67.source_document SET cta_state=$2,cta_error_code=$3,cta_enqueued_at=NULL,updated_at=now()
+            WHERE document_id=$1 AND cta_pipeline_version<2 RETURNING source_id`,[documentId,state,errorCode||null])).rows;
+          return {saved:true,documentId,changed:rows.length};
+        }
+        const row=(await c.query(`SELECT * FROM reading_listening67.source_document WHERE document_id=$1 AND course_id=$2
+          AND coursework_id=$3 AND submission_id=$4 FOR UPDATE`,[documentId,courseId,courseworkId,submissionId])).rows[0];
+        if(!row||row.cta_dispatch_token!==dispatchToken||row.cta_execution_id!==executionId)fail('SOURCE_DISPATCH_IDENTITY_MISMATCH');
+        if(row.cta_state!=='pending')return {saved:true,documentId,changed:0,state:row.cta_state};
+        if(!row.cta_lease_until||new Date(row.cta_lease_until).getTime()<=Date.now())fail('SOURCE_DISPATCH_LEASE_EXPIRED');
+        if(state==='ready'){
+          const products=['speaking','reading_homework','listening_homework','reading_practice','listening_practice','legacy'];
+          if(!Array.isArray(proof)||proof.length!==products.length||products.some(product=>proof.filter(p=>p.product===product&&p.documentId===documentId&&['verified','not_applicable'].includes(p.status)).length!==1))fail('SOURCE_CTA_PROOF_INCOMPLETE');
+        }
+        const exhausted=state==='error'&&row.cta_attempts>=8;
+        const finalState=exhausted?'review':state;
+        const delay=Math.min(120,15*2**Math.max(0,row.cta_attempts-1));
+        await c.query(`UPDATE reading_listening67.source_document SET cta_state=$2,cta_error_code=$3,cta_enqueued_at=NULL,
+          cta_lease_until=NULL,cta_retry_at=CASE WHEN $2='error' THEN now()+($4::int*interval '1 minute') ELSE NULL END,
+          cta_proof=$5::jsonb,updated_at=now() WHERE source_id=$1`,[row.source_id,finalState,exhausted?'CTA_RETRY_EXHAUSTED':errorCode||null,delay,JSON.stringify(proof||null)]);
+        return {saved:true,documentId,changed:1,state:finalState};
+      });
     },
-    async sourceCtaState({documentId}) {
-      const rows=(await pool.query('SELECT cta_state FROM reading_listening67.source_document WHERE document_id=$1',[documentId])).rows;
-      // Event cũ đã xử lý xong chỉ ACK; không đọc Google Docs lần nữa.
-      return {documentId,shouldProcess:!rows.length||rows.some(x=>['pending','error'].includes(x.cta_state))};
+    async sourceCtaState({documentId,courseId,courseworkId,submissionId,dispatchToken,executionId}) {
+      if(!dispatchToken){
+        const rows=(await pool.query('SELECT cta_state,cta_pipeline_version FROM reading_listening67.source_document WHERE document_id=$1',[documentId])).rows;
+        return {documentId,shouldProcess:!rows.length||rows.some(x=>x.cta_pipeline_version<2&&['pending','error'].includes(x.cta_state))};
+      }
+      return transaction(async c=>{
+        const row=(await c.query(`SELECT * FROM reading_listening67.source_document WHERE document_id=$1 AND course_id=$2
+          AND coursework_id=$3 AND submission_id=$4 FOR UPDATE`,[documentId,courseId,courseworkId,submissionId])).rows[0];
+        const eligible=row&&row.cta_dispatch_token===dispatchToken&&row.cta_state==='pending'&&row.cta_lease_until&&new Date(row.cta_lease_until).getTime()>Date.now()
+          &&(!row.cta_execution_id||row.cta_execution_id===executionId);
+        if(eligible)await c.query('UPDATE reading_listening67.source_document SET cta_execution_id=$2 WHERE source_id=$1',[row.source_id,executionId]);
+        return {documentId,dispatchToken,shouldProcess:Boolean(eligible)};
+      });
+    },
+    async sourceCtaExecutionFailed({executionId}) {
+      const rows=(await pool.query("SELECT * FROM reading_listening67.source_document WHERE cta_execution_id=$1 AND cta_state='pending'",[executionId])).rows;
+      if(rows.length>1)fail('SOURCE_EXECUTION_IDENTITY_AMBIGUOUS');
+      if(!rows.length)return {saved:true,changed:0};
+      const r=rows[0];
+      return api.sourceCtaResult({documentId:r.document_id,courseId:r.course_id,courseworkId:r.coursework_id,submissionId:r.submission_id,
+        dispatchToken:r.cta_dispatch_token,executionId,state:'error',errorCode:'CTA_EXECUTION_FAILED'});
     },
     async sourceCtaEnqueuedBatch({sources}) {
       return transaction(async c=>{

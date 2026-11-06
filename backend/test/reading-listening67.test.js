@@ -26,6 +26,7 @@ async function database(t) {
   await db.exec(sourceMigration.replace(/^GRANT .*;$/gm,''));
   await db.exec(scanMigration.replace(/^GRANT .*;$/gm,''));
   await db.exec(dispatchMigration);
+  await db.exec(await readFile(new URL('../../docs/migrations/2026-11-06-homework-cta-recovery.sql',import.meta.url),'utf8'));
   // Sentinel giúp phát hiện đọc/ghi nhầm bảng Writing trong ca SQL thực.
   await db.exec("CREATE SCHEMA writing_flow; CREATE TABLE writing_flow.sentinel (id integer); INSERT INTO writing_flow.sentinel VALUES(7);");
   const c = { query: (...args) => db.query(...args), release() {} };
@@ -192,26 +193,51 @@ test('Chưa gửi Rabbit vẫn retry; gửi đã xác nhận không xếp CTA l�
   const input={documentId:doc,classroom:{courseId:'c1',courseworkId:'w1',submissionId:'s1',sourceEventId:'e1'}};
   const first=await store.source(input),unsentRetry=await store.source(input);
   assert.equal(first.ctaNeeded,true);assert.equal(unsentRetry.ctaNeeded,true);
-  assert.notEqual(first.dispatchToken,unsentRetry.dispatchToken);
+  assert.equal(first.dispatchToken,unsentRetry.dispatchToken);
   const s={documentId:doc,courseId:'c1',courseworkId:'w1',submissionId:'s1',dispatchToken:unsentRetry.dispatchToken};
-  await assert.rejects(store.sourceCtaEnqueuedBatch({sources:[{...s,dispatchToken:first.dispatchToken}]}),{code:'SOURCE_DISPATCH_IDENTITY_MISMATCH'});
+  await assert.rejects(store.sourceCtaEnqueuedBatch({sources:[{...s,dispatchToken:'11111111-1111-4111-8111-111111111111'}]}),{code:'SOURCE_DISPATCH_IDENTITY_MISMATCH'});
   for(const k of ['documentId','courseId','courseworkId','submissionId'])await assert.rejects(store.sourceCtaEnqueuedBatch({sources:[{...s,[k]:'wrong'}]}),{code:'SOURCE_DISPATCH_IDENTITY_MISMATCH'});
   assert.equal((await store.sourceCtaEnqueuedBatch({sources:[s]})).sources[0].marked,true);
   assert.equal((await store.source(input)).ctaNeeded,false);
-  assert.equal((await store.sourceCtaState({documentId:doc})).shouldProcess,true);
+  assert.equal((await store.sourceCtaState({...s,executionId:'worker1'})).shouldProcess,true);
 });
-test('Callback kết thúc/lỗi trước xác nhận gửi không bị ACK muộn khóa retry',async t=>{
-  const {store}=await database(t);
+const ctaProof=documentId=>['speaking','reading_homework','listening_homework','reading_practice','listening_practice','legacy'].map(product=>({product,documentId,status:'verified'}));
+test('Worker callback preserves exact identity, complete product proofs, replay and late publish ACK',async t=>{
+  const {store,db}=await database(t);
   const input={documentId:doc,classroom:{courseId:'c1',courseworkId:'w1',submissionId:'s1',sourceEventId:'e1'}};
-  for(const state of ['ready','review','error']){
-    await store.sourceCtaResult({documentId:doc,state:'error'});
-    const first=await store.source(input);
-    await store.sourceCtaResult({documentId:doc,state});
-    const s={documentId:doc,courseId:'c1',courseworkId:'w1',submissionId:'s1',dispatchToken:first.dispatchToken};
-    assert.equal((await store.sourceCtaEnqueuedBatch({sources:[s]})).sources[0].marked,false);
-    assert.equal((await store.source(input)).ctaNeeded,state==='error');
-    assert.equal((await store.sourceCtaState({documentId:doc})).shouldProcess,state==='error');
-  }
+  const first=await store.source(input);
+  const s={documentId:doc,courseId:'c1',courseworkId:'w1',submissionId:'s1',dispatchToken:first.dispatchToken,executionId:'worker1'};
+  assert.equal((await store.sourceCtaState(s)).shouldProcess,true);
+  assert.equal((await store.sourceCtaState({...s,executionId:'worker2'})).shouldProcess,false);
+  for(const key of ['courseId','courseworkId','submissionId','documentId','executionId'])
+    await assert.rejects(store.sourceCtaResult({...s,[key]:'wrong',state:'ready',proof:ctaProof(doc)}),{code:'SOURCE_DISPATCH_IDENTITY_MISMATCH'});
+  await assert.rejects(store.sourceCtaResult({...s,state:'ready',proof:ctaProof(doc).slice(1)}),{code:'SOURCE_CTA_PROOF_INCOMPLETE'});
+  assert.equal((await store.sourceCtaResult({documentId:doc,state:'ready'})).changed,0);
+  assert.equal((await store.sourceCtaResult({...s,state:'ready',proof:ctaProof(doc)})).changed,1);
+  assert.equal((await store.sourceCtaResult({...s,state:'ready',proof:ctaProof(doc)})).changed,0);
+  const {executionId,...sent}=s;
+  assert.equal((await store.sourceCtaEnqueuedBatch({sources:[sent]})).sources[0].marked,false);
+  assert.equal((await store.source(input)).ctaNeeded,false);
+  assert.equal((await store.sourceCtaState(s)).shouldProcess,false);
+  assert.equal((await db.query('SELECT cta_proof FROM reading_listening67.source_document')).rows[0].cta_proof.length,6);
+});
+test('Transient errors back off; abandoned queue/worker leases recover; old token cannot finish new attempt',async t=>{
+  const {store,db}=await database(t);
+  const input={documentId:doc,classroom:{courseId:'c1',courseworkId:'w1',submissionId:'s1',sourceEventId:'e1'}};
+  const first=await store.source(input);const s={documentId:doc,courseId:'c1',courseworkId:'w1',submissionId:'s1',dispatchToken:first.dispatchToken,executionId:'worker1'};
+  await store.sourceCtaState(s);await store.sourceCtaResult({...s,state:'error',errorCode:'GOOGLE_TEMPORARY'});
+  assert.equal((await store.source(input)).ctaNeeded,false);
+  await db.query("UPDATE reading_listening67.source_document SET cta_retry_at=now()-interval '1 second'");
+  const second=await store.source(input);assert.equal(second.ctaNeeded,true);assert.notEqual(second.dispatchToken,first.dispatchToken);
+  await assert.rejects(store.sourceCtaResult({...s,state:'ready',proof:ctaProof(doc)}),{code:'SOURCE_DISPATCH_IDENTITY_MISMATCH'});
+  await db.query("UPDATE reading_listening67.source_document SET cta_enqueued_at=now(),cta_lease_until=now()-interval '1 second'");
+  const third=await store.source(input);assert.equal(third.ctaNeeded,true);assert.notEqual(third.dispatchToken,second.dispatchToken);
+  await db.query("UPDATE reading_listening67.source_document SET cta_attempts=8,cta_lease_until=now()-interval '1 second'");
+  assert.equal((await store.source(input)).ctaNeeded,false);
+  assert.equal((await db.query('SELECT cta_error_code FROM reading_listening67.source_document')).rows[0].cta_error_code,'CTA_RETRY_EXHAUSTED');
+  const updated=await store.source({...input,classroom:{...input.classroom,sourceVersion:'2026-11-06T00:00:00Z'}});
+  assert.equal(updated.ctaNeeded,true);
+  assert.equal((await db.query('SELECT cta_attempts FROM reading_listening67.source_document')).rows[0].cta_attempts,1);
 });
 test('Nguồn Classroom tới trước/sau lần bấm đầu đều nối đúng lớp, học viên và nhiều mã bài',async t=>{
   const {store,db}=await database(t);
@@ -226,4 +252,27 @@ test('Nguồn Classroom tới trước/sau lần bấm đầu đều nối đún
   await store.source({documentId:other,classroom:{...classroom,submissionId:'sub2'}});
   assert.equal((await db.query('SELECT source_kind FROM reading_listening67.document_unit WHERE document_id=$1',[other])).rows[0].source_kind,'classroom');
   assert.ok(reading.jobId);
+});
+
+test('Rollout baselines historical terminal Docs; changed homework and new copies still dispatch, student IDs are immutable',async t=>{
+ const {store,db}=await database(t);
+ const input={documentId:doc,classroom:{courseId:'c1',courseworkId:'w1',submissionId:'s1',studentId:'google1',sourceEventId:'e1',sourceVersion:'v1'}};
+ await store.source(input);
+ await db.query("UPDATE reading_listening67.source_document SET cta_pipeline_version=0,cta_state='review',cta_lease_until=NULL,cta_dispatch_token=NULL");
+ assert.equal((await store.source(input)).ctaNeeded,false);
+ assert.equal((await store.source({...input,classroom:{...input.classroom,sourceVersion:'v2'}})).ctaNeeded,true);
+ await assert.rejects(store.source({...input,classroom:{...input.classroom,studentId:'google-other'}}),{code:'SOURCE_STUDENT_IDENTITY_CHANGED'});
+ const sibling={...input,documentId:'fixture_new_copy_document_123456789',classroom:{...input.classroom,submissionId:'s2',studentId:'google2'}};
+ assert.equal((await store.source(sibling)).ctaNeeded,true);
+});
+
+test('Error workflow resolves only its claimed source; duplicate and unrelated errors cannot change another Doc',async t=>{
+ const {store,db}=await database(t);
+ const i={documentId:doc,classroom:{courseId:'c1',courseworkId:'w1',submissionId:'s1',sourceEventId:'e1'}};
+ const a=await store.source(i);await store.sourceCtaState({documentId:doc,courseId:'c1',courseworkId:'w1',submissionId:'s1',dispatchToken:a.dispatchToken,executionId:'claimed'});
+ assert.equal((await store.sourceCtaExecutionFailed({executionId:'unrelated'})).changed,0);
+ assert.equal((await store.sourceCtaExecutionFailed({executionId:'claimed'})).changed,1);
+ assert.equal((await store.sourceCtaExecutionFailed({executionId:'claimed'})).changed,0);
+ assert.equal((await db.query('SELECT cta_state,cta_error_code FROM reading_listening67.source_document')).rows[0].cta_state,'error');
+ assert.equal((await store.source(i)).ctaNeeded,false);
 });

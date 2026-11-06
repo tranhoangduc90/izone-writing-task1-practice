@@ -17,15 +17,18 @@ const identity = {
 const owner = { jobId: key, leaseToken: z.uuid() };
 const text = z.string().trim().min(1).max(200);
 const classroom = z.object({courseId:text,courseworkId:text,submissionId:text,studentId:text.optional(),classCode:text.optional(),sourceEventId:text}).strict();
-const sourceInput=z.object({documentId:identity.documentId,classroom:classroom.extend({homeworkTitle:z.string().trim().max(300).optional(),classroomName:text.optional()})}).strict();
+const dispatchIdentity={courseId:text,courseworkId:text,submissionId:text,dispatchToken:z.uuid(),executionId:key};
+const dispatchSchema=fields=>z.union([z.object(fields).strict(),z.object({...fields,...dispatchIdentity}).strict()]);
+const sourceInput=z.object({documentId:identity.documentId,classroom:classroom.extend({homeworkTitle:z.string().trim().max(300).optional(),classroomName:text.optional(),sourceVersion:text.optional()})}).strict();
 const schemas = {
   register: z.object({ ...identity, classroom: z.object({ courseId: text, courseworkId: text, submissionId: text, studentId: text.optional(), classCode: text.optional(), sourceEventId: text }).strict().optional() }).strict(),
   accept: z.object({ ...identity, requestId: key, jobId: key.optional() }).strict(),
   source:sourceInput,
   sourceBatch:z.object({sources:z.array(sourceInput).min(1).max(20)}).strict(),
-  sourceCtaState:z.object({documentId:identity.documentId}).strict(),
+  sourceCtaState:dispatchSchema({documentId:identity.documentId}),
+  sourceCtaExecutionFailed:z.object({executionId:key}).strict(),
   sourceCtaEnqueuedBatch:z.object({sources:z.array(z.object({documentId:identity.documentId,courseId:text,courseworkId:text,submissionId:text,dispatchToken:z.uuid()}).strict()).min(1).max(20)}).strict(),
-  sourceCtaResult: z.object({documentId:identity.documentId,state:z.enum(['ready','review','error']),errorCode:z.string().regex(/^[A-Z0-9_|-]{1,200}$/).optional()}).strict(),
+  sourceCtaResult:dispatchSchema({documentId:identity.documentId,state:z.enum(['ready','review','error']),errorCode:z.string().regex(/^[A-Z0-9_|-]{1,200}$/).optional(),proof:z.array(z.object({product:z.enum(['speaking','reading_homework','listening_homework','reading_practice','listening_practice','legacy']),documentId:identity.documentId,status:z.enum(['verified','not_applicable'])}).strict()).max(6).optional()}),
   scanStart:z.object({executionId:key}).strict(),
   scanFinish:z.object({executionId:key,leaseToken:z.uuid()}).strict(),
   scanCourseResult:z.object({executionId:key,leaseToken:z.uuid(),courseId:text,status:z.enum(['done','failed']),errorCode:z.string().regex(/^[A-Z0-9_]{1,100}$/).optional()}).strict(),

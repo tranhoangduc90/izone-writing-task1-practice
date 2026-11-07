@@ -16,7 +16,11 @@ services:
       TEACHER_SESSION_COOKIE_SAME_SITE: none
     ports:
       - "127.0.0.1:8790:8790"
-    networks: [mapping-api-net, n8n-net]
+    networks:
+      mapping-api-net: {}
+      n8n-net: {}
+      sw-task1-production:
+        aliases: [writing-legacy]
     read_only: true
     tmpfs:
       - /tmp:size=16m,noexec,nosuid,nodev
@@ -32,4 +36,6 @@ networks:
   mapping-api-net:
     external: true
   n8n-net:
+    external: true
+  sw-task1-production:
     external: true

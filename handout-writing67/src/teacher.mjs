@@ -32,7 +32,7 @@ export function createTeacher({db,store,roster,registry,secret,verifyGoogleToken
     if(!row.students.some(x=>x.studentRef===s.studentRef))fail('TEACHER_FORBIDDEN',403);
     return s;
   }
-  const publicSession=s=>withBodies({ref:s.ref,activity:s.activity,...(s.handoutMode?{handoutMode:s.handoutMode,bodyProgress:s.bodyProgress,...(s.preparationMode?{preparationMode:s.preparationMode,...preparationContext(s)}:{})}:{}),workflowMode:s.workflowMode||GUIDED,workflowVersion:s.workflowVersion||1,body:s.body||2,classRef:s.classRef,studentRef:s.studentRef,version:s.version,responses:s.responses,steps:s.steps,vocabulary:s.vocabulary,idea2Open:s.idea2Open,teacherComments:publicTeacherComments(s),commentThreads:publicThreads(s),commentVersion:s.commentVersion||0,dashboard:dashboardProjection(s,clock()),processing:dashboardProjection(s,clock()).processing});
+  const publicSession=s=>withBodies({ref:s.ref,activity:s.activity,...(s.outlineOnly?{outlineOnly:true}:{}),...(s.handoutMode?{handoutMode:s.handoutMode,bodyProgress:s.bodyProgress,...(s.preparationMode?{preparationMode:s.preparationMode,...preparationContext(s)}:{})}:{}),workflowMode:s.workflowMode||GUIDED,workflowVersion:s.workflowVersion||1,body:s.body||2,classRef:s.classRef,studentRef:s.studentRef,version:s.version,responses:s.responses,steps:s.steps,vocabulary:s.vocabulary,idea2Open:s.idea2Open,teacherComments:publicTeacherComments(s),commentThreads:publicThreads(s),commentVersion:s.commentVersion||0,dashboard:dashboardProjection(s,clock()),processing:dashboardProjection(s,clock()).processing});
   return {
     clientId:()=>registry().clientId,
     async login(credential){

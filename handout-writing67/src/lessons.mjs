@@ -7,8 +7,9 @@ export const LEGACY_LESSON5={
  ideaHint:'Chọn tác hại bạn sẽ bàn luận trong thân bài này.',promptVersion:'lesson5-rubric-v3'
 };
 const fields=['preparationMode','preparationKind','solutionOptions','rosterScope','handoutMode','bodies','helpTitle','helpItems','description','workflowMode','workflowVersion','whyOptions','objective','activity','number','title','shortTitle','body','topic','aInstruction','ideaHint','promptVersion','classes','defaultClass'];
-export function publicLesson(lesson){return Object.fromEntries(fields.filter(k=>lesson[k]!==undefined).map(k=>[k,lesson[k]]));}
+export function publicLesson(lesson){return Object.fromEntries([...fields,'outlineOnly'].filter(k=>lesson[k]!==undefined).map(k=>[k,lesson[k]]));}
 export function validateLesson(value,key){
+ if(value?.outlineOnly!==undefined&&(value.outlineOnly!==true||value.handoutMode!=='two-bodies-v1'||value.preparationMode!==undefined))throw new Error('LESSON_CONFIG_INVALID');
  if(value?.rosterScope!==undefined&&value.rosterScope!=='lesson')throw new Error('LESSON_CONFIG_INVALID');
  if(value?.preparationKind!==undefined&&(!['opinion-v1','discussion-v1'].includes(value.preparationKind)||value.preparationMode!=='ideas-first-v1'||value.handoutMode!=='two-bodies-v1'||!Array.isArray(value.solutionOptions)||value.solutionOptions.length!==2||value.solutionOptions.some(x=>typeof x!=='string'||!x.trim()||x.length>120)||new Set(value.solutionOptions).size!==2))throw new Error('LESSON_CONFIG_INVALID');
  if(value?.solutionOptions!==undefined&&!['opinion-v1','discussion-v1'].includes(value.preparationKind))throw new Error('LESSON_CONFIG_INVALID');

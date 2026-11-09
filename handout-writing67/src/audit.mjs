@@ -17,7 +17,9 @@ export async function auditChange(tx,before,after,now){
   if(!before)await event(`${after.ref}:open`,'session_opened');
   if(before&&JSON.stringify(before.responses)!==JSON.stringify(after.responses)){
     const fields=Object.keys(after.responses).filter(k=>before.responses[k]!==after.responses[k]);
-    const edited=Object.entries(after.operations||{}).some(([key,operation])=>!before.operations?.[key]&&operation.action==='edit');
+    const operations=Object.entries(after.operations||{}).filter(([key])=>!before.operations?.[key]);
+    const edited=operations.some(([,operation])=>operation.action==='edit');
+    if(operations.some(([,operation])=>operation.action==='swapBodies'))await event(`${after.ref}:swap:${after.version}`,'outline_bodies_swapped',null,{version:after.version,activity:after.activity});
     await event(`${after.ref}:save:${after.version}`,edited?'content_edited':'responses_saved',null,{version:after.version,fields,...(edited?{before:Object.fromEntries(fields.map(k=>[k,before.responses[k]])),after:Object.fromEntries(fields.map(k=>[k,after.responses[k]]))}:{})});
   }
   for(const [section,step] of Object.entries(after.steps))if(step.approval?.source==='student_attested_teacher_permission'&&JSON.stringify(step.approval)!==JSON.stringify(before?.steps[section]?.approval))await event(`${after.ref}:attest:${section}`,'student_attested_teacher_permission',null,{section,approval:step.approval,responses:after.responses});

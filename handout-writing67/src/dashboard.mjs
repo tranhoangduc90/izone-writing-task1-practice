@@ -1,4 +1,4 @@
-import {workflowFor,available,jobStateKey,isDiscussion,isOpinion,requiredFields} from './workflow.mjs';
+import {outlineRelation,isBodyOutline,workflowFor,available,jobStateKey,isDiscussion,isOpinion,requiredFields} from './workflow.mjs';
 
 // Nhận hai trạng thái đã khóa trong transaction; giữ mốc hoạt động ngoài nhật ký hết hạn.
 // Góp ý của GV và lượt đọc không đổi thời gian hoạt động học viên. Dữ liệu cũ thiếu mốc giữ null.
@@ -44,9 +44,11 @@ export function dashboardProjection(s,now=Date.now()){
   const studentRepliedAt=max(a.studentRepliedAt,...threads.flatMap(t=>t.messages.filter(m=>m.role==='student').map(m=>m.createdAt)));
   const resultAt=max(a.resultAt,...s.jobs.filter(j=>j.kind==='grade'&&['completed','failed'].includes(j.status)).map(j=>j.stateChangedAt),...ORDER.map(k=>s.steps[k].approval?.source==='ai'?s.steps[k].approval.at:0));
   const passed=ORDER.filter(k=>s.steps[k].status==='passed').length;
+  const relation=isBodyOutline(s)?outlineRelation(s):null;
+  const complete=relation?relation==='passed':passed===ORDER.length;
   const attention=Object.values(processing).some(j=>j.status==='failed'||j.overdue);
   const fields=(isOpinion(s)||isDiscussion(s))?ORDER.flatMap(k=>requiredFields(s,k)):null;
-  return {totalSections:ORDER.length,sectionOrder:ORDER,...(fields?{totalFields:fields.length}:{}),filled:(fields?fields.map(k=>s.responses[k]):Object.values(s.responses)).filter(v=>typeof v==='string'&&v.trim()).length,passed,
+  return {...(relation?{relation}:{}),totalSections:ORDER.length,sectionOrder:ORDER,...(fields?{totalFields:fields.length}:{}),filled:(fields?fields.map(k=>s.responses[k]):Object.values(s.responses)).filter(v=>typeof v==='string'&&v.trim()).length,passed,
     checks:s.jobs.filter(j=>j.kind==='grade').length,aiComments:ORDER.reduce((n,k)=>n+s.steps[k].history.length,0),
     current,currentLabel:!current&&passed<ORDER.length?'Chờ học viên mở Ý 2':null,negativeStreak,supportLevel:negativeStreak>=9?9:negativeStreak>=6?6:negativeStreak>=3?3:0,
     openThreads:open.length,addressedThreads:threads.length-open.length,waitingReplyAt,
@@ -54,6 +56,6 @@ export function dashboardProjection(s,now=Date.now()){
     edited:ORDER.filter(k=>s.steps[k].editedAfterApproval).length,stepStates,processing,
     activity:{studentSavedAt:a.studentSavedAt??null,studentCheckedAt:checked,studentAttestedAt:attested,studentRepliedAt,resultAt,
       studentAt:max(a.studentSavedAt,checked,attested,studentRepliedAt,edited,a.studentOpenedIdea2At),lastAt:max(a.studentSavedAt,checked,attested,studentRepliedAt,edited,a.studentOpenedIdea2At,resultAt)},
-    state:negativeStreak>=3?'support':attention?'attention':passed===ORDER.length?'complete':Object.values(processing).some(j=>['queued','leased'].includes(j.status))?'pending':current&&s.steps[current].status==='revision'?'revision':'working',
-    priority:negativeStreak>=3?0:attention?1:edited||waitingReplyAt?2:passed<ORDER.length?3:4};
+    state:negativeStreak>=3?'support':attention?'attention':complete?'complete':['order','stance'].includes(relation)?'revision':Object.values(processing).some(j=>['queued','leased'].includes(j.status))?'pending':current&&s.steps[current].status==='revision'?'revision':'working',
+    priority:negativeStreak>=3?0:attention?1:edited||waitingReplyAt?2:!complete?3:4};
 }

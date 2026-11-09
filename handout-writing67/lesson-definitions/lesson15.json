@@ -1,0 +1,64 @@
+{
+  "activity": "lesson15",
+  "number": 15,
+  "title": "Phạt tù hay biện pháp thay thế?",
+  "shortTitle": "Phạt tù hay biện pháp thay thế?",
+  "topic": "Some people think all lawbreakers should be put into prison, while others believe that there are better alternatives. Discuss both views and give your own opinion.",
+  "aInstruction": "Nêu hành động, đặc điểm hoặc bối cảnh tạo ra tác động ở phương án đang bàn.",
+  "ideaHint": "Nêu khía cạnh và hướng đánh giá ngắn gọn.",
+  "description": "Chốt mức đồng ý với nhận định tất cả người vi phạm pháp luật đều nên bị phạt tù và bốn idea. Thân bài 1 bàn quan điểm không ủng hộ; thân bài 2 bảo vệ quan điểm ủng hộ.",
+  "workflowMode": "whole-chain-v1",
+  "workflowVersion": 1,
+  "handoutMode": "two-bodies-v1",
+  "preparationMode": "ideas-first-v1",
+  "preparationKind": "opinion-v1",
+  "rosterScope": "lesson",
+  "solutionOptions": [
+    "Phạt tù tất cả người vi phạm",
+    "Ưu tiên biện pháp thay thế"
+  ],
+  "objective": "BAX",
+  "helpTitle": "Chốt lập trường và phát triển A → X → B",
+  "helpItems": [
+    "Chọn mức độ đồng ý với nhận định tất cả người vi phạm pháp luật đều nên bị phạt tù. Nếu đồng ý một phần, nêu phía nghiêng về và trường hợp áp dụng.",
+    "Thân bài 1 trình bày lý do có người ủng hộ quan điểm không chọn và đánh giá giới hạn của nó. Thân bài 2 bảo vệ quan điểm chọn. Hai idea mỗi đoạn cần phân biệt được.",
+    "Khi kế hoạch được thông qua, viết Topic sentence từ hai idea đã chốt, rồi Check cả chuỗi A → X → B của từng ý."
+  ],
+  "bodies": [
+    {
+      "body": 1,
+      "objective": "BAX",
+      "title": "Đánh giá quan điểm không ủng hộ",
+      "focus": "Trình bày lý do có người ủng hộ quan điểm không chọn và đánh giá giới hạn của nó. Có thể nhượng bộ ở ý đầu rồi chỉ ra giới hạn ở ý sau.",
+      "ideaHint": "Dùng hai idea đã chốt trong kế hoạch chung.",
+      "topicInstruction": "Viết Topic sentence bao quát cả hai idea và đúng vai trò của đoạn.",
+      "chainInstruction": "Nhập đủ A → X → B. Check cả chuỗi để kiểm cơ chế nối điểm đầu với hệ quả và vai trò của đoạn.",
+      "comparisonInstruction": "Ý 2 cần có nội dung hoặc cơ chế phân biệt được với ý 1. Hai ý có thể cùng dẫn tới một hệ quả."
+    },
+    {
+      "body": 2,
+      "objective": "BAX",
+      "title": "Bảo vệ quan điểm ủng hộ",
+      "focus": "Dùng hai idea để bảo vệ quan điểm chọn. Giữ phạm vi và điều kiện đã chốt.",
+      "ideaHint": "Dùng hai idea đã chốt trong kế hoạch chung.",
+      "topicInstruction": "Viết Topic sentence bao quát cả hai idea và đúng vai trò của đoạn.",
+      "chainInstruction": "Nhập đủ A → X → B. Check cả chuỗi để kiểm cơ chế nối điểm đầu với hệ quả và vai trò của đoạn.",
+      "comparisonInstruction": "Ý 2 cần có nội dung hoặc cơ chế phân biệt được với ý 1. Hai ý có thể cùng dẫn tới một hệ quả."
+    }
+  ],
+  "classes": [
+    "IC2213",
+    "IC2228",
+    "IC2238",
+    "IC2262",
+    "IC2270",
+    "IC2273",
+    "IC2304",
+    "IC2314",
+    "IC2340",
+    "IC2353",
+    "IC2363",
+    "IC2376",
+    "IC2404"
+  ]
+}

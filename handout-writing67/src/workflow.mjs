@@ -4,12 +4,15 @@ export const PREPARATION='ideas-first-v1';
 export const SOLUTIONS=['Đường tàu và tàu điện ngầm','Thêm đường và mở rộng đường bộ'];
 export const PLAN_FIELDS=['chosenSolution','body1_idea1','body1_idea2','body2_idea1','body2_idea2'];
 // Lập trường là biến thể cấu hình của cùng hành trình; bài cũ giữ nguyên schema và lựa chọn.
-export const OPINION='opinion-v1';
+export const OPINION='opinion-v1', DISCUSSION='discussion-v1';
+// Lesson 15 phiên cũ đã lưu profile opinion trước khi bỏ hai ô lập trường.
+const preparationKindOf=s=>s.activity==='lesson15'&&s.preparationKind===OPINION?DISCUSSION:s.preparationKind;
 export const AGREEMENT_LEVELS=['Đồng ý hoàn toàn','Phản đối hoàn toàn','Đồng ý một phần'];
-export const planFields=s=>s.preparationKind===OPINION?['agreementLevel','chosenSolution','positionLimit',...PLAN_FIELDS.slice(1)]:PLAN_FIELDS;
+export const planFields=s=>preparationKindOf(s)===OPINION?['agreementLevel','chosenSolution','positionLimit',...PLAN_FIELDS.slice(1)]:PLAN_FIELDS;
 export const solutionsFor=s=>s.solutionOptions||SOLUTIONS;
-export const preparationContext=s=>s.preparationKind===OPINION?{preparationKind:OPINION,solutionOptions:[...s.solutionOptions]}:{};
-export const isOpinion=s=>isPrepared(s)&&s.preparationKind===OPINION;
+export const preparationContext=s=>isOpinion(s)||isDiscussion(s)?{preparationKind:preparationKindOf(s),solutionOptions:[...s.solutionOptions]}:{};
+export const isOpinion=s=>isPrepared(s)&&preparationKindOf(s)===OPINION;
+export const isDiscussion=s=>isPrepared(s)&&preparationKindOf(s)===DISCUSSION;
 export function requiredFields(s,section){return workflowFor(s).fields[section].filter(k=>k!=='positionLimit'||s.responses?.agreementLevel===AGREEMENT_LEVELS[2]);}
 export function preparationError(s){
  if(!solutionsFor(s).includes(s.responses?.chosenSolution))return 'SOLUTION_INVALID';
@@ -62,6 +65,7 @@ export function bodyConfig(lesson,s,n){
  const original=lesson.bodies.find(b=>b.body===n);
  if(!isPrepared(lesson))return original;
  const options=solutionsFor(lesson),chosen=s.responses?.chosenSolution,valid=options.includes(chosen),other=options.find(x=>x!==chosen),solution=valid?(n===2?chosen:other):'';
+ if(isDiscussion(lesson))return {...original,title:original.title+(solution?' · '+solution:'')};
  if(isOpinion(lesson))return {...original,title:(n===2?'Bảo vệ phương án ủng hộ':'Đánh giá phương án không ủng hộ')+(solution?' · '+solution:''),focus:original.focus+(s.responses?.agreementLevel?' Mức độ: '+s.responses.agreementLevel+'.':'')+(s.responses?.agreementLevel===AGREEMENT_LEVELS[2]?' Giữ điều kiện đã chốt: '+(s.responses.positionLimit||''):'')};
  return {...original,title:(n===2?'Bảo vệ phương án chọn':'Đánh giá phương án không chọn')+(solution?' · '+solution:''),focus:n===2?'Dùng hai idea đã chốt để làm rõ vì sao phương án bạn chọn tốt hơn.':'Dùng hai idea đã chốt để chỉ ra hạn chế của phương án không chọn; có thể khen mở đầu rồi chuyển sang hạn chế.'};
 }

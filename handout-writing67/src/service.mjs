@@ -74,7 +74,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     if(isMulti(s)&&!(isPrepared(s)&&section==='outline'?[0]:[1,2]).includes(bodyIndex))fail('BODY_IDENTITY_MISSING');
     const snapshot = {activity:s.activity,workflowMode:s.workflowMode||GUIDED,body:bodyIndex??s.body??2,...(isMulti(s)?{bodyIndex,handoutMode:s.handoutMode,...(isPrepared(s)?{preparationMode:s.preparationMode,...preparationContext(s)}:{})}:{}),topic:lesson.topic,responses:structuredClone(s.responses),history:section?s.steps[section].history.map(h=>({feedback:h.feedback,status:h.status,snapshot:h.snapshot})):[],ideaIndex};
     const job = {productId:PRODUCT,sessionRef:s.ref,jobRef:randomUUID(),kind,section,ideaIndex,workflowMode:s.workflowMode||GUIDED,snapshotHash:hash(snapshot),snapshot,promptVersion,status:'queued',tries:0,createdAt:clock(),deadlineAt:clock()+maxJobMs,leaseUntil:0,leaseToken:null,attempts:[]};
-    if(bodyIndex!==null&&bodyIndex!==undefined)job.bodyIndex=bodyIndex;if(isPrepared(s)){job.preparationMode=s.preparationMode;if(isOpinion(s))job.preparationKind=s.preparationKind;}
+    if(bodyIndex!==null&&bodyIndex!==undefined)job.bodyIndex=bodyIndex;if(isPrepared(s)){job.preparationMode=s.preparationMode;job.preparationKind=preparationContext(s).preparationKind;}
     job.operationKey = `${PRODUCT}:${job.jobRef}:${job.promptVersion}`;
     job.inputHash=relevant(job,s.responses);
     // Ghim nguyên prompt vào job trước ACK; retry/redeploy giữ cùng payload và operationKey.
@@ -90,7 +90,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
   function vocabulary(s,n,delay=0,b){
     if(!vocabEligible(s,n,b))return;
     const vk=vocabularyKey(s,n,b),latest=s.jobs.find(j=>j.jobRef===s.vocabulary[vk]?.jobRef);
-    const current=hash(Object.fromEntries(dependencies(null,n,s.workflowMode,b,s.preparationMode,s.preparationKind).map(k=>[k,s.responses[k]])));
+    const current=hash(Object.fromEntries(dependencies(null,n,s.workflowMode,b,s.preparationMode,preparationContext(s).preparationKind).map(k=>[k,s.responses[k]])));
     if(latest&&latest.inputHash===current&&['queued','leased','completed'].includes(latest.status))return;
     for(const j of s.jobs)if(j.kind==='vocab'&&j.ideaIndex===n&&(!isMulti(s)||j.bodyIndex===b))supersede(s,j,'content_changed');
     const v=makeJob(s,'vocab',null,n,b);

@@ -6,12 +6,12 @@
   "topic": "Some people think all lawbreakers should be put into prison, while others believe that there are better alternatives. Discuss both views and give your own opinion.",
   "aInstruction": "Nêu hành động, đặc điểm hoặc bối cảnh tạo ra tác động ở phương án đang bàn.",
   "ideaHint": "Nêu khía cạnh và hướng đánh giá ngắn gọn.",
-  "description": "Chốt mức đồng ý với nhận định tất cả người vi phạm pháp luật đều nên bị phạt tù và bốn idea. Thân bài 1 bàn quan điểm không ủng hộ; thân bài 2 bảo vệ quan điểm ủng hộ.",
+  "description": "Chọn quan điểm bạn ủng hộ và chốt hai idea cho mỗi thân bài. Trình bày cả hai quan điểm và làm rõ ý kiến riêng.",
   "workflowMode": "whole-chain-v1",
   "workflowVersion": 1,
   "handoutMode": "two-bodies-v1",
   "preparationMode": "ideas-first-v1",
-  "preparationKind": "opinion-v1",
+  "preparationKind": "discussion-v1",
   "rosterScope": "lesson",
   "solutionOptions": [
     "Phạt tù tất cả người vi phạm",
@@ -20,7 +20,7 @@
   "objective": "BAX",
   "helpTitle": "Chốt lập trường và phát triển A → X → B",
   "helpItems": [
-    "Chọn mức độ đồng ý với nhận định tất cả người vi phạm pháp luật đều nên bị phạt tù. Nếu đồng ý một phần, nêu phía nghiêng về và trường hợp áp dụng.",
+    "Chọn quan điểm bạn ủng hộ. Nếu lập trường có phạm vi áp dụng, có thể nêu ngay trong idea liên quan.",
     "Thân bài 1 trình bày lý do có người ủng hộ quan điểm không chọn và đánh giá giới hạn của nó. Thân bài 2 bảo vệ quan điểm chọn. Hai idea mỗi đoạn cần phân biệt được.",
     "Khi kế hoạch được thông qua, viết Topic sentence từ hai idea đã chốt, rồi Check cả chuỗi A → X → B của từng ý."
   ],
@@ -39,7 +39,7 @@
       "body": 2,
       "objective": "BAX",
       "title": "Bảo vệ quan điểm ủng hộ",
-      "focus": "Dùng hai idea để bảo vệ quan điểm chọn. Giữ phạm vi và điều kiện đã chốt.",
+      "focus": "Dùng hai idea để bảo vệ quan điểm bạn chọn. Giữ nhất quán với phạm vi đã nêu trong idea nếu có.",
       "ideaHint": "Dùng hai idea đã chốt trong kế hoạch chung.",
       "topicInstruction": "Viết Topic sentence bao quát cả hai idea và đúng vai trò của đoạn.",
       "chainInstruction": "Nhập đủ A → X → B. Check cả chuỗi để kiểm cơ chế nối điểm đầu với hệ quả và vai trò của đoạn.",

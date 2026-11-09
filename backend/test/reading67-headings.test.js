@@ -32,6 +32,27 @@ sourceTest('Thiếu nhận xét → bổ sung đúng trường → kiểm nội 
  assert.equal(next.result.grading.target_results.length,15);assert.equal(next.result.feedback[id].status,'partial');assert.equal(calls,3);
  const completeState=next.result.audit.validation;const resumed=await g.finish(prepared,{validationState:JSON.parse(JSON.stringify(completeState))});assert.equal(calls,3);assert.equal(resumed.grading.validation.reviewedHash,next.result.grading.validation.reviewedHash);
 });
+sourceTest('Repair gets the pinned error codes and recovers an invalid code without changing the verdict',async()=>{
+ const prompts=[],responses=[];
+ const g=await grader(async request=>{prompts.push(request.prompt);return envelope(responses.shift());});
+ const prepared=g.prepareWeb(answers(g),'repair-error-code');
+ const initial=ai(g,prepared),id=initial.results[0].target_id;
+ const code=g.config.semantic_error_codes[0];
+ initial.results[0]={target_id:id,verdict:'incorrect',error_code:'unlisted_code',
+  feedback:'Em còn thiếu ý cốt lõi giúp giải thích đặc điểm của thiết bị.',
+  next_step:'Lần sau, hãy giữ đủ ý chính và quan hệ của đoạn.'};
+ responses.push(initial,{results:[{target_id:id,error_code:code}]});
+ let next=await checkpoint(()=>g.finish(prepared));
+ assert.deepEqual(next.state.issues[0].fields,['error_code']);
+ next=await checkpoint(()=>g.finish(prepared,{validationState:next.state}));
+ assert.ok(prompts[1].includes(JSON.stringify(g.config.semantic_error_codes)));
+ assert.equal(next.state.phase,'review');
+ responses.push({results:initial.results.map(row=>({target_id:row.target_id,accepted:true,fields:[],problems:[]}))});
+ const result=await g.finish(prepared,{validationState:next.state});
+ assert.deepEqual(result.audit.validation.value.results[0],{...initial.results[0],error_code:code});
+ assert.equal(result.grading.target_results.find(row=>row.target_id===id).verdict,'incorrect');
+});
+
 sourceTest('Review sai JSON gửi rõ lỗi cho vòng kế tiếp, giữ checkpoint và các verdict ban đầu',async()=>{
  const prompts=[];let responses=[];const g=await grader(async p=>{prompts.push(p.prompt);return responses.shift();}),prepared=g.prepareWeb(answers(g),'review-format-recovery'),initial=ai(g,prepared);
  const review={results:initial.results.map(r=>({target_id:r.target_id,accepted:true,fields:[],problems:[]}))};

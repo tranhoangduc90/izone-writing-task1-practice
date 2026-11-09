@@ -1,0 +1,45 @@
+{
+  "activity": "lesson3",
+  "number": 3,
+  "title": "Chọn idea cho hai thân bài",
+  "shortTitle": "Cấm hoàn toàn fast food?",
+  "topic": "With an increasing number of people eating fast food, which if eaten too regularly can cause health issues, some people think that the only solution is to ban it completely. To what extent do you agree?",
+  "aInstruction": "Chọn thông điệp chung và hai idea của thân bài.",
+  "ideaHint": "Lấy idea từ kết quả trên lớp. Ưu tiên những ý bạn thấy dễ viết nhất.",
+  "description": "Chọn quan điểm của cả bài, rồi chốt thông điệp và hai idea cho mỗi thân bài.",
+  "outlineOnly": true,
+  "workflowMode": "whole-chain-v1",
+  "workflowVersion": 1,
+  "handoutMode": "two-bodies-v1",
+  "rosterScope": "lesson",
+  "classes": ["IC2213", "IC2228", "IC2238", "IC2262", "IC2270", "IC2273", "IC2304", "IC2314", "IC2340", "IC2353", "IC2363", "IC2376", "IC2404"],
+  "objective": "BAX",
+  "helpTitle": "Chọn idea như thế nào?",
+  "helpItems": [
+    "Lấy ý từ kết quả trên lớp và ưu tiên ý dễ viết.",
+    "Hai idea cùng làm rõ thông điệp mà bạn khai báo cho đoạn.",
+    "Nếu hai thân trái hướng, đặt hướng bạn ủng hộ hơn ở Thân bài 2."
+  ],
+  "bodies": [
+    {
+      "body": 1,
+      "objective": "BAX",
+      "title": "Thân bài 1",
+      "focus": "Chốt thông điệp và hai idea bạn sẽ dùng.",
+      "ideaHint": "Nêu ngắn gọn ý bạn sẽ triển khai.",
+      "topicInstruction": "Thông điệp chung của các idea trong đoạn văn này là gì?",
+      "chainInstruction": "Check thông điệp và hai idea cùng lúc.",
+      "comparisonInstruction": "Đối chiếu với quan điểm của cả bài."
+    },
+    {
+      "body": 2,
+      "objective": "BAX",
+      "title": "Thân bài 2",
+      "focus": "Chốt thông điệp và hai idea bạn sẽ dùng.",
+      "ideaHint": "Nêu ngắn gọn ý bạn sẽ triển khai.",
+      "topicInstruction": "Thông điệp chung của các idea trong đoạn văn này là gì?",
+      "chainInstruction": "Check thông điệp và hai idea cùng lúc.",
+      "comparisonInstruction": "Đối chiếu với quan điểm của cả bài."
+    }
+  ]
+}

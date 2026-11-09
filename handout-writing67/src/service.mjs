@@ -2,6 +2,7 @@ import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto
 import {parseAiResult} from './processor.mjs';
 import {publicThreads, changeThread} from './comments.mjs';
 import {LEGACY_LESSON5,publicLesson} from './lessons.mjs';
+import {isBodyOutline,outlineRelation,validOutlineDirection} from './workflow.mjs';
 
 export const PRODUCT = 'handout-writing67';
 import {ORDER,FIELDS,workflowFor,isWhole,isMulti,isPrepared,isOpinion,PREPARATION,planFields,solutionsFor,preparationContext,preparationError,requiredFields,AGREEMENT_LEVELS,bodyView,bodyKey,bodyIndexOf,localKey,vocabularyKey,jobStateKey,sectionFor,ideaPassed,available,vocabEligible,vocabFields,GUIDED} from './workflow.mjs';
@@ -36,6 +37,10 @@ const relevant = (job,responses) => hash(Object.fromEntries(dependencies(job.sec
 // API trả hai nhánh rõ ràng; storage dùng khóa có tiền tố để transaction chỉ hợp nhất trường đổi.
 export function withBodies(value){
   if(!isMulti(value))return value;
+  if(isBodyOutline(value)){
+    const relation=outlineRelation(value);
+    return {...value,relation,completed:relation==='passed'};
+  }
   return {...value,bodies:Object.fromEntries([1,2].map(n=>[n,bodyView(value,n)])),completed:workflowFor(value).order.every(k=>value.steps[k]?.status==='passed')};
 }
 function checkBody(s,input,key){
@@ -53,7 +58,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     // Lấy job cuối của từng bước/ý trước khi lọc, không hiện lỗi cũ sau lượt mới đã đạt.
     const latest=Object.fromEntries(s.jobs.map(j=>[jobStateKey(j),j]));
     const processing=Object.fromEntries(Object.entries(latest).filter(([,j])=>['queued','leased','failed'].includes(j.status)).map(([key,j])=>[key,{jobRef:j.jobRef,status:j.status,tries:j.tries,maxTries:3,createdAt:j.createdAt,deadlineAt:j.deadlineAt??j.createdAt+maxJobMs,leaseUntil:j.leaseUntil,nextAttemptAt:j.nextAttemptAt??null,error:j.error??null}]));
-    return withBodies({ref:s.ref,activity:s.activity,...(isMulti(s)?{handoutMode:s.handoutMode,bodyProgress:s.bodyProgress,...(isPrepared(s)?{preparationMode:s.preparationMode,...preparationContext(s)}:{})}:{}),workflowMode:s.workflowMode||GUIDED,workflowVersion:s.workflowVersion||1,body:s.body||2,classRef:s.classRef,studentRef:s.studentRef,responses:s.responses,version:s.version,idea2Open:s.idea2Open,steps:s.steps,vocabulary:s.vocabulary,teacherComments:publicTeacherComments(s),commentThreads:publicThreads(s),commentVersion:s.commentVersion||0,submittedSections:[...new Set(s.jobs.filter(j=>j.kind==='grade').map(j=>j.section))],processing});
+    return withBodies({ref:s.ref,activity:s.activity,...(isBodyOutline(s)?{outlineOnly:true}:{}),...(isMulti(s)?{handoutMode:s.handoutMode,bodyProgress:s.bodyProgress,...(isPrepared(s)?{preparationMode:s.preparationMode,...preparationContext(s)}:{})}:{}),workflowMode:s.workflowMode||GUIDED,workflowVersion:s.workflowVersion||1,body:s.body||2,classRef:s.classRef,studentRef:s.studentRef,responses:s.responses,version:s.version,idea2Open:s.idea2Open,steps:s.steps,vocabulary:s.vocabulary,teacherComments:publicTeacherComments(s),commentThreads:publicThreads(s),commentVersion:s.commentVersion||0,submittedSections:[...new Set(s.jobs.filter(j=>j.kind==='grade').map(j=>j.section))],processing});
   };
   const issue = ref => {const content=`${ref}.${clock()+sessionMs}`;return `${content}.${sign(content)}`;};
   const authorize = (ref,token) => {
@@ -72,8 +77,9 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     const lesson=lessonFor(s.activity),promptVersion=lesson.promptVersion;
     const bodyIndex=isPrepared(s)&&section==='outline'?0:isMulti(s)?bodyIndexOf(section)||selectedBody:null;
     if(isMulti(s)&&!(isPrepared(s)&&section==='outline'?[0]:[1,2]).includes(bodyIndex))fail('BODY_IDENTITY_MISSING');
-    const snapshot = {activity:s.activity,workflowMode:s.workflowMode||GUIDED,body:bodyIndex??s.body??2,...(isMulti(s)?{bodyIndex,handoutMode:s.handoutMode,...(isPrepared(s)?{preparationMode:s.preparationMode,...preparationContext(s)}:{})}:{}),topic:lesson.topic,responses:structuredClone(s.responses),history:section?s.steps[section].history.map(h=>({feedback:h.feedback,status:h.status,snapshot:h.snapshot})):[],ideaIndex};
+    const snapshot = {activity:s.activity,workflowMode:s.workflowMode||GUIDED,body:bodyIndex??s.body??2,...(isBodyOutline(s)?{outlineOnly:true}:{}),...(isMulti(s)?{bodyIndex,handoutMode:s.handoutMode,...(isPrepared(s)?{preparationMode:s.preparationMode,...preparationContext(s)}:{})}:{}),topic:lesson.topic,responses:structuredClone(s.responses),history:section?s.steps[section].history.map(h=>({feedback:h.feedback,status:h.status,snapshot:h.snapshot})):[],ideaIndex};
     const job = {productId:PRODUCT,sessionRef:s.ref,jobRef:randomUUID(),kind,section,ideaIndex,workflowMode:s.workflowMode||GUIDED,snapshotHash:hash(snapshot),snapshot,promptVersion,status:'queued',tries:0,createdAt:clock(),deadlineAt:clock()+maxJobMs,leaseUntil:0,leaseToken:null,attempts:[]};
+    if(isBodyOutline(s))job.outlineOnly=true;
     if(bodyIndex!==null&&bodyIndex!==undefined)job.bodyIndex=bodyIndex;if(isPrepared(s)){job.preparationMode=s.preparationMode;job.preparationKind=preparationContext(s).preparationKind;}
     job.operationKey = `${PRODUCT}:${job.jobRef}:${job.promptVersion}`;
     job.inputHash=relevant(job,s.responses);
@@ -108,13 +114,18 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     s.operations||={};const signature=hash(input);
     if(s.operations[input.requestId]){if(s.operations[input.requestId].hash!==signature)fail('REQUEST_ID_CONFLICT',409);return publicSession(s);}
     if(s.version!==input.baseVersion)fail('VERSION_CONFLICT',409);
-    change();s.operations[input.requestId]={hash:signature,at:clock(),action:input.field?'edit':'attest',field:input.field??null,section:input.section??null};
+    change();s.operations[input.requestId]={hash:signature,at:clock(),action:input.action==='swapBodies'?'swapBodies':input.field?'edit':'attest',field:input.field??null,section:input.section??null};
     if(Object.keys(s.operations).length>200)delete s.operations[Object.keys(s.operations)[0]];
     return publicSession(s);
   }
   function resultValid(job,result) {
     if (!object(result)) return false;
-    if (job.kind==='grade') return ['passed','needs_revision'].includes(result.resultStatus) && string(result.feedback) && result.feedback.trim().split(/\s+/).length<=(isWhole(job)?100:150) && Object.keys(result).every(k=>['resultStatus','feedback'].includes(k));
+    if(job.kind==='grade'){
+      const outline=isBodyOutline(job);
+      const keys=outline?['resultStatus','feedback','direction']:['resultStatus','feedback'];
+      return ['passed','needs_revision'].includes(result.resultStatus)&&string(result.feedback)&&result.feedback.trim().split(/\s+/).length<=(isWhole(job)?100:150)&&Object.keys(result).every(k=>keys.includes(k))
+        &&(!outline||validOutlineDirection(result.direction)||result.resultStatus==='needs_revision'&&result.direction==='unclear');
+    }
     const keys=job.ideaIndex===0?['A1','X1','B1','A2','X2','B2']:['A','X','B'];
     if(Object.keys(result).sort().join(',')!==[...keys].sort().join(','))return false;
     return keys.every(k=>Array.isArray(result[k]) && result[k].length===2 && result[k].every(v=>object(v) && Object.keys(v).sort().join(',')==='meaningVi,phrase' && string(v.phrase) && v.phrase.trim().split(/\s+/).length<=5 && string(v.meaningVi)));
@@ -148,7 +159,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
       if (!rows.some(c=>c.classRef===input.classRef && c.students.some(s=>s.studentRef===input.studentRef))) fail('STUDENT_OUT_OF_SCOPE',403);
       const key=JSON.stringify([input.activity,input.classRef,input.studentRef]);
       const lesson=lessonFor(input.activity),policy=workflowFor(lesson);
-      const s=await store.open(key,ref=>({ref,activity:input.activity,handoutMode:lesson.handoutMode,...(isPrepared(lesson)?{preparationMode:lesson.preparationMode,...preparationContext(lesson)}:{}),...(isMulti(lesson)?{bodyProgress:{1:{idea2Open:false},2:{idea2Open:false}}}:{}),workflowMode:lesson.workflowMode||GUIDED,workflowVersion:1,body:lesson.body,classRef:input.classRef,studentRef:input.studentRef,responses:Object.fromEntries(Object.values(policy.fields).flat().map(k=>[k,''])),version:0,idea2Open:false,steps:Object.fromEntries(policy.order.map(k=>[k,{status:'draft',history:[],error:null}])),jobs:[],vocabulary:{},saves:{}}));
+      const s=await store.open(key,ref=>({ref,activity:input.activity,...(isBodyOutline(lesson)?{outlineOnly:true}:{}),handoutMode:lesson.handoutMode,...(isPrepared(lesson)?{preparationMode:lesson.preparationMode,...preparationContext(lesson)}:{}),...(isMulti(lesson)?{bodyProgress:{1:{idea2Open:false},2:{idea2Open:false}}}:{}),workflowMode:lesson.workflowMode||GUIDED,workflowVersion:1,body:lesson.body,classRef:input.classRef,studentRef:input.studentRef,responses:Object.fromEntries([...Object.values(policy.fields).flat(),...(isBodyOutline(lesson)?['stance']:[])].map(k=>[k,''])),version:0,idea2Open:false,steps:Object.fromEntries(policy.order.map(k=>[k,{status:'draft',history:[],error:null}])),jobs:[],vocabulary:{},saves:{}}));
       return {session:publicSession(s),token:issue(s.ref)};
     },
     async read(ref,token) {
@@ -163,9 +174,20 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
         if(s.saves[input.requestId]) {if(s.saves[input.requestId]!==signature)fail('REQUEST_ID_CONFLICT',409);return publicSession(s);}
         if(s.version!==input.baseVersion)fail('VERSION_CONFLICT',409);
         for(const [field,value] of Object.entries(input.responses)) {
+          if(isBodyOutline(s)&&field==='stance'){
+            if(value!==''&&!validOutlineDirection(value))fail('OUTLINE_STANCE_INVALID');
+            s.responses.stance=value;continue;
+          }
           const section=sectionFor(s,field);
           if(!section || typeof value!=='string' || value.length>4000)fail('FIELD_INVALID');
-          if(value!==s.responses[field] && (!available(s,section) || ['pending','passed'].includes(s.steps[section].status)))fail('FIELD_LOCKED',409);
+          if(value!==s.responses[field]){
+            if(isBodyOutline(s)){
+              for(const job of s.jobs)if(job.section===section)supersede(s,job,'content_changed');
+              const step=s.steps[section];
+              step.status=step.history.length?'revision':'draft';step.error=null;
+              delete step.approval;delete step.direction;
+            }else if(!available(s,section)||['pending','passed'].includes(s.steps[section].status))fail('FIELD_LOCKED',409);
+          }
           s.responses[field]=value;
         }
         s.version++;
@@ -185,6 +207,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
         if(prior) {if(prior.section!==input.section || prior.requestHash!==hash(input))fail('REQUEST_ID_CONFLICT',409);return {jobRef:prior.jobRef,session:publicSession(s)};}
         if(s.version!==input.baseVersion)fail('VERSION_CONFLICT',409);
         if(!available(s,input.section) || ['passed','pending'].includes(s.steps[input.section].status))fail('STEP_LOCKED',409);
+        if(isBodyOutline(s)&&!validOutlineDirection(s.responses.stance))fail('OUTLINE_STANCE_INVALID');
         if(requiredFields(s,input.section).some(k=>!string(s.responses[k])))fail('EMPTY_RESPONSE');
         if(isPrepared(s)){const error=preparationError(s);if(error)fail(error);}
         const n=input.section==='outline'?0:localKey(input.section)==='topic'?null:Number(input.section.at(-1));
@@ -197,6 +220,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     async attest(ref,token,input){
       if(!object(input)||!id(input.requestId)||!Number.isSafeInteger(input.baseVersion)||typeof input.section!=='string'||input.teacherPermission!==true)fail('ATTEST_INVALID');
       return edit(ref,token,s=>receipt(s,input,()=>{
+        if(isBodyOutline(s))fail('ATTEST_INVALID');
         if(!workflowFor(s).order.includes(input.section))fail('ATTEST_INVALID');
         checkBody(s,input,input.section);
         if(!available(s,input.section)||passed(s,input.section))fail('STEP_LOCKED',409);
@@ -208,8 +232,27 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
       }));
     },
     async revise(ref,token,input){
+      if(input?.action==='swapBodies'){
+        if(!id(input.requestId)||!Number.isSafeInteger(input.baseVersion))fail('EDIT_INVALID');
+        return edit(ref,token,s=>receipt(s,input,()=>{
+          if(!isBodyOutline(s)||outlineRelation(s)!=='order')fail('OUTLINE_SWAP_UNAVAILABLE',409);
+          const flip=key=>bodyKey(3-bodyIndexOf(key),localKey(key));
+          const snapshot=entries=>Object.fromEntries(Object.entries(entries).map(([key,value])=>[flip(key),value]));
+          for(const field of FIELDS.topic){
+            const a=bodyKey(1,field),b=bodyKey(2,field);
+            [s.responses[a],s.responses[b]]=[s.responses[b],s.responses[a]];
+          }
+          [s.steps.body1_topic,s.steps.body2_topic]=[s.steps.body2_topic,s.steps.body1_topic];
+          for(const section of workflowFor(s).order)for(const entry of s.steps[section].history)entry.snapshot=snapshot(entry.snapshot);
+          for(const thread of s.commentThreads||[]){thread.field=flip(thread.field);thread.section=flip(thread.section);}
+          for(const comment of s.teacherComments||[]){comment.section=flip(comment.section);comment.snapshot=snapshot(comment.snapshot);}
+          s.commentVersion=(s.commentVersion||0)+1;
+          s.version++;
+        }));
+      }
       if(!object(input)||!id(input.requestId)||!Number.isSafeInteger(input.baseVersion)||typeof input.field!=='string'||!string(input.value))fail('EDIT_INVALID');
       return edit(ref,token,s=>receipt(s,input,()=>{
+        if(isBodyOutline(s))fail('EDIT_INVALID');
         const section=sectionFor(s,input.field);if(!section)fail('EDIT_INVALID');checkBody(s,input,input.field);
         if(!available(s,section))fail('FIELD_LOCKED',409);
         if(s.responses[input.field]===input.value)return;
@@ -290,6 +333,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
           const step=s.steps[j.section];step.status=input.result.resultStatus==='passed'?'passed':'revision';step.error=null;
           step.history.push({number:step.history.length+1,status:step.status,feedback:input.result.feedback,snapshot:Object.fromEntries(workflowFor(s).fields[j.section].map(k=>[k,j.snapshot.responses[k]])),jobRef:j.jobRef});
           if(step.status==='passed')pass(s,j.section,'ai');
+          if(isBodyOutline(s))step.direction=input.result.direction;
         } else {
           if(!vocabEligible(s,j.ideaIndex,j.bodyIndex)||s.vocabulary[vocabularyKey(s,j.ideaIndex,j.bodyIndex)]?.jobRef!==j.jobRef)fail('VOCAB_STALE',409);
           s.vocabulary[vocabularyKey(s,j.ideaIndex,j.bodyIndex)]={status:'ready',jobRef:j.jobRef,sourceHash:j.snapshotHash,groups:input.result};

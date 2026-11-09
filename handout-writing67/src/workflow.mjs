@@ -8,6 +8,18 @@ export const OPINION='opinion-v1', DISCUSSION='discussion-v1';
 // Lesson 15 phiên cũ đã lưu profile opinion trước khi bỏ hai ô lập trường.
 const preparationKindOf=s=>s.activity==='lesson15'&&s.preparationKind===OPINION?DISCUSSION:s.preparationKind;
 export const AGREEMENT_LEVELS=['Đồng ý hoàn toàn','Phản đối hoàn toàn','Đồng ý một phần'];
+export const OUTLINE_DIRECTIONS={agree:'Nghiêng về đồng ý',disagree:'Nghiêng về phản đối',balanced:'Cân bằng hai phía'};
+export const isBodyOutline=s=>s.outlineOnly===true;
+export const validOutlineDirection=value=>typeof value==='string'&&Object.hasOwn(OUTLINE_DIRECTIONS,value);
+export function outlineRelation(s){
+ const steps=[s.steps?.body1_topic,s.steps?.body2_topic];
+ const stance=s.responses?.stance;
+ if(!validOutlineDirection(stance)||steps.some(step=>step?.status!=='passed'||!validOutlineDirection(step.direction)))return 'waiting';
+ const [first,second]=steps.map(step=>step.direction);
+ if(first===second)return first===stance?'passed':'stance';
+ if(first==='balanced'||second==='balanced')return (first==='balanced'?second:first)===stance?'passed':'stance';
+ return stance==='balanced'||second===stance?'passed':'order';
+}
 export const planFields=s=>preparationKindOf(s)===OPINION?['agreementLevel','chosenSolution','positionLimit',...PLAN_FIELDS.slice(1)]:PLAN_FIELDS;
 export const solutionsFor=s=>s.solutionOptions||SOLUTIONS;
 export const preparationContext=s=>isOpinion(s)||isDiscussion(s)?{preparationKind:preparationKindOf(s),solutionOptions:[...s.solutionOptions]}:{};
@@ -36,6 +48,10 @@ export const jobStateKey=j=>j.kind==='grade'?j.section:(j.bodyIndex?'body'+j.bod
 const multi={order:[1,2].flatMap(n=>whole.order.map(k=>bodyKey(n,k))),fields:Object.fromEntries([1,2].flatMap(n=>whole.order.map(k=>[bodyKey(n,k),whole.fields[k].map(f=>bodyKey(n,f))])))};
 const prepared={order:['outline',...multi.order],fields:{outline:PLAN_FIELDS,...Object.fromEntries(Object.entries(multi.fields).map(([k,v])=>[k,localKey(k)==='topic'?[bodyKey(bodyIndexOf(k),'topicSentence')]:v]))}};
 export function workflowFor(value={}){
+ if(isBodyOutline(value)){
+  const order=['body1_topic','body2_topic'];
+  return {order,fields:Object.fromEntries(order.map((section,i)=>[section,FIELDS.topic.map(field=>bodyKey(i+1,field))]))};
+ }
  const mode=value.workflowMode||GUIDED;
  if(![GUIDED,WHOLE].includes(mode))throw new Error('WORKFLOW_INVALID');
  return isPrepared(value)?(isOpinion(value)?{order:prepared.order,fields:{...prepared.fields,outline:planFields(value)}}:prepared):isMulti(value)?multi:mode===WHOLE?whole:{order:ORDER,fields:FIELDS};
@@ -54,6 +70,7 @@ export function bodyView(s,n){
 export const sectionFor=(s,field)=>workflowFor(s).order.find(k=>workflowFor(s).fields[k].includes(field));
 export const ideaPassed=(s,n,b)=>isMulti(s)?[1,2].includes(b)&&ideaPassed(bodyView(s,b),n):isWhole(s)?s.steps['si'+n]?.status==='passed':['b','a','x'].every(k=>s.steps[k+n]?.status==='passed');
 export function available(s,key){
+ if(isBodyOutline(s))return workflowFor(s).order.includes(key);
  if(isPrepared(s)){if(key==='outline')return true;if(s.steps.outline?.status!=='passed')return false;}
  if(isMulti(s)){const b=bodyIndexOf(key);return !!b&&available(bodyView(s,b),localKey(key));}
  const order=workflowFor(s).order,i=order.indexOf(key);

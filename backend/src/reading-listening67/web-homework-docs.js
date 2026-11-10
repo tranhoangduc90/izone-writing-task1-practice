@@ -4,6 +4,7 @@
  * đọc lại cùng planner rồi mới công nhận verified; lỗi mơ hồ trả mã để dừng ghi.
  */
 import {WebGradingError} from './web-grader.js';
+import {planDocsStatus} from './docs-status-format.js';
 
 export const HOMEWORK_CTA='NHẤN VÀO ĐÂY ĐỂ LUYỆN TẬP READING';
 export const HOMEWORK_STATUS='TÌNH TRẠNG NỘP BÀI READING';
@@ -75,23 +76,13 @@ export function planReading67HomeworkWrite(document,binding,job,contract={}){
   });
   return {revisionId:document.revisionId,verified:correct,requests:correct?[]:[{updateTextStyle:{range:{startIndex:cta.start,endIndex:cta.end,tabId},textStyle:{link:{url:job.payload.url},underline:false,foregroundColor:{color:{rgbColor:{red:1,green:1,blue:1}}}},fields:'link,underline,foregroundColor'}}]};
  }
- if(job.kind!=='status'||typeof job.payload.text!=='string'||/[\r\n]/.test(job.payload.text))fail('DOC_STATUS_INVALID');
- const rs=runs(scope.cell.content),existing=cellText(scope.cell),prefixLabel=contract.prefix||HOMEWORK_PREFIX,target=prefixLabel+job.payload.text;
- const managed=existing.split('\n').filter(line=>line.startsWith(prefixLabel));
- if(managed.length>1)fail('DOC_STATUS_AMBIGUOUS');
- const old=managed[0];
- if((!old&&binding.last_doc_text)||(old&&old!==prefixLabel+binding.last_doc_text&&old!==target))fail('DOC_MANUAL_CONFLICT');
- const offset=old?existing.indexOf(old):existing.length,start=indexAt(rs,offset);
- const labelOffset=target.indexOf(LINK);
- if(job.payload.link&&(!/^https:\/\//.test(job.payload.link)||labelOffset<0))fail('DOC_LINK_INVALID');
- if(old===target&&(!job.payload.link||linked(rs,start+labelOffset,start+labelOffset+LINK.length,job.payload.link)))return {revisionId:document.revisionId,verified:true,requests:[]};
- const requests=[];
- if(old)requests.push({deleteContentRange:{range:{startIndex:start,endIndex:start+old.length,tabId}}});
- const prefix=!old&&existing?'\n':'',textStart=start+prefix.length;
- requests.push({insertText:{location:{index:start,tabId},text:prefix+target}},
-  {updateTextStyle:{range:{startIndex:textStart,endIndex:textStart+target.length,tabId},textStyle:{bold:false,foregroundColor:{color:{rgbColor:{red:0.082,green:0.169,blue:0.306}}},fontSize:{magnitude:11,unit:'PT'}},fields:'link,bold,foregroundColor,fontSize'}});
- if(job.payload.link)requests.push({updateTextStyle:{range:{startIndex:textStart+labelOffset,endIndex:textStart+labelOffset+LINK.length,tabId},textStyle:{link:{url:job.payload.link},underline:true},fields:'link,underline'}});
- return {revisionId:document.revisionId,verified:false,requests};
+ if(job.kind!=='status')fail('DOC_STATUS_INVALID');
+ if(job.payload.link&&!/^https:\/\//.test(job.payload.link))fail('DOC_LINK_INVALID');
+ return planDocsStatus({
+  revisionId:document.revisionId,tabId,runs:runs(scope.cell.content),existing:cellText(scope.cell),
+  previous:binding.last_doc_text,text:job.payload.text,link:job.payload.link,
+  prefix:contract.prefix||HOMEWORK_PREFIX,requirePrevious:true,linkError:'DOC_LINK_INVALID',fail,
+ });
 }
 
 // Adapter nhận token qua auth private. Không nhận documentId hoặc token từ URL public.

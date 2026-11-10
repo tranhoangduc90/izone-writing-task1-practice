@@ -5,6 +5,7 @@ import { PRODUCT, fail } from './service.mjs';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const prefix='/api/handout67/v1';
+const homeworkOutlinePath=prefix+'/integrations/homework/lesson3/outline';
 const equal=(a,b)=>typeof a==='string'&&typeof b==='string'&&Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
 async function jsonBody(req,maxBytes=32768) {
   let length=0;const chunks=[];
@@ -14,7 +15,7 @@ async function jsonBody(req,maxBytes=32768) {
 
 // Nhận HTTP, kiểm origin/token và dữ liệu trước khi gọi nghiệp vụ; chỉ trả mã lỗi an toàn.
 // ACK Check sau transaction. Không in bài, credential hoặc token khi SQL/AI lỗi.
-export function createApi({service,teacher=null,processor=null,origins,internalSecret,trustedProxyAddresses=[],verifySharedTeacher=null,ssoBootstrapKey=null}) {
+export function createApi({service,teacher=null,processor=null,origins,internalSecret,trustedProxyAddresses=[],verifySharedTeacher=null,ssoBootstrapKey=null,homeworkOutlineKey=null}) {
   const normalize=ip=>ip?.startsWith('::ffff:')?ip.slice(7):ip;
   const trusted=new Set(trustedProxyAddresses.map(normalize));
   function networkAddress(req){
@@ -34,6 +35,12 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
     try {
       const origin=req.headers.origin;
       const requestUrl=new URL(req.url,'http://localhost');
+      const homeworkPath=requestUrl.pathname===homeworkOutlinePath;
+      if(homeworkPath){
+        if(!homeworkOutlineKey||req.method!=='POST')fail('NOT_FOUND',404);
+        if(origin||!equal(req.headers.authorization,`Bearer ${homeworkOutlineKey}`))fail('HOMEWORK_OUTLINE_UNAUTHORIZED',401);
+        if(requestUrl.search||!/^application\/json(?:;|$)/i.test(req.headers['content-type']||''))fail('JSON_INVALID');
+      }
       const teacherPath=requestUrl.pathname.startsWith(prefix+'/teacher/');
       if(origin && !origins.includes(origin))fail('ORIGIN_NOT_ALLOWED',403);
       if(origin){res.setHeader('Access-Control-Allow-Origin',origin);res.setHeader('Vary','Origin');if(teacherPath)res.setHeader('Access-Control-Allow-Credentials','true');}
@@ -43,7 +50,7 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
       if(internal && !equal(req.headers.authorization,`Bearer ${internalSecret}`))fail('INTERNAL_UNAUTHORIZED',401);
       if(!internal && path!==prefix+'/health'){
         const now=Date.now();
-        let key='bootstrap:'+networkAddress(req);
+        let key=(homeworkPath?'homework-outline:':'bootstrap:')+networkAddress(req);
         const sessionPath=path.match(/^\/api\/handout67\/v1\/sessions\/([^/]+)(?:\/|$)/);
         if(sessionPath && uuid.test(sessionPath[1])) {
           service.authorizeSession(sessionPath[1],req.headers.authorization?.replace(/^Bearer /,''));
@@ -55,7 +62,8 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
         if(bucket.count>120){res.setHeader('Retry-After','60');fail('RATE_LIMITED',429);}
       }
       let value,status=200;
-      if(teacherPath){
+      if(homeworkPath)value={outline:await service.homeworkOutline(await jsonBody(req,2048))};
+      else if(teacherPath){
         if(!teacher)fail('NOT_FOUND',404);
         const cookieName='izone_handout67_teacher';
         const cookie=value=>`${cookieName}=${value}; Path=${prefix}/teacher; HttpOnly; Secure; SameSite=None; Partitioned; Max-Age=${value?43200:0}`;

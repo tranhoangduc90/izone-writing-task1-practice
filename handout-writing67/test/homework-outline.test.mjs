@@ -1,0 +1,49 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {test} from 'node:test';
+import {PGlite} from '@electric-sql/pglite';
+import {createApi} from '../src/http.mjs';
+import {createService} from '../src/service.mjs';
+import {createStore} from '../src/store.mjs';
+
+test('Homework đọc riêng dàn ý Lesson 3 của đúng người và không sửa hay tạo phiên',async t=>{
+ const db=new PGlite();
+ for(const file of ['001-initial.sql','002-activity-log.sql'])await db.exec(await readFile(new URL('../db/'+file,import.meta.url),'utf8'));
+ const lesson=JSON.parse(await readFile(new URL('../lesson-definitions/lesson3.json',import.meta.url),'utf8'));
+ let allowed=true;
+ const roster=async()=>[{classRef:'IC2363',students:allowed?[{studentRef:'student-a'},{studentRef:'student-b'}]:[]}];
+ const service=createService({store:createStore(db),roster,secret:'s'.repeat(40),lessons:{lesson3:lesson}});
+ const internalSecret='i'.repeat(40),homeworkOutlineKey='h'.repeat(40);
+ const server=createApi({service,origins:['https://fixture.invalid'],internalSecret,homeworkOutlineKey});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ t.after(async()=>{await new Promise(resolve=>server.close(resolve));await db.close();});
+ const base='http://127.0.0.1:'+server.address().port+'/api/handout67/v1',path='/integrations/homework/lesson3/outline';
+ const identity={classRef:'IC2363',studentRef:'student-a'};
+ async function request({body=identity,key=homeworkOutlineKey,route=path,method='POST',origin}={}){
+  const response=await fetch(base+route,{method,headers:{'Content-Type':'application/json',...(key?{Authorization:'Bearer '+key}:{}),...(origin?{Origin:origin}:{})},body:method==='POST'?JSON.stringify(body):undefined});
+  return {status:response.status,data:await response.json(),cache:response.headers.get('cache-control')};
+ }
+ assert.equal((await request({key:null})).status,401);
+ assert.equal((await request({key:internalSecret})).status,401);
+ assert.equal((await request({origin:'https://fixture.invalid'})).status,401);
+ assert.equal((await request({route:'/internal/jobs/claim'})).status,401);
+ assert.equal((await request({method:'GET'})).status,404);
+ assert.equal((await request({body:{...identity,activity:'lesson5'}})).status,400);
+ assert.equal((await request()).status,404);
+ assert.equal(Number((await db.query('SELECT count(*) AS n FROM handout67.session')).rows[0].n),0);
+ const opened=await service.open({activity:'lesson3',...identity});
+ await service.save(opened.session.ref,opened.token,{baseVersion:0,requestId:'outline-fixture-save',responses:{stance:'disagree',body1_topicSentence:'Thông điệp thân 1',body1_idea1:'Ý tưởng của chính người này'}});
+ const before=(await db.query('SELECT payload,updated_at FROM handout67.session')).rows;
+ const result=await request(),outline=result.data.outline;
+ assert.equal(result.status,200);
+ assert.equal(result.cache,'no-store');
+ assert.equal(outline.responses.stance,'disagree');
+ assert.equal(outline.responses.body1_idea1,'Ý tưởng của chính người này');
+ assert.deepEqual(Object.keys(outline).sort(),['activity','classRef','handoutMode','outlineOnly','questionHash','responses','steps','studentRef','version','workflowMode']);
+ assert.doesNotMatch(JSON.stringify(outline),/teacherComments|processing|jobs|token|vocabulary/);
+ assert.equal((await request({body:{classRef:'IC2304',studentRef:'student-a'}})).status,403);
+ assert.equal((await request({body:{classRef:'IC2363',studentRef:'student-b'}})).status,404);
+ allowed=false;
+ assert.equal((await request()).status,403);
+ assert.deepEqual((await db.query('SELECT payload,updated_at FROM handout67.session')).rows,before);
+});

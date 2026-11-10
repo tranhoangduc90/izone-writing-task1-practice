@@ -153,6 +153,29 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     authorizeSession(ref,token) {authorize(ref,token);},
     lesson(activity='lesson5'){return publicLesson(lessonFor(activity));},
     async roster(activity='lesson5') {const lesson=lessonFor(activity);return (await roster(activity,lesson.rosterScope)).filter(c=>!lesson.classes||lesson.classes.includes(c.classRef));},
+    async homeworkOutline(input) {
+      if(!object(input)||Object.keys(input).length!==2||!id(input.classRef)||!id(input.studentRef))fail('IDENTITY_INVALID');
+      const activity='lesson3',lesson=lessonFor(activity);
+      if(!isBodyOutline(lesson))fail('LESSON_NOT_FOUND',404);
+      const {classRef,studentRef}=input;
+      const rows=await api.roster(activity);
+      if(!rows.some(c=>c.classRef===classRef&&c.students.some(s=>s.studentRef===studentRef)))fail('STUDENT_OUT_OF_SCOPE',403);
+      const s=await store.readByIdentity(JSON.stringify([activity,classRef,studentRef]));
+      if(!s)fail('SESSION_NOT_FOUND',404);
+      if(s.activity!==activity||s.classRef!==classRef||s.studentRef!==studentRef||!isBodyOutline(s)||!Number.isSafeInteger(s.version))fail('SESSION_SCOPE_INVALID',409);
+      const fields=['stance',...Object.values(workflowFor(s).fields).flat()];
+      const responses=Object.fromEntries(fields.map(field=>{
+        const value=s.responses?.[field];
+        if(typeof value!=='string'||value.length>16000)fail('SESSION_SCOPE_INVALID',409);
+        return [field,value];
+      }));
+      const steps=Object.fromEntries([1,2].map(body=>{
+        const key='body'+body+'_topic';
+        return [key,{status:s.steps?.[key]?.status==='passed'?'passed':'draft'}];
+      }));
+      return {activity,classRef,studentRef,version:s.version,questionHash:createHash('sha256').update(lesson.topic).digest('hex'),
+        outlineOnly:true,workflowMode:s.workflowMode,handoutMode:s.handoutMode,responses,steps};
+    },
     async open(input) {
       if (!object(input) || !id(input.activity) || !id(input.classRef) || !id(input.studentRef)) fail('IDENTITY_INVALID');
       const rows=await api.roster(input.activity);

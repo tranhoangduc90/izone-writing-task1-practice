@@ -18,6 +18,8 @@ function document(status='Chữ tay phải giữ'){
 }
 const completed={kind:'status',payload:{text:'Đã hoàn thành ngay từ lần đầu. Giảng viên nhấn vào đây để xem kết quả.',link:'https://page.test/reading-skills67/?teacher=1&attempt=fixture'}};
 
+const formatted=completed.payload.text.replace(' Giảng viên','\nGiảng viên');
+
 test('Hai Reading cùng child tab: đúng cặp CTA–mã và đúng ô trạng thái của bài này',()=>{
  const doc=document(),located=locate(doc,binding);assert.equal(located.cta.start,2000);
  const cta=plan(doc,binding,{kind:'cta',payload:{url:'https://page.test/reading-skills67/'}});
@@ -25,7 +27,7 @@ test('Hai Reading cùng child tab: đúng cặp CTA–mã và đúng ô trạng 
  assert.deepEqual(cta.requests[0].updateTextStyle.range,{startIndex:2000,endIndex:2000+CTA.length,tabId:'child'});
  const status=plan(doc,binding,completed);
  assert.equal(status.requests[0].insertText.location.index,2400+'Chữ tay phải giữ'.length);
- assert.equal(status.requests[0].insertText.text,'\n'+PREFIX+completed.payload.text);
+ assert.equal(status.requests[0].insertText.text,'\n'+PREFIX+formatted);
  assert.ok(status.requests.every(r=>!r.deleteContentRange));
  assert.ok(status.requests.filter(r=>r.updateTextStyle).every(r=>r.updateTextStyle.range.startIndex>2400+'Chữ tay phải giữ'.length));
 });
@@ -37,11 +39,11 @@ test('CTA retry đọc đúng từng ký tự style và giữ mọi thuộc tín
  assert.equal(changed.requests[0].updateTextStyle.fields,'link,underline,foregroundColor');
 });
 test('Trạng thái đã ghi nhưng mất ACK: đọc lại đúng chữ/link không tạo request hoặc dòng thứ hai',()=>{
- const doc=document('Chữ tay phải giữ\n'+PREFIX+completed.payload.text),cell=locate(doc,binding).cell;
+ const doc=document('Chữ tay phải giữ\n'+PREFIX+formatted),cell=locate(doc,binding).cell;
  const run=cell.content[0].paragraph.elements[0];
  const raw=run.textRun.content,index=raw.indexOf('nhấn vào đây'),start=run.startIndex;
  cell.content[0].paragraph.elements=[
-  {startIndex:start,textRun:{content:raw.slice(0,index),textStyle:{link:{url:'https://manual.test/link'}}}},
+  {startIndex:start,textRun:{content:raw.slice(0,index),textStyle:{link:{url:'https://manual.test/link'},bold:true}}},
   {startIndex:start+index,textRun:{content:'nhấn vào đây',textStyle:{link:{url:completed.payload.link}}}},
   {startIndex:start+index+'nhấn vào đây'.length,textRun:{content:raw.slice(index+'nhấn vào đây'.length),textStyle:{}}}
  ];
@@ -52,7 +54,7 @@ test('Chỉ thay dòng tự động đã biết, giữ nguyên phần chữ/link
  const old='Đã bắt đầu làm bài lần đầu tiên.',manual='Ghi chú trước\n',suffix='\nGhi chú sau';
  const doc=document(manual+PREFIX+old+suffix),result=plan(doc,{...binding,last_doc_text:old},completed);
  assert.deepEqual(result.requests[0].deleteContentRange.range,{startIndex:2400+manual.length,endIndex:2400+manual.length+PREFIX.length+old.length,tabId:'child'});
- assert.equal(result.requests[1].insertText.text,PREFIX+completed.payload.text);
+ assert.equal(result.requests[1].insertText.text,PREFIX+formatted);
 });
 test('Dòng tự động sửa tay, bị xóa hoặc trùng thì dừng; không ghi đè hoặc chèn dòng thay thế',()=>{
  for(const value of ['Chữ tay\n'+PREFIX+'GV đã sửa','Chữ tay',PREFIX+'Một\n'+PREFIX+'Hai']){
@@ -97,7 +99,7 @@ test('Homework Reading–Listening: ghi dưới nhãn READING, giữ nguyên ô 
  assert.equal(locate(f.doc,binding).cell,f.reading.status);
  const result=plan(f.doc,binding,completed);
  assert.equal(result.requests[0].insertText.location.index,2400);
- assert.equal(result.requests[0].insertText.text,PREFIX+completed.payload.text);
+ assert.equal(result.requests[0].insertText.text,PREFIX+formatted);
  assert.ok(result.requests.every(r=>!r.deleteContentRange));
  assert.deepEqual(f.listening.element,before);
 });
@@ -122,4 +124,9 @@ test('Dòng cũ còn ở Listening, Reading trống: báo xung đột thay vì t
  const before=structuredClone(f.doc);
  assert.throws(()=>plan(f.doc,{...binding,last_doc_text:old},completed),e=>e.code==='DOC_MANUAL_CONFLICT');
  assert.deepEqual(f.doc,before);
+});
+
+test('Khối nhiều dòng bị sửa tay ở đoạn tiếp theo được giữ nguyên',()=>{
+ const current=document('Chữ tay phải giữ\n'+PREFIX+formatted.replace('xem kết quả','xem ghi chú'));
+ assert.throws(()=>plan(current,{...binding,last_doc_text:completed.payload.text},completed),e=>e.code==='DOC_MANUAL_CONFLICT');
 });

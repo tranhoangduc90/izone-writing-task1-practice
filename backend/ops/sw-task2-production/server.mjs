@@ -13,6 +13,7 @@ import {createTeacherAuthService} from '../../src/teacher-auth.js';
 import {createTeacherCommentService} from '../../src/teacher-comment-service.js';
 import {createLmsResultService} from '../../src/lms-result-service.js';
 import {createLesson9Service} from './lesson9-service.js';
+import {readLesson9Overview} from './lesson9-overview.js';
 import {createTeacherClassAccessService} from '../../src/teacher-class-access.js';
 import {createProvisionalStudentService} from '../../src/provisional-service.js';
 import {createLesson9VocabularyService} from './lesson9-vocabulary.js';
@@ -85,6 +86,12 @@ app.post('/api/v1/lesson9/sessions/:ref/actions',safe(async(q,r)=>{
 }));
 app.get('/api/v1/admin/lesson9/sessions/:ref',teacherAuth.authenticate,safe(async(q,r)=>{
  const ref=z.uuid().parse(q.params.ref);await access.assertSession(q.reviewer,ref);r.json({ok:true,session:await lesson9.details(ref)});
+}));
+app.get('/api/v1/admin/sw/lesson9/overview/:slug',teacherAuth.authenticate,safe(async(q,r)=>{
+ const activitySlug=q.params.slug,classRef=z.uuid().parse(q.query.classRef);
+ requireLesson(activitySlug);
+ await access.assertActivityClass(q.reviewer,{activitySlug,classRef});
+ r.json({ok:true,activitySlug,classRef,students:await readLesson9Overview(pool,activitySlug,classRef)});
 }));
 app.get('/api/v1/shops/status',safe(async(q,r)=>r.json({ok:true,environment:'production',aiMode:'n8n-task2-connected',database:(await pool.query('SELECT current_database() name')).rows[0].name,queued:Number((await pool.query("SELECT count(*) n FROM writing_practice.check_attempt a JOIN writing_practice.activity_session s ON s.id=a.session_id JOIN writing_practice.activity task ON task.id=s.activity_id WHERE a.status='queued' AND task.grading_pool='task2'")).rows[0].n)})));
 

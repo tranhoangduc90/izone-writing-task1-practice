@@ -44,6 +44,25 @@ export function createStore(db,{clock=Date.now}={}) {
       const result = await db.query('SELECT payload FROM handout67.session WHERE ref=$1', [ref]);
       return result.rows[0]?.payload;
     },
+    async readForPoll(ref, knownRevision, maxJobMs) {
+      // Include the row version because changes to feedback or a lease need not change draft version.
+      const result = await db.query(`
+        SELECT revision,
+          CASE WHEN revision IS DISTINCT FROM $2::text THEN payload END AS payload,
+          CASE WHEN revision = $2::text THEN (
+            SELECT min(least(
+              COALESCE((job->>'deadlineAt')::bigint, (job->>'createdAt')::bigint + $3::bigint),
+              CASE WHEN job->>'status' = 'leased' THEN (job->>'leaseUntil')::bigint END
+            ))
+            FROM jsonb_array_elements(payload->'jobs') job
+            WHERE job->>'status' IN ('queued', 'leased')
+          ) END AS next_transition_at
+        FROM (
+          SELECT payload, xmin::text || ':' || extract(epoch FROM updated_at)::text AS revision
+          FROM handout67.session WHERE ref=$1
+        ) session`, [ref, knownRevision, maxJobMs]);
+      return result.rows[0];
+    },
     async edit(ref, change) {
       return db.transaction(async tx => {
         const result = await tx.query('SELECT payload FROM handout67.session WHERE ref=$1 FOR UPDATE', [ref]);

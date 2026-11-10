@@ -60,6 +60,9 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     const processing=Object.fromEntries(Object.entries(latest).filter(([,j])=>['queued','leased','failed'].includes(j.status)).map(([key,j])=>[key,{jobRef:j.jobRef,status:j.status,tries:j.tries,maxTries:3,createdAt:j.createdAt,deadlineAt:j.deadlineAt??j.createdAt+maxJobMs,leaseUntil:j.leaseUntil,nextAttemptAt:j.nextAttemptAt??null,error:j.error??null}]));
     return withBodies({ref:s.ref,activity:s.activity,...(isBodyOutline(s)?{outlineOnly:true}:{}),...(isMulti(s)?{handoutMode:s.handoutMode,bodyProgress:s.bodyProgress,...(isPrepared(s)?{preparationMode:s.preparationMode,...preparationContext(s)}:{})}:{}),workflowMode:s.workflowMode||GUIDED,workflowVersion:s.workflowVersion||1,body:s.body||2,classRef:s.classRef,studentRef:s.studentRef,responses:s.responses,version:s.version,idea2Open:s.idea2Open,steps:s.steps,vocabulary:s.vocabulary,teacherComments:publicTeacherComments(s),commentThreads:publicThreads(s),commentVersion:s.commentVersion||0,submittedSections:[...new Set(s.jobs.filter(j=>j.kind==='grade').map(j=>j.section))],processing});
   };
+  const expiryDue = (session, now) => session.jobs.some(job =>
+    ['queued', 'leased'].includes(job.status) && (now >= (job.deadlineAt ?? job.createdAt + maxJobMs) ||
+      (job.status === 'leased' && job.leaseUntil <= now)));
   const issue = ref => {const content=`${ref}.${clock()+sessionMs}`;return `${content}.${sign(content)}`;};
   const authorize = (ref,token) => {
     if (typeof token!=='string') fail('SESSION_UNAUTHORIZED',401);
@@ -164,8 +167,25 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     },
     async read(ref,token) {
       authorize(ref,token);const s=await store.read(ref);if(!s)fail('SESSION_NOT_FOUND',404);
-      if(s.jobs.some(j=>['queued','leased'].includes(j.status)&&(clock()>=(j.deadlineAt??j.createdAt+maxJobMs)||(j.status==='leased'&&j.leaseUntil<=clock()))))return edit(ref,token,current=>{expire(current);return publicSession(current);});
+      if(expiryDue(s,clock()))return edit(ref,token,current=>{expire(current);return publicSession(current);});
       return publicSession(s);
+    },
+    async readForPoll(ref, token, ifNoneMatch) {
+      authorize(ref, token);
+      const prefix = `W/"handout67-session-v1:${ref}:`;
+      const knownRevision = typeof ifNoneMatch === 'string' && ifNoneMatch.startsWith(prefix) && ifNoneMatch.endsWith('"')
+        ? ifNoneMatch.slice(prefix.length, -1) : null;
+      const row = await store.readForPoll(ref, knownRevision, maxJobMs);
+      if (!row) fail('SESSION_NOT_FOUND', 404);
+      const etag = `${prefix}${row.revision}"`;
+      const now = clock();
+      const needsExpiry = row.payload
+        ? expiryDue(row.payload, now)
+        : row.next_transition_at !== null && Number(row.next_transition_at) <= now;
+      // Expiry can change the stored row during the read. The next poll can obtain its new ETag.
+      if (needsExpiry) return {session:await edit(ref, token, current => {expire(current);return publicSession(current);})};
+      if (!row.payload) return {etag, notModified:true};
+      return {etag, session:publicSession(row.payload)};
     },
     async save(ref,token,input) {
       if (!object(input) || !Number.isSafeInteger(input.baseVersion) || !id(input.requestId) || !object(input.responses)) fail('SAVE_INVALID');

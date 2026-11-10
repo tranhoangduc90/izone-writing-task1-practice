@@ -87,15 +87,83 @@ test('Công nhận lời chatbot cả bài; chặn tự khai, lời trong prompt
  const quoted=messages.map(m=>({...m}));quoted[2].text='```\n'+messages[2].text+'\n```';await assert.rejects(()=>verifyReadingPractice({messages:quoted},'Nén cấp 1',analyze),/COMPLETION_QUOTED_EXAMPLE/);
  const unfinished=async()=>({completed:false,confidence:1});assert.equal((await verifyReadingPractice({messages},'Nén cấp 1',unfinished,async()=>null)).status,'rejected');
 });
-test('Mercy Rule: chỉ công nhận lời dừng có thật từ chatbot và đúng bài',async()=>{
+test('Mercy Rule với lời dừng: chỉ công nhận lời chatbot kết thúc đúng bài',async()=>{
  const messages=[{role:'user',text:'Tôi thử nén lại.'},{role:'assistant',text:'Bạn đã thử ba lần ở Level 2. Hôm nay chúng ta tạm nghỉ để tránh quá tải.'}];
  const result={stopped:true,matched:true,confidence:.99,reason:'mercy_rule',candidateId:'m1'};
  const call=async()=>new Response(JSON.stringify({text:JSON.stringify(result)}));assert.equal((await analyzeReadingStop(messages,'Reading nén cấp 1',call)).reason,'mercy_rule');
  result.candidateId='m99';await assert.rejects(()=>analyzeReadingStop(messages,'Reading nén cấp 1',call),{code:'SHARE_EVIDENCE_INVALID'});
 });
+const turn=(role,text)=>({role,text});
+const readingQuestion=level=>turn('assistant',`**\\[Level ${level} - Band ${level+4}.0\\] Câu tiếp theo**\n\nThe early warning system helped residents prepare for severe floods.\n\n🎯 Nén câu này thành một câu tiếng Việt.`);
+const readingReply=turn('user','Cảnh báo sớm giúp dân chuẩn bị.');
+const readingMiss=turn('assistant','Chưa PASS\\! Em thử nén lại.\n\n\\[Chuỗi reset: 0/2\\]');
+const readingHelp=turn('assistant','**Phao cứu sinh:** Em thử tìm chủ thể.\n\n[Chuỗi reset: 0/2]');
+const readingPass=turn('assistant','(PASS) Em đã giữ đúng ý.\n\n[Chuỗi: 1/2]');
+const twoMisses=[readingQuestion(1),readingReply,readingMiss,readingReply,readingMiss];
+const unfinishedReading=async()=>({completed:false,confidence:1});
+const checkReading=messages=>verifyReadingPractice({messages},'Nén cấp 1',unfinishedReading,async()=>null);
+test('Mercy Rule đếm ba lần chưa đạt hoặc SOS trong cùng level, dù chatbot vẫn luyện tiếp',async()=>{
+ const messages=[readingQuestion(1),readingReply,readingMiss,readingReply,readingPass,readingQuestion(1),
+  turn('user','SOS'),readingHelp,readingReply,readingMiss,readingReply,readingPass];
+ const unexpected=async()=>assert.fail('Mercy Rule có bằng chứng trực tiếp, không cần bộ nhận dạng dự phòng');
+ const result=await verifyReadingPractice({messages},'Nén cấp 1',unexpected,unexpected);
+ assert.equal(result.status,'accepted');
+ assert.equal(result.acceptanceBasis,'mercy_rule_transcript');
+ assert.equal(result.evidence.level,1);
+ assert.deepEqual(result.evidence.attempts,[
+  {userMessage:2,assistantMessage:3,reason:'incorrect'},
+  {userMessage:7,assistantMessage:8,reason:'sos'},
+  {userMessage:9,assistantMessage:10,reason:'incorrect'},
+ ]);
+});
+test('Mercy Rule giữ khóa với hai lần, khác level, thiếu câu hỏi, lời trích, và lần lặp không có phản hồi mới',async()=>{
+ const cases=[
+  twoMisses,
+  [...twoMisses,readingQuestion(2),readingReply,readingMiss],
+  [...twoMisses,readingQuestion(2),readingQuestion(1),readingReply,readingMiss],
+  [...twoMisses,turn('assistant','[Level 2 - Band 6.0]'),readingReply,readingMiss],
+  [...twoMisses.slice(1),readingReply,readingMiss],
+  [...twoMisses,readingReply,turn('assistant','> Chưa PASS!\n> [Chuỗi reset: 0/2]')],
+  [...twoMisses,readingReply,turn('assistant','~~~\nChưa PASS!\n[Chuỗi reset: 0/2]\n~~~')],
+  [...twoMisses,readingReply,turn('assistant','Chưa PASS! Em thử lại.')],
+  [...twoMisses,turn('user','SOS'),turn('assistant','[Chuỗi reset: 0/2]')],
+  [...twoMisses,readingMiss],
+  [...twoMisses,turn('user',readingMiss.text),readingMiss],
+ ];
+ for(const messages of cases)assert.equal((await checkReading(messages)).status,'rejected');
+});
+test('Mercy Rule phát lại snapshot Share riêng đã từng bị từ chối', {skip:!process.env.READING_MERCY_REPLAY},async()=>{
+ const {snapshot,analysis_response:previous}=JSON.parse(await fs.readFile(process.env.READING_MERCY_REPLAY,'utf8'));
+ const result=await checkReading(snapshot.messages);
+ assert.equal(result.fingerprint,previous.fingerprint);
+ assert.equal(previous.status,'rejected');
+ assert.equal(result.status,'accepted');
+ assert.equal(result.acceptanceBasis,'mercy_rule_transcript');
+ assert.equal(result.evidence.level,1);
+ assert.deepEqual(result.evidence.attempts.map(a=>a.assistantMessage),[6,10,12]);
+ assert.equal((await checkReading(snapshot.messages.slice(0,11))).status,'rejected');
+});
 async function database(t){const db=new PGlite();await db.exec('CREATE SCHEMA reading_listening67');await db.exec(await fs.readFile(new URL('../../docs/migrations/2026-10-29-reading67-share-practice.sql',import.meta.url),'utf8'));t.after(()=>db.close());return db;}
 const a={ownerId:'11111111-1111-4111-8111-111111111111',courseId:'1293',code:'67-reading-the-desolenator',version:'v1'},b={...a,ownerId:'22222222-2222-4222-8222-222222222222'};
 const url=id=>'https://chatgpt.com/share/'+id;
+test('Mercy Rule chỉ mở đúng chủ sau khi worker lưu ba lần, có bằng chứng đọc lại được',async t=>{
+ const db=await database(t);
+ const practice=createReadingSharePractice({db,content:{code:a.code,version:a.version,practice:{target:'Nén cấp 1'}},
+  readShare:async link=>({messages:link===url(a.ownerId)?[...twoMisses,readingReply,readingMiss]:twoMisses}),
+  verify:conversation=>checkReading(conversation.messages)});
+ const accepted=await practice.save(a,{url:url(a.ownerId),requestId:randomUUID()});
+ await practice.save(b,{url:url(b.ownerId),requestId:randomUUID()});
+ await practice.once();await practice.once();
+ assert.equal((await practice.status(a)).status,'accepted');
+ assert.equal((await practice.status(b)).status,'rejected');
+ await db.transaction(tx=>practice.requireAccepted(tx,a));
+ await assert.rejects(()=>db.transaction(tx=>practice.requireAccepted(tx,b)),{code:'PRACTICE_NOT_ACCEPTED'});
+ const row=(await db.query('SELECT outcome,analysis_response FROM reading_listening67.web_share_practice WHERE id=$1',[accepted.id])).rows[0];
+ assert.deepEqual(row.outcome,row.analysis_response);
+ assert.equal(row.outcome.acceptanceBasis,'mercy_rule_transcript');
+ assert.equal(row.outcome.evidence.recognizerVersion,'reading-mercy-transcript-v1');
+ assert.equal(row.outcome.evidence.attempts.length,3);
+});
 test('Hàng Share tách chủ, đổi link khi đang đọc, idempotency và giữ snapshot lịch sử',async t=>{
  const db=await database(t);let release,entered;const started=new Promise(resolve=>entered=resolve),gate=new Promise(resolve=>release=resolve);
  const service=createReadingSharePractice({db,content:{code:a.code,version:a.version,practice:{target:'Nén cấp 1'}},readShare:async()=>{entered();await gate;return {messages:[{role:'user',text:'Bài giả'}]};},verify:async()=>({status:'accepted',policy:'reading-skimming-l1-share-20261029-v1',message:'Đã đạt'})});

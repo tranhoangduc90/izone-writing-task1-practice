@@ -26,9 +26,66 @@ export async function analyzeReadingStop(messages,target,call=fetch){
  if(!selected||result.stopped!==true||result.matched!==true||!['threshold','level5','mercy_rule'].includes(result.reason)||!Number.isFinite(result.confidence)||result.confidence<.8||result.confidence>1)throw new WebGradingError('SHARE_EVIDENCE_INVALID',503);
  return {...selected,reason:result.reason,confidence:result.confidence,recognizerVersion:policy};
 }
+function practiceLines(text) {
+ const lines=[];
+ let fence;
+ for (const raw of text.normalize('NFC').split(/\r?\n/u)) {
+  const delimiter=raw.match(/^\s*(\x60{3,}|~{3,})(.*)$/u);
+  if (delimiter) {
+   if (!fence) fence=delimiter[1];
+   else if (delimiter[1].startsWith(fence)&&!delimiter[2].trim()) fence=null;
+   continue;
+  }
+  if (fence||/^\s*>/u.test(raw)) continue;
+  const line=raw.trim().replace(/\\([[\]!:.])/gu,'$1').replace(/\*{2,3}/gu,'').trim();
+  if (line) lines.push(line);
+ }
+ return lines;
+}
+const levelHeader=/^\[level\s+([1-5])\s+[-–—]\s+band\s+([5-9])\.0\](?:\s+câu tiếp theo)?$/iu;
+function questionLevel(lines) {
+ const header=lines.findLastIndex(line=>/^\[level\b/iu.test(line));
+ if (header<0) return undefined;
+ const match=lines[header].match(levelHeader);
+ const exercise=lines.slice(header+1);
+ const english=exercise.some(line=>/^[“"']?(?:[a-z][a-z'-]*[ ,]+){5,}[a-z]/iu.test(line));
+ const instruction=exercise.some(line=>/nén\b.{0,120}(?:tiếng việt|câu (?:này|trên)|(?:dưới|tối đa) \d+ (?:chữ|từ))/iu.test(line));
+ return match&&Number(match[2])===Number(match[1])+4&&english&&instruction?Number(match[1]):null;
+}
+const resetLine=/^\[chuỗi reset:\s*0\/2\]$/iu;
+const miss=/^\(?(?:chưa pass|chưa đạt)\)?(?:[!.:\s]|$)/iu;
+const sos=/^(?:sos|giúp (?:tôi|em)(?: với)?|khó quá|dịch hộ (?:tôi|em)|(?:tôi|em) không biết từ [\p{L}'-]+)[!?.\s]*$/iu;
+function mercyRuleEvidence(messages) {
+ let level=null;
+ let attempts=[];
+ for (const [index,message] of messages.entries()) {
+  if (message.role!=='assistant') continue;
+  const lines=practiceLines(message.text);
+  const reply=messages[index-1];
+  if (level&&reply?.role==='user'&&messages[index-2]?.role==='assistant'&&lines.some(line=>resetLine.test(line))) {
+   const answer=reply.text.trim();
+   const requestedHelp=sos.test(answer);
+   const gaveHelp=lines.some(line=>/^(?:🎯\s*)?(?:sos\b|phao(?: cứu sinh|\s+[123])\b|gợi ý\b)/iu.test(line));
+   // Count only a reply and its own assessment. A help request marked incorrect still counts once.
+   const incorrect=!requestedHelp&&miss.test(lines[0]||'')&&/^[\p{L}\p{N}]/u.test(answer)&&!/\r|\n/u.test(answer)&&!miss.test(answer);
+   if ((requestedHelp&&gaveHelp)||incorrect) {
+    attempts.push({userMessage:index,assistantMessage:index+1,reason:requestedHelp?'sos':'incorrect'});
+    if (attempts.length===3) return {reason:'mercy_rule',level,attempts,recognizerVersion:'reading-mercy-transcript-v1'};
+   }
+  }
+  const nextLevel=questionLevel(lines);
+  if (nextLevel!==undefined&&nextLevel!==level) {
+   level=nextLevel;
+   attempts=[];
+  }
+ }
+ return null;
+}
 export async function verifyReadingPractice(conversation,target,analyze=analyzeChatbotCompletion,stop=analyzeReadingStop){
  const messages=speakingMessages(conversation);
  if(!messages.some(m=>m.role==='user')||!messages.some(m=>m.role==='assistant')||messages.reduce((sum,m)=>sum+m.text.length,0)>160000)throw new WebGradingError('SHARE_TRANSCRIPT_INVALID',422);
+ const mercy=mercyRuleEvidence(messages);
+ if (mercy) return {status:'accepted',policy,fingerprint:speakingFingerprint(messages),evidence:mercy,acceptanceBasis:'mercy_rule_transcript',message:'Bạn đã đủ điều kiện dừng theo Mercy Rule. Phần luyện được công nhận.'};
  const result=await analyze(messages,target);
  const completion=validateCompletion(messages,result),proof=completion||await stop(messages,target);
  return {status:proof?'accepted':'rejected',policy,fingerprint:speakingFingerprint(messages),evidence:proof,acceptanceBasis:completion?'chatbot_completion':proof?'stopping_rule':null,message:proof?'Chatbot đã kết thúc bài luyện; phần luyện được công nhận.':'Chưa thấy chatbot xác nhận hoàn thành toàn bộ bài luyện. Hãy tiếp tục luyện rồi cập nhật link chia sẻ.'};

@@ -212,9 +212,16 @@ test('both SW dashboards enter the real native session immediately and carry pen
     assert.equal(await form.locator('input').count(), 1);
     if (losesResponse) await teacherPage.evaluate(() => {
       const original = globalThis.fetch;
+      let failures = 0;
       globalThis.fetch = async (url, options) => {
+        if (options?.method !== 'POST' || !String(url).endsWith('/class-members')) return original(url, options);
+        failures += 1;
+        if (failures === 1) {
+          globalThis.fixtureRequestBeforeNetwork = JSON.parse(options.body).requestId;
+          throw new TypeError('Fixture dropped the request before reaching the server.');
+        }
         const response = await original(url, options);
-        if (options?.method === 'POST' && String(url).endsWith('/class-members') && response.status === 201) {
+        if (response.status === 201) {
           globalThis.fetch = original;
           throw new TypeError('Fixture dropped the response after server commit.');
         }
@@ -225,7 +232,17 @@ test('both SW dashboards enter the real native session immediately and carry pen
     await form.getByRole('button', { name: 'Lưu', exact: true }).click();
     if (duplicate) await form.getByRole('button', { name: 'Thêm người khác cùng tên' }).click();
     if (losesResponse) {
-      await teacherPage.getByText('Chưa nhận được phản hồi. Bấm Lưu để thử lại.').waitFor();
+      const lostMessage = teacherPage.getByText('Chưa nhận được phản hồi. Bấm Lưu để thử lại.');
+      await lostMessage.waitFor();
+      const beforeNetwork = await teacherPage.evaluate(() => globalThis.fixtureRequestBeforeNetwork);
+      assert.ok(beforeNetwork);
+      assert.equal(task2SaveRequests.length, 0);
+      const saved = teacherPage.waitForResponse(res =>
+        res.url().endsWith('/class-members') && res.request().method() === 'POST');
+      await form.getByRole('button', { name: 'Lưu', exact: true }).click();
+      assert.equal((await saved).status(), 201);
+      await lostMessage.waitFor();
+      assert.equal(task2SaveRequests[0], beforeNetwork);
       await teacherPage.reload();
       await teacherPage.getByRole('button', { name: 'Thêm học viên', exact: true }).click();
       await form.getByRole('textbox', { name: 'Họ và tên' }).fill(displayName);
@@ -295,6 +312,10 @@ test('both SW dashboards enter the real native session immediately and carry pen
   await studentPage.locator('#save-state').waitFor();
   const { session: second } = await (await secondOpen).json();
   assert.notEqual(second.studentRef, first.studentRef);
+  const resumed = studentPage.waitForResponse(resp => resp.url().endsWith('/lesson9/sessions/' + second.sessionRef));
+  await studentPage.reload();
+  await studentPage.locator('#save-state').waitFor();
+  assert.equal((await (await resumed).json()).session.studentRef, second.studentRef);
   await teacherPage.reload();
   await teacherPage.getByRole('button', { name: 'Thêm học viên', exact: true }).click();
   await teacherPage.locator('.sw-roster-dialog').getByText(/Người học mới Task 2 · Chờ đối soát ERP/u).waitFor();

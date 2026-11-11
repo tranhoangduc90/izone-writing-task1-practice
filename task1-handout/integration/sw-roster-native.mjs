@@ -60,6 +60,11 @@ test('class membership and one-time claim keep same-name students apart while ER
     scope: next, actor: input.actor, requestId: randomUUID(), studentRef: member.studentRef,
   });
   assert.equal((await registry.redeem({ scope: next, token: renewed.invitationToken })).member.studentRef, member.studentRef);
+  const expiring = await registry.reissue({ scope: next, actor: input.actor, requestId: randomUUID(), studentRef: member.studentRef });
+  await db.query(`UPDATE sw_roster.invitation SET expires_at=now()-interval '1 second'
+    WHERE student_ref=$1 AND redeemed_at IS NULL`, [member.studentRef]);
+  await assert.rejects(registry.redeem({ scope: next, token: expiring.invitationToken }),
+    { code: 'SW_ROSTER_INVITATION_INVALID' });
   await db.query('UPDATE sw_roster.member SET active=false WHERE student_ref=$1', [member.studentRef]);
   assert.equal(await registry.canAccess({ ...next, studentRef: member.studentRef, credential }), false);
   assert.equal((await registry.listActive(next.erpClassId)).length, 1);

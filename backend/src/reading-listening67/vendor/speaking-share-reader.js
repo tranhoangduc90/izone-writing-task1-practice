@@ -296,13 +296,22 @@ function parseConversationHtml(html, source) {
     const transcript = JSON.parse(octane[1]);
     if (!Array.isArray(transcript.rows)) throw new Error('OCTANE_TRANSCRIPT_INVALID');
     const messages = [];
-    for (const row of transcript.rows) {
+    for (const [index, row] of transcript.rows.entries()) {
       const role = row?.frame?.role;
       if (!['user', 'assistant'].includes(role)) continue;
       // DIL cung cấp bản văn bản đầy đủ riêng; không thực thi code hay lấy constants/UI.
       const text = role === 'user' ? row.frame.text
         : row.source?.markdown?.trim() ? row.source.markdown : row.source?.dil?.fallbackMarkdown;
       const id = row.frame.id || row.source?.messageId;
+      // An unfinished DIL response can be present in a public snapshot as an empty
+      // tail frame. Keep the preceding student reply and all completed feedback.
+      if (index === transcript.rows.length - 1 && role === 'assistant'
+        && row.source?.markdown === '' && text === ''
+        && row.source?.dil?.kind === 'dil' && row.source.dil.status === 'pending'
+        && typeof id === 'string' && id && !messages.some(message => message.id === id)
+        && messages.at(-1)?.role === 'user' && messages.some(message => message.role === 'assistant')) {
+        continue;
+      }
       if (typeof id !== 'string' || !id || typeof text !== 'string' || !text.trim()) throw new Error('OCTANE_MESSAGE_INVALID');
       messages.push({ id, node_id: row.key || id, role, create_time: null, update_time: null, text });
     }
@@ -355,7 +364,9 @@ export async function readSpeakingShare(shareUrl, n8nOnly = false) {
       const html = await fetchViaN8n(shareUrl);
       return parseConversationHtml(html, 'n8n_fallback');
     } catch (n8nError) {
-      throw new Error(`Đọc trực tiếp lỗi: ${directError?.message || 'SHARE_READ_LIMIT'} n8n fallback lỗi: ${n8nError.message}`);
+      const error = new Error(`Đọc trực tiếp lỗi: ${directError?.message || 'SHARE_READ_LIMIT'} n8n fallback lỗi: ${n8nError.message}`);
+      if ([directError?.message, n8nError.message].includes('OCTANE_MESSAGE_INVALID')) error.shareReadReason = 'OCTANE_MESSAGE_INVALID';
+      throw error;
     }
   }
 

@@ -102,6 +102,25 @@ const readingPass=turn('assistant','(PASS) Em đã giữ đúng ý.\n\n[Chuỗi:
 const twoMisses=[readingQuestion(1),readingReply,readingMiss,readingReply,readingMiss];
 const unfinishedReading=async()=>({completed:false,confidence:1});
 const checkReading=messages=>verifyReadingPractice({messages},'Nén cấp 1',unfinishedReading,async()=>null);
+test('Mercy Rule recognizes FAIL assessments under the chatbot’s unbracketed Level headings', async () => {
+ const question = (level, heading = 'Tiếp tục') => turn('assistant', `**${heading} Level ${level} - Band ${level+4}.0\\:**\n\n"The early warning system helped residents prepare for severe floods."\n\n**Câu hỏi\\:** Điều gì giúp người dân chuẩn bị? Hãy lấy lõi bỏ vỏ!`);
+ const fail = turn('assistant', '(FAIL – Chưa giữ đúng lõi)\n\nEm thử lại.\n\n\\[Chuỗi reset: 0/2\\]');
+ const continued = turn('assistant', readingPass.text + '\n\n' + question(4).text);
+ const beforeThird = [question(4), readingReply, fail, readingReply, fail, readingReply, continued];
+ const result = await checkReading([...beforeThird, readingReply, fail]);
+ assert.equal(result.status, 'accepted');
+ assert.equal(result.evidence.level, 4);
+ assert.deepEqual(result.evidence.attempts.map(x => x.assistantMessage), [3, 5, 9]);
+ const feedback = turn('assistant', readingPass.text + '\n\nLevel 4 còn một câu nữa.');
+ assert.equal((await checkReading([...beforeThird.slice(0, -1), feedback, readingReply, fail])).status, 'accepted');
+ for (const tail of [
+  [],
+  [question(5, 'Nâng cấp'), readingReply, fail],
+  [readingReply, turn('assistant', '> ' + fail.text.replaceAll('\n', '\n> '))],
+  [readingReply, turn('assistant', '(FAIL – Không có dấu reset)')],
+  [turn('assistant', '**Nâng cấp Level 5 - Band 9.0!**\n\nVí dụ'), readingReply, fail],
+ ]) assert.equal((await checkReading([...beforeThird, ...tail])).status, 'rejected');
+});
 test('Mercy Rule đếm ba lần chưa đạt hoặc SOS trong cùng level, dù chatbot vẫn luyện tiếp',async()=>{
  const messages=[readingQuestion(1),readingReply,readingMiss,readingReply,readingPass,readingQuestion(1),
   turn('user','SOS'),readingHelp,readingReply,readingMiss,readingReply,readingPass];
@@ -161,7 +180,7 @@ test('Mercy Rule chỉ mở đúng chủ sau khi worker lưu ba lần, có bằn
  const row=(await db.query('SELECT outcome,analysis_response FROM reading_listening67.web_share_practice WHERE id=$1',[accepted.id])).rows[0];
  assert.deepEqual(row.outcome,row.analysis_response);
  assert.equal(row.outcome.acceptanceBasis,'mercy_rule_transcript');
- assert.equal(row.outcome.evidence.recognizerVersion,'reading-mercy-transcript-v1');
+ assert.equal(row.outcome.evidence.recognizerVersion,'reading-mercy-transcript-v2');
  assert.equal(row.outcome.evidence.attempts.length,3);
 });
 test('Hàng Share tách chủ, đổi link khi đang đọc, idempotency và giữ snapshot lịch sử',async t=>{

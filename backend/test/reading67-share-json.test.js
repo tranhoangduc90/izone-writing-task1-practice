@@ -1,6 +1,47 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import https from 'node:https';
+import {EventEmitter} from 'node:events';
+import {Readable} from 'node:stream';
 import {analyzeReadingStop,verifyReadingPractice} from '../src/reading-listening67/web-share-practice.js';
+import {readSpeakingShare} from '../src/reading-listening67/vendor/speaking-share-reader.js';
+
+test('Reading Share reads an Octane transcript with a pending empty final assistant frame', async t => {
+ const share = 'https://chatgpt.com/share/11111111-1111-4111-8111-111111111111';
+ const question = 'Nén câu này.';
+ const feedback = 'Hãy giữ đúng ý chính.';
+ const rows = [
+  {frame: {id: '1', role: 'user', text: question}},
+  {frame: {id: '2', role: 'assistant'}, source: {markdown: '', dil: {fallbackMarkdown: feedback}}},
+  {frame: {id: '3', role: 'user', text: 'Tôi thử lại.'}},
+ ];
+ const pending = {frame: {id: '4', role: 'assistant'}, source: {markdown: '', dil: {kind: 'dil', status: 'pending', fallbackMarkdown: ''}}};
+ let activeRows = [...rows, pending];
+ const direct = t.mock.method(https, 'get', (url, options, callback) => {
+  const html = `<!doctype html><script id="octane-conversation-transcript">${JSON.stringify({rows: activeRows})}</script>`;
+  const response = Readable.from([Buffer.from(html)]);
+  Object.assign(response, {statusCode: 200, headers: {}});
+  callback(response);
+  return new EventEmitter();
+ });
+ const fallback = t.mock.method(globalThis, 'fetch', async () => new Response('{}'));
+ const read = await readSpeakingShare(share);
+ assert.equal(read.source, 'direct');
+ assert.deepEqual(read.messages.map(({id, text}) => [id, text]), [['1', question], ['2', feedback], ['3', 'Tôi thử lại.']]);
+ assert.equal(direct.mock.callCount(), 1);
+ assert.equal(fallback.mock.callCount(), 0);
+
+ for (const invalidRows of [
+  [...rows, {...pending, source: {markdown: '', dil: {...pending.source.dil, status: 'complete'}}}],
+  [...rows.slice(0, 2), pending, rows[2]],
+  [...rows, {...pending, frame: {role: 'assistant'}}],
+  [...rows, {...pending, frame: {...pending.frame, id: '2'}}],
+  [rows[0], pending],
+ ]) {
+  activeRows = invalidRows;
+  await assert.rejects(() => readSpeakingShare(share), {shareReadReason: 'OCTANE_MESSAGE_INVALID'});
+ }
+});
 
 // Existing stopping-rule tests only supplied plain JSON. Real providers may wrap JSON
 // in Markdown; this must neither quarantine an unfinished practice nor bypass evidence.

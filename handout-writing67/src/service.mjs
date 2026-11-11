@@ -174,7 +174,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
         return [key,{status:s.steps?.[key]?.status==='passed'?'passed':'draft'}];
       }));
       return {activity,classRef,studentRef,version:s.version,questionHash:createHash('sha256').update(lesson.topic).digest('hex'),
-        outlineOnly:true,workflowMode:s.workflowMode,handoutMode:s.handoutMode,responses,steps};
+        outlineOnly:true,approved:outlineRelation(s)==='passed',workflowMode:s.workflowMode,handoutMode:s.handoutMode,responses,steps};
     },
     async open(input) {
       if (!object(input) || !id(input.activity) || !id(input.classRef) || !id(input.studentRef)) fail('IDENTITY_INVALID');

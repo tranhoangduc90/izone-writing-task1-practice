@@ -39,7 +39,8 @@ test('Homework đọc riêng dàn ý Lesson 3 của đúng người và không s
  assert.equal(result.cache,'no-store');
  assert.equal(outline.responses.stance,'disagree');
  assert.equal(outline.responses.body1_idea1,'Ý tưởng của chính người này');
- assert.deepEqual(Object.keys(outline).sort(),['activity','classRef','handoutMode','outlineOnly','questionHash','responses','steps','studentRef','version','workflowMode']);
+ assert.deepEqual(Object.keys(outline).sort(),['activity','approved','classRef','handoutMode','outlineOnly','questionHash','responses','steps','studentRef','version','workflowMode']);
+ assert.equal(outline.approved,false);
  assert.doesNotMatch(JSON.stringify(outline),/teacherComments|processing|jobs|token|vocabulary/);
  assert.equal((await request({body:{classRef:'IC2304',studentRef:'student-a'}})).status,403);
  assert.equal((await request({body:{classRef:'IC2363',studentRef:'student-b'}})).status,404);

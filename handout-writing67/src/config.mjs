@@ -28,7 +28,9 @@ export function config(env=process.env) {
   if(teacherFile&&(teacherSecret.length<32||[secret,internalSecret,wakeSecret].includes(teacherSecret)))throw new Error('Cần secret giảng viên riêng.');
   const gatewayUrl=env.HANDOUT67_AI_GATEWAY_URL||null,gatewayToken=env.HANDOUT67_AI_GATEWAY_TOKEN||null;
   if(Boolean(gatewayUrl)!==Boolean(gatewayToken)||gatewayUrl&&(new URL(gatewayUrl).protocol!=='https:'||gatewayToken.length<32||/[\r\n]/.test(gatewayToken)))throw new Error('Cần URL HTTPS và khóa Cổng AI riêng cho Handout67.');
-  return {databaseUrl,origins,port,secret,internalSecret,rosterUrl:rosterUrl.href,classes,promptFile,wakeUrl:wakeUrl.href,wakeSecret,teacherFile,teacherSecret,gatewayUrl,gatewayToken,trustedProxyAddresses};
+  const homeworkOutlineKey=env.HANDOUT67_HOMEWORK_OUTLINE_KEY||null;
+  if(homeworkOutlineKey&&(!/^[A-Za-z0-9_-]{32,128}$/.test(homeworkOutlineKey)||[secret,internalSecret,wakeSecret,teacherSecret,gatewayToken].includes(homeworkOutlineKey)))throw new Error('HANDOUT67_HOMEWORK_OUTLINE_KEY_INVALID');
+  return {databaseUrl,origins,port,secret,internalSecret,homeworkOutlineKey,rosterUrl:rosterUrl.href,classes,promptFile,wakeUrl:wakeUrl.href,wakeSecret,teacherFile,teacherSecret,gatewayUrl,gatewayToken,trustedProxyAddresses};
 }
 
 export function rosterAdapter({rosterUrl,classes}, fetcher=fetch) {

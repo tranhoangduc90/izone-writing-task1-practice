@@ -40,6 +40,10 @@ export function createStore(db,{clock=Date.now}={}) {
         return result.rows[0].payload;
       });
     },
+    async readByIdentity(identity) {
+      const result=await db.query('SELECT payload FROM handout67.session WHERE identity_key=$1',[identity]);
+      return result.rows[0]?.payload;
+    },
     async read(ref) {
       const result = await db.query('SELECT payload FROM handout67.session WHERE ref=$1', [ref]);
       return result.rows[0]?.payload;

@@ -177,6 +177,28 @@ test('AI Share không rõ outcome: không tự gọi lại; người khác khôn
  const db=await database(t);let calls=0;const service=createReadingSharePractice({db,content:{code:a.code,version:a.version,practice:{target:'Nén cấp 1'}},readShare:async()=>({messages:[{role:'user',text:'Dữ liệu giả'}]}),verify:async()=>{calls++;throw Error('network');}});
  await service.save(a,{url:url(a.ownerId),requestId:randomUUID()});await service.once();assert.equal((await service.status(a)).status,'needs_review');await service.save(a,{url:url(a.ownerId),requestId:randomUUID()});await service.once();assert.equal(calls,1);assert.equal((await service.status(b)).status,'not_started');
 });
+test('A new Mercy Rule check preserves a prior teacher approval and its original analysis', async t => {
+ const db = await database(t);
+ const practice = createReadingSharePractice({
+  db,
+  content: {code: a.code, version: a.version, practice: {target: 'Nén cấp 1'}},
+  readShare: async link => ({messages: link === url(a.ownerId) ? twoMisses : [...twoMisses, readingReply, readingMiss]}),
+  verify: conversation => checkReading(conversation.messages),
+ });
+ const prior = await practice.save(a, {url: url(a.ownerId), requestId: randomUUID()});
+ await practice.once();
+ const manual = {status: 'accepted', acceptanceBasis: 'manual_override', message: 'Giảng viên đã xác nhận.'};
+ await db.query("UPDATE reading_listening67.web_share_practice SET status='accepted', outcome=$2::jsonb WHERE id=$1", [prior.id, JSON.stringify(manual)]);
+ const query = 'SELECT status, outcome, analysis_response FROM reading_listening67.web_share_practice WHERE id=$1';
+ const {rows: [before]} = await db.query(query, [prior.id]);
+ assert.equal(before.analysis_response.status, 'rejected');
+ await practice.save(b, {url: url(b.ownerId), requestId: randomUUID()});
+ await practice.once();
+ assert.equal((await practice.status(b)).status, 'accepted');
+ assert.deepEqual((await db.query(query, [prior.id])).rows, [before]);
+ await db.transaction(tx => practice.requireAccepted(tx, a));
+ await assert.rejects(() => db.transaction(tx => practice.requireAccepted(tx, {...a, version: 'different'})), {code: 'PRACTICE_NOT_ACCEPTED'});
+});
 test('Recovered rejected Share response finishes native progress without AI and keeps the Reading gate closed',async t=>{
  const db=await database(t);let calls=0,events=[];
  const service=createReadingSharePractice({db,content:{code:a.code,version:a.version,practice:{target:'Nén cấp 1'}},readShare:async()=>{calls++;throw Error('NO_EXTERNAL_CALL');},verify:async()=>{calls++;throw Error('NO_EXTERNAL_CALL');},onProgress:async(tx,scope,id,outcome)=>events.push({scope,id,status:outcome.status})});

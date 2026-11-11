@@ -1,4 +1,6 @@
 import express from 'express';
+import {rateLimit} from 'express-rate-limit';
+import {Pool} from 'pg';
 import {installDeferredVocabularyRoutes} from './deferred-vocabulary.mjs';
 import {ENABLED_LESSONS,requireLesson} from './lesson-config.mjs';
 import {reviewerClassAccessSql} from '../../src/teacher-class-access-sql.js';
@@ -17,13 +19,17 @@ import {createTeacherClassAccessService} from '../../src/teacher-class-access.js
 import {createProvisionalStudentService} from '../../src/provisional-service.js';
 import {createLesson9VocabularyService} from './lesson9-vocabulary.js';
 import {createShopsResults,installShopsResultRoutes} from './atomic-results.mjs';
+import {loadSwRoster} from '../../../task1-handout/vendor/sw-roster-runtime.mjs';
 
 const config=loadConfig();
+const readOnlyCanary=process.env.SW_ROSTER_READ_ONLY_CANARY==='1';
 if(config.nodeEnv!=='production'||!new URL(config.databaseUrl).pathname.endsWith('/shops_writing'))throw Error('SHOPS_PRODUCTION_DATABASE_REQUIRED');
 const pool=createDatabasePool(config),provisionalService=createProvisionalStudentService({pool,pepper:config.provisionalStudentPinPepper}),lessonService=createLessonPracticeService({pool,provisionalService});
 const service=createWritingPracticeService({pool,provisionalService}),teacherAuth=createTeacherAuthService({pool,config});
 const vocabularyService=createLesson9VocabularyService({pool});
 const lesson9=createLesson9Service({pool,lessonService,vocabularyService}),access=createTeacherClassAccessService({pool});
+const swRoster=await loadSwRoster({z,Pool,pool,product:'task2',origins:config.allowedOrigins,
+ supportsActivity:slug=>ENABLED_LESSONS.includes(slug)});
 const app=express();app.disable('x-powered-by');app.use(express.json({limit:'128kb'}));
 // The reusable router never exposes another product's internal consumer.
 app.use((q,r,next)=>q.path.startsWith('/api/v1/internal/')&&!q.path.startsWith('/api/v1/internal/grading-jobs/')?r.sendStatus(404):next());
@@ -70,6 +76,13 @@ app.get('/api/v1/auth/config',(_q,r)=>r.json({ok:true,googleClientId:config.goog
 const safe=fn=>(req,res,next)=>Promise.resolve(fn(req,res)).catch(next);
 installDeferredVocabularyRoutes(app,{pool,config,getSession:lesson9.details});
 app.use((q,r,next)=>{if(q.method!=='GET'&&q.get('origin')&&!config.allowedOrigins.has(q.get('origin')))return r.status(403).json({ok:false,error:'ORIGIN_DENIED'});next();});
+swRoster?.install(app,{
+ teacher:teacherAuth.authenticate,
+ assertTeacher:(q,scope)=>access.assertActivityClass(q.reviewer,scope),
+ getRoster:service.getRoster,
+ writeLimit:rateLimit({windowMs:60000,limit:120,standardHeaders:'draft-8',legacyHeaders:false,
+  validate:{xForwardedForHeader:false}}),
+});
 app.post('/api/v1/lesson9/sessions',safe(async(q,r)=>{
  const input=z.object({activitySlug:z.enum(ENABLED_LESSONS),classRef:z.uuid(),studentRef:z.uuid(),accessCode:z.string().regex(/^\d{4}$/).optional()}).parse(q.body);
  r.status(201).json({ok:true,session:await lesson9.open(input)});
@@ -89,7 +102,13 @@ app.get('/api/v1/admin/lesson9/sessions/:ref',teacherAuth.authenticate,safe(asyn
 app.get('/api/v1/shops/status',safe(async(q,r)=>r.json({ok:true,environment:'production',aiMode:'n8n-task2-connected',database:(await pool.query('SELECT current_database() name')).rows[0].name,queued:Number((await pool.query("SELECT count(*) n FROM writing_practice.check_attempt a JOIN writing_practice.activity_session s ON s.id=a.session_id JOIN writing_practice.activity task ON task.id=s.activity_id WHERE a.status='queued' AND task.grading_pool='task2'")).rows[0].n)})));
 
 app.get('/api/v1/sw/status',safe(async(_q,r)=>r.json({ok:true,environment:'production',database:(await pool.query('SELECT current_database() name')).rows[0].name,aiMode:'sw-task2-native',enabledLessons:ENABLED_LESSONS,queued:Number((await pool.query("SELECT count(*) n FROM writing_practice.check_attempt WHERE status='queued'")).rows[0].n)})));
-app.get('/api/v1/activities/:slug/roster',safe(async(q,r)=>{requireLesson(q.params.slug);const data=await service.getRoster(q.params.slug);r.json({...data,ok:true,classes:data.classes.filter(c=>c.className.startsWith('CS.'))});}));
+app.get('/api/v1/activities/:slug/roster',safe(async(q,r)=>{
+ const slug=q.params.slug;requireLesson(slug);
+ await swRoster?.syncActivity(slug);
+ const source=await service.getRoster(slug);
+ const data=swRoster?await swRoster.enrichRoster(slug,source):source;
+ r.json({...data,ok:true,classes:data.classes.filter(c=>c.className.startsWith('CS.'))});
+}));
 app.get('/api/v1/admin/activities/:slug/roster',teacherAuth.authenticate,safe(async(q,r)=>{
  requireLesson(q.params.slug);
  const source=await service.getRoster(q.params.slug),allowed=new Set((await access.listClasses(q.reviewer)).map(c=>c.classCode));
@@ -99,7 +118,7 @@ app.get('/api/v1/admin/activities/:slug/roster',teacherAuth.authenticate,safe(as
  LEFT JOIN writing_practice.activity_roster r ON r.activity_class_id=c.id AND r.student_public_id=s.student_public_id
  WHERE a.slug=$1 AND c.status='active' AND c.class_name_snapshot LIKE 'CS.%' AND ($2 OR ${reviewerClassAccessSql('c','$3')})`,[q.params.slug,q.reviewer.role==='admin',q.reviewer.email]);
  for(const row of history.rows){const c=classes.find(c=>c.classRef===row.classRef);if(c&&!c.students.some(p=>p.studentRef===row.studentRef))c.students.push({studentRef:row.studentRef,displayName:row.displayName});}
- r.json({ok:true,classes});
+ r.json({ok:true,classes,...(swRoster?{permissions:{swClassRoster:true,swClassRosterAdds:swRoster.allowAdds}}:{})});
 }));
 app.get('/api/v1/admin/live/activities/:slug',teacherAuth.authenticate,safe(async(q,r,next)=>{
  if(!q.query.classRef)return next();requireLesson(q.params.slug);const classRef=z.uuid().parse(q.query.classRef);await access.assertActivityClass(q.reviewer,{activitySlug:q.params.slug,classRef});
@@ -115,4 +134,5 @@ installShopsResultRoutes(app,shopsResults);
 app.use(createApp({config,pool,service,lessonService,provisionalService,teacherAuth,adminAuth:teacherAuth.authenticate,teacherCommentService:createTeacherCommentService({pool}),lmsResultService:shopsResults}));
 app.use((e,q,r,n)=>r.status(e.status||400).json({ok:false,error:e.code||'INVALID_REQUEST',message:e.status?e.message:'Yêu cầu không hợp lệ.'}));
 app.listen(config.port,'0.0.0.0',()=>console.log('Shops Writing API ready'));
-setInterval(()=>void vocabularyService.tick().catch(()=>console.error('Vocabulary test worker needs retry')),15000).unref();
+swRoster?.start();
+if(!readOnlyCanary)setInterval(()=>void vocabularyService.tick().catch(()=>console.error('Vocabulary test worker needs retry')),15000).unref();

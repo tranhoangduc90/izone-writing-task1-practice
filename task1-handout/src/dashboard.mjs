@@ -18,5 +18,11 @@ export async function dashboard({pool,service,slug,classRef,reviewer,management=
  }
  const h=service.history?await service.history():null;
  const legacy=h?.students(slug).filter(x=>(!classRef||x.classRef===classRef)&&((reviewer.canAccessAllClasses??reviewer.canManage)||reviewer.class_refs.includes(x.classRef)))||[];
- return {students:[...students,...legacy].map(dashboardStudent),generatedAt:new Date().toISOString(),permissions:{canManage:management&&reviewer.canManage},history:h?.metadata||null};
+ const {rows:classes}=await pool.query(`
+  SELECT c.public_id AS "classRef",c.class_name_snapshot AS "className"
+  FROM writing_practice.activity a JOIN writing_practice.activity_class_scope c ON c.activity_id=a.id
+  WHERE a.slug=$1 AND a.status='active' AND c.status='active' AND c.end_date>=CURRENT_DATE
+    AND ($2 OR c.public_id=ANY($3::uuid[]))
+  ORDER BY c.class_name_snapshot`,[slug,reviewer.canAccessAllClasses??reviewer.canManage,reviewer.class_refs]);
+ return {students:[...students,...legacy].map(dashboardStudent),classes,generatedAt:new Date().toISOString(),permissions:{canManage:management&&reviewer.canManage},history:h?.metadata||null};
 }

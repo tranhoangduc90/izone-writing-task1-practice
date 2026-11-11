@@ -10,7 +10,7 @@ const snapshot=z.object({overview:z.string().max(20000),body1:z.string().max(200
 const save=snapshot.extend({baseVersion:z.number().int().nonnegative(),requestId:uuid,draft2Unlocked:z.boolean().optional()});
 const safe=f=>(q,r,n)=>Promise.resolve(f(q,r)).catch(n);
 const parse=(s,x)=>s.parse(x);
-export function createApp({config,pool,service,verifyTeacher,authority=null}){
+export function createApp({config,pool,service,verifyTeacher,authority=null,swRoster=null}){
  const app=express();app.disable('x-powered-by');app.set('trust proxy',1);app.use(helmet());
  if(config.legacyBase)app.use('/_legacy',legacyRouter(pool,config.legacyBase));
  app.use((q,r,next)=>{
@@ -55,9 +55,20 @@ export function createApp({config,pool,service,verifyTeacher,authority=null}){
    teacher(q,r,err=>{if(err)return next(err);void allowClass(q,historical.classRef).then(()=>next(),next);});
   }).catch(next);
  });
+ swRoster?.install(app,{
+  teacher,
+  assertTeacher:(q,{classRef})=>allowClass(q,classRef),
+  getRoster:service.getRoster,
+  writeLimit:writes,
+ });
  app.get('/health',(_q,r)=>r.json({ok:true,productId:'sw-task1'}));
  app.get('/ready',safe(async(_q,r)=>{await pool.query('SELECT 1');r.json({ok:true,productId:'sw-task1'});}));
- app.get('/api/v1/activities/:slug/roster',safe(async(q,r)=>r.json({ok:true,...await service.getRoster(q.params.slug)})));
+ app.get('/api/v1/activities/:slug/roster',safe(async(q,r)=>{
+  const slug=q.params.slug;
+  await swRoster?.syncActivity(slug);
+  const roster=await service.getRoster(slug);
+  r.json({ok:true,...(swRoster?await swRoster.enrichRoster(slug,roster):roster)});
+ }));
  app.post('/api/v1/activities/:slug/provisional-students',writes,safe(async(q,r)=>{
   const input=parse(z.object({classRef:uuid,displayName:z.string().min(2).max(100),pin:z.string().regex(/^\d{4}$/),requestId:uuid,duplicateConfirmed:z.boolean().optional()}).strict(),q.body);
   const student=await service.provisional.createStudent({activitySlug:q.params.slug,...input});r.status(201).json({ok:true,...student,student});
@@ -96,7 +107,9 @@ export function createApp({config,pool,service,verifyTeacher,authority=null}){
  app.post('/api/v1/admin/attempts/:ref/retry',writes,teacher,safe(async(q,r)=>{const a=await pool.query('SELECT s.public_id FROM writing_practice.check_attempt a JOIN writing_practice.activity_session s ON s.id=a.session_id WHERE a.public_id=$1',[parse(uuid,q.params.ref)]);if(!a.rowCount)throw new ApiError(404,'ATTEMPT_NOT_FOUND','Không tìm thấy lượt chấm.');await allowSession(q,a.rows[0].public_id);r.status(202).json({ok:true,attempt:await service.retryAttempt(q.params.ref)});}));
  app.get('/api/v1/admin/live/activities/:slug',teacher,safe(async(q,r)=>{
   const classRef=q.query.classRef?parse(uuid,q.query.classRef):null;if(classRef)await allowClass(q,classRef);
-  r.json({ok:true,...await dashboard({pool,service,slug:q.params.slug,classRef,reviewer:q.reviewer,management:Boolean(authority)})});
+  const data=await dashboard({pool,service,slug:q.params.slug,classRef,reviewer:q.reviewer,management:Boolean(authority)});
+  r.json({ok:true,...data,permissions:{...data.permissions,
+   ...(swRoster?{swClassRoster:true,swClassRosterAdds:swRoster.allowAdds}:{})}});
  }));
  app.get('/api/v1/admin/live/sessions/:ref',teacher,safe(async(q,r)=>r.json({ok:true,session:await allowSession(q,parse(uuid,q.params.ref))})));
  app.get('/api/v1/admin/live/sessions/:ref/teacher-comments',teacher,safe(async(q,r)=>{const ref=parse(uuid,q.params.ref);await allowSession(q,ref);r.json({ok:true,...await service.comments.list({sessionRef:ref})});}));

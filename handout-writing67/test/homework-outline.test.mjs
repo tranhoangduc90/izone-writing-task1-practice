@@ -47,4 +47,13 @@ test('Homework đọc riêng dàn ý Lesson 3 của đúng người và không s
  allowed=false;
  assert.equal((await request()).status,403);
  assert.deepEqual((await db.query('SELECT payload,updated_at FROM handout67.session')).rows,before);
+ allowed=true;
+ const checked=structuredClone(before[0].payload);
+ checked.steps.body1_topic={status:'passed',direction:'disagree'};
+ checked.steps.body2_topic={status:'passed',direction:'disagree'};
+ await db.query('UPDATE handout67.session SET payload=$1::jsonb',[JSON.stringify(checked)]);
+ assert.equal((await request()).data.outline.approved,true);
+ checked.responses.stance='agree';
+ await db.query('UPDATE handout67.session SET payload=$1::jsonb',[JSON.stringify(checked)]);
+ assert.equal((await request()).data.outline.approved,false);
 });

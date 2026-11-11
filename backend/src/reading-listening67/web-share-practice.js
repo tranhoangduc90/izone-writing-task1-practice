@@ -43,17 +43,22 @@ function practiceLines(text) {
  return lines;
 }
 const levelHeader=/^\[level\s+([1-5])\s+[-–—]\s+band\s+([5-9])\.0\](?:\s+câu tiếp theo)?$/iu;
+const plainLevelPrefix=/^(?:(?:tiếp tục|nâng cấp)\s+|câu (?:tiếp theo|cuối cùng)\s*[-–—]\s*)?level\s+(?=\d+\s+[-–—]\s+band\b)/iu;
+const plainLevelBand=/^([1-5])\s+[-–—]\s+band\s+([5-9])\.0[!:]?$/iu;
 function questionLevel(lines) {
- const header=lines.findLastIndex(line=>/^\[level\b/iu.test(line));
+ const header=lines.findLastIndex(line=>/^\[level\b/iu.test(line)||plainLevelPrefix.test(line));
  if (header<0) return undefined;
- const match=lines[header].match(levelHeader);
+ const heading=lines[header];
+ const plain=plainLevelPrefix.test(heading);
+ const match=plain?heading.replace(plainLevelPrefix,'').match(plainLevelBand):heading.match(levelHeader);
  const exercise=lines.slice(header+1);
  const english=exercise.some(line=>/^[“"']?(?:[a-z][a-z'-]*[ ,]+){5,}[a-z]/iu.test(line));
- const instruction=exercise.some(line=>/nén\b.{0,120}(?:tiếng việt|câu (?:này|trên)|(?:dưới|tối đa) \d+ (?:chữ|từ))/iu.test(line));
+ const instruction=exercise.some(line=>/nén\b.{0,120}(?:tiếng việt|câu (?:này|trên)|(?:dưới|tối đa) \d+ (?:chữ|từ))/iu.test(line)
+  ||(plain&&/^(?:🎯\s*)?câu hỏi:\s*\S/iu.test(line)));
  return match&&Number(match[2])===Number(match[1])+4&&english&&instruction?Number(match[1]):null;
 }
 const resetLine=/^\[chuỗi reset:\s*0\/2\]$/iu;
-const miss=/^\(?(?:chưa pass|chưa đạt)\)?(?:[!.:\s]|$)/iu;
+const miss=/^(?:\(?(?:chưa pass|chưa đạt)\)?(?:[!.:\s]|$)|\(fail(?:\s*[-–—]\s*[^)\n]+)?\)(?:[!.:\s]|$))/iu;
 const sos=/^(?:sos|giúp (?:tôi|em)(?: với)?|khó quá|dịch hộ (?:tôi|em)|(?:tôi|em) không biết từ [\p{L}'-]+)[!?.\s]*$/iu;
 function mercyRuleEvidence(messages) {
  let level=null;
@@ -70,7 +75,7 @@ function mercyRuleEvidence(messages) {
    const incorrect=!requestedHelp&&miss.test(lines[0]||'')&&/^[\p{L}\p{N}]/u.test(answer)&&!/\r|\n/u.test(answer)&&!miss.test(answer);
    if ((requestedHelp&&gaveHelp)||incorrect) {
     attempts.push({userMessage:index,assistantMessage:index+1,reason:requestedHelp?'sos':'incorrect'});
-    if (attempts.length===3) return {reason:'mercy_rule',level,attempts,recognizerVersion:'reading-mercy-transcript-v1'};
+    if (attempts.length===3) return {reason:'mercy_rule',level,attempts,recognizerVersion:'reading-mercy-transcript-v2'};
    }
   }
   const nextLevel=questionLevel(lines);
@@ -136,7 +141,12 @@ export function createReadingSharePractice({db,content,readShare=readSpeakingSha
     const done=(await tx.query('UPDATE reading_listening67.web_share_practice SET status=$3,outcome=$4::jsonb,lease_token=NULL,lease_until=NULL,updated_at=now() WHERE '+guarded+' RETURNING id',[row.id,row.lease_token,outcome.status,JSON.stringify(outcome)])).rows[0];if(!done)throw new WebGradingError('SHARE_SCOPE_CHANGED',409);
     await onProgress(tx,{ownerId:row.owner_id,courseId:row.course_id,code:row.assignment_code,version:row.content_version},row.id,outcome);
    });
-  }catch(error){if(error.code==='SHARE_SCOPE_CHANGED')return;await update("status=$3,outcome=$4::jsonb,lease_token=NULL,lease_until=NULL,updated_at=now()",[called||error.code==='SHARE_OUTCOME_UNKNOWN'?'needs_review':'retry',JSON.stringify({message:called?'Chưa rõ kết quả kiểm; cần đối soát trước khi gọi lại.':'Chưa đọc được link. Kiểm tra link chia sẻ công khai rồi thử lại.',errorCode:error.code||'SHARE_READ_FAILED'})]);}
+  }catch(error){
+   if(error.code==='SHARE_SCOPE_CHANGED')return;
+   const outcome={message:called?'Chưa rõ kết quả kiểm; cần đối soát trước khi gọi lại.':'Chưa đọc được link. Kiểm tra link chia sẻ công khai rồi thử lại.',errorCode:error.code||'SHARE_READ_FAILED'};
+   if(!called&&error.shareReadReason==='OCTANE_MESSAGE_INVALID')outcome.readReason=error.shareReadReason;
+   await update("status=$3,outcome=$4::jsonb,lease_token=NULL,lease_until=NULL,updated_at=now()",[called||error.code==='SHARE_OUTCOME_UNKNOWN'?'needs_review':'retry',JSON.stringify(outcome)]);
+  }
  }
  return {status,save,once,requireAccepted,attachAttempt};
 }

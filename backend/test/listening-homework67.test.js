@@ -6,6 +6,7 @@ import {tmpdir} from 'node:os';
 import request from 'supertest';
 import {PGlite} from '@electric-sql/pglite';
 import {createListeningGrader,listeningSummary} from '../src/listening-homework67/grader.js';
+import {LISTENING_SOURCE_VERSION,listeningEvidenceSource,materializeListeningSpans} from '../src/listening-homework67/source-references.js';
 import {createListeningHomeworkApp,DOC_CONTRACT,listeningCompletionText} from '../src/listening-homework67/app.js';
 import {createListeningContext} from '../src/listening-homework67/context.js';
 import {sha256} from '../src/reading-listening67/web-grader.js';
@@ -35,6 +36,95 @@ test('Wrong or duplicate target identity is never accepted as a complete result'
 test('Unknown provider outcome stops for investigation instead of silently re-calling',async()=>{const statuses=[];const g=createListeningGrader({lesson,provider:async()=>{throw Error('network lost');}});await assert.rejects(g.finish(g.prepareWeb({...answers(),U1:'variant'}),{onRound:async e=>statuses.push(e.status)}),e=>e.code==='AI_OUTCOME_UNKNOWN');assert.deepEqual(statuses,['calling','unknown']);});
 async function setup(t,audioOverride){const db=new PGlite();await db.exec(await fs.readFile(new URL('../ops/listening-homework67/schema.sql',import.meta.url),'utf8'));t.after(()=>db.close());const a='11111111-1111-4111-8111-111111111111',b='22222222-2222-4222-8222-222222222222';const snapshot={classes:[{erp_course_class_id:'1293',erp_class_name_snapshot:'IC-FIXTURE'}],students:[a,b].map((id,i)=>({public_id:id,erp_course_class_id:'1293',erp_student_contact_id:String(i+1),erp_student_name_snapshot:'Fixture '+(i+1),status:'approved'})),memberships:[1,2].map(id=>({erp_course_class_id:'1293',erp_student_contact_id:String(id),source_state:'active'}))};let permitted=true;const context={snapshot:async()=>snapshot,classes:async()=>[{id:'1293',classCode:'IC-FIXTURE'}],roster:async()=>snapshot.students.map(s=>({studentRef:s.public_id,name:s.erp_student_name_snapshot})),teacher:async()=>permitted};const identity=createReading67WebIdentity({db,context,allowedClassIds:['1293'],cookieName:'listening_homework_teacher',cookiePath:'/api/listening-homework67',verifyGoogle:async()=>({email:'teacher@example.test',sub:'fixture',email_verified:true})});const runtime=createListeningHomeworkApp({db,lesson,identity,origins:['https://fixture.test'],studentsOpen:true,audio:audioOverride||{id:lesson.audioId},provider:async()=>{throw Error('No AI expected in this fixture');}});return {...runtime,db,a,b,identity,revoke:()=>{permitted=false;}};}
 const prefix='/api/listening-homework67';
+
+test('Listening references require the exact job, rubric, field and occurrence',()=>{
+ const item={id:'U1',response:'both\twork. both  work.'};
+ const source=listeningEvidenceSource(item,'job-1','lesson-v1');
+ const ref=`${source.scope}:4-6`;
+ assert.equal(materializeListeningSpans(row('U1',ref),source,'audit').units[0].span,'both  work.');
+ for(const other of [
+  listeningEvidenceSource({...item,id:'U2'},'job-1','lesson-v1'),
+  listeningEvidenceSource(item,'job-2','lesson-v1'),
+  listeningEvidenceSource(item,'job-1','lesson-v2'),
+  listeningEvidenceSource({...item,response:'both\twork. both work.'},'job-1','lesson-v1'),
+ ])assert.throws(()=>materializeListeningSpans(row('U1',ref),other,'audit'),{code:'SOURCE_VERSION_MISMATCH'});
+ for(const [wrong,code] of [[null,'SOURCE_REF_MISSING'],['both  work.','SOURCE_REF_INVALID'],[`${source.scope}:6-4`,'SOURCE_REF_INVALID'],[`${source.scope}:1-7`,'SOURCE_REF_INVALID']]){
+  assert.throws(()=>materializeListeningSpans(row('U1',wrong),source,'audit'),{code});
+ }
+});
+
+test('Listening HTTP/SQL pins the job, repairs audit and review, and reads the exact saved text after flag off',async t=>{
+ const x=await setup(t);
+ const raw='The first speaker agrees,\r\n\tbut B agrees too.';
+ let audits=0,reviews=0;
+ const provider=async({prompt})=>{
+  const {targets:[target]}=JSON.parse(prompt.slice(prompt.lastIndexOf('\n')+1));
+  const {scope,marks}=target.source_positions;
+  const ref=`${scope}:1-${marks.length}`;
+  if(prompt.includes('lượt kiểm nội dung độc lập')){
+   assert.equal(target.candidate.units[0].span,raw);
+   assert.equal(target.candidate.meaning_errors[0].span,raw);
+   const selected=++reviews===1?raw:ref;
+   return {reviews:[review('incorrect',1,row('U1',selected,['present','contradicted']).meaning_errors)]};
+  }
+  const selected=++audits===1?'The first speaker agrees, but B agrees too.':ref;
+  return {results:[row('U1',selected,['present','contradicted'])]};
+ };
+ const runtime=referenceJobs=>createListeningHomeworkApp({db:x.db,lesson,identity:x.identity,origins:[],studentsOpen:true,provider,referenceJobs});
+ const enabled=runtime(true),api=request(enabled.app);
+ const owner=await x.identity.loginStudent({classId:'1293',studentRef:x.a});
+ const auth='Bearer '+owner.token;
+ const draft=await api.put(prefix+'/draft').set('Authorization',auth).send({baseRevision:0,mutationId:randomUUID(),
+  body:{answers:{...answers(),U1:raw},annotations:[],notes:'',flags:[]}}).expect(200);
+ const submission={revision:draft.body.revision,requestId:randomUUID()};
+ const sent=await api.post(prefix+'/submit').set('Authorization',auth).send(submission).expect(202);
+ const jobId=sent.body.jobId;
+ const read=async()=> (await x.db.query('SELECT state FROM reading_listening67.web_validation WHERE job_id=$1',[jobId])).rows[0].state;
+ assert.equal((await read()).version,LISTENING_SOURCE_VERSION);
+ const disabled=runtime(false);
+ const resetDelay=()=>x.db.query('UPDATE reading_listening67.web_validation SET next_attempt_at=now() WHERE job_id=$1',[jobId]);
+ await disabled.worker.tick();
+ const initial=await read();
+ assert.equal(initial.issues[0].code,'SOURCE_REF_INVALID');
+ assert.equal(initial.rows.U1,undefined);
+ await resetDelay();
+ await disabled.worker.tick();
+ await resetDelay();
+ await disabled.worker.tick();
+ const rejectedReview=await read();
+ assert.equal(rejectedReview.phase,'review');
+ assert.equal(rejectedReview.issues[0].code,'SOURCE_REF_INVALID');
+ assert.equal(rejectedReview.approved.U1,undefined);
+ await resetDelay();
+ const interrupted=await disabled.store.claim();
+ const prepared=disabled.grader.prepareWeb(interrupted.answers,interrupted.jobId);
+ await assert.rejects(disabled.grader.finish(prepared,{validationState:rejectedReview,onRound:async event=>{
+  await disabled.store.validation.round(interrupted,event);
+  if(event.status==='received')throw Error('FIXTURE_LOST_WORKER_AFTER_RESPONSE');
+ }}),/FIXTURE_LOST_WORKER_AFTER_RESPONSE/);
+ await x.db.query("UPDATE reading_listening67.web_job SET status='queued',lease_until=NULL,lease_token=NULL WHERE id=$1",[jobId]);
+ await disabled.worker.tick();
+ const result=await api.get(prefix+'/attempts/'+sent.body.attemptId).set('Authorization',auth).expect(200);
+ assert.equal(result.body.status,'done');
+ assert.equal(result.body.snapshot.answers.U1,raw);
+ const stored=result.body.result.grading.target_results.find(target=>target.target_id==='U1');
+ assert.equal(stored.verdict,'incorrect');
+ assert.equal(stored.metUnits,1);
+ assert.equal(stored.units[0].span,raw);
+ assert.equal(stored.meaning_errors[0].span,raw);
+ const audited=await read();
+ assert.equal(audited.sourceAudit[0].reviewMeaningErrors[0].span,raw);
+ assert.equal(audited.sourceAuditHash,result.body.result.grading.validation.sourceAuditHash);
+ const received=await x.db.query('SELECT response,status FROM reading_listening67.web_validation_round WHERE job_id=$1 ORDER BY round_no',[jobId]);
+ assert.equal(received.rows.length,4);
+ assert.ok(received.rows.every(round=>round.status==='applied'));
+ assert.match(received.rows[3].response.reviews[0].meaning_errors[0].span,/^[a-f0-9]{32}:1-/u);
+ assert.deepEqual([audits,reviews],[2,2]);
+ const other=await x.identity.loginStudent({classId:'1293',studentRef:x.b});
+ await api.get(prefix+'/attempts/'+sent.body.attemptId).set('Authorization','Bearer '+other.token).expect(404);
+ const replay=await api.post(prefix+'/submit').set('Authorization',auth).send(submission);
+ assert.equal(replay.body.attemptId,sent.body.attemptId);
+});
 
 test('R2 descriptor is issued only after native Homework identity and teacher class authorization',async t=>{
  const catalog=JSON.parse(await fs.readFile(new URL('../src/listening-homework67/r2-audio-catalog.json',import.meta.url),'utf8')),asset=Object.values(catalog)[0];

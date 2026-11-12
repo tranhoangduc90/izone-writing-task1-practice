@@ -6,13 +6,15 @@
 import { readFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import vm from 'node:vm';
-import {VALIDATION_VERSION} from './web-validation.js';
+import {SOURCE_VALIDATION_VERSION, VALIDATION_VERSION} from './web-validation.js';
 import {createReading67ValidationRunner} from './web-validation-runner.js';
+import {indexSourceEvidence, sourceEvidencePositions, SOURCE_REFERENCE_RULE} from './source-evidence.js';
 
 export const READING67_WEB_CODE = '67-reading-materials-beyond-concrete-matching-information-nen-cap-1';
 export const sha256 = value => createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex');
 const canonical=value=>JSON.stringify(value,(_k,v)=>v&&typeof v==='object'&&!Array.isArray(v)?Object.fromEntries(Object.entries(v).sort(([a],[b])=>a.localeCompare(b))):v);
 export const reading67AnswerFingerprint=parsed=>sha256(canonical(parsed.targets.map(t=>({target_id:t.target_id,source_text:t.source_text,source_text_original:t.source_text_original,observed_state:t.observed_state}))));
+export const reading67RawAnswerFingerprint=answers=>sha256(canonical(answers));
 const clone = value => JSON.parse(JSON.stringify(value));
 const PREPARE_NODES = ['Kiểm tra parser registry', 'Đánh giá mức hoàn thành', 'Chấm deterministic exact', 'Chấm deterministic proposition-targets', 'Chuẩn bị semantic oracle'];
 const RESULT_NODES = ['Lấy output AI chính', 'Đọc JSON AI chính', 'Quyết định verdict từ unit audit', 'Merge và kiểm tra fail-closed'];
@@ -21,7 +23,7 @@ export class WebGradingError extends Error {
   constructor(code, status=422, details={}) { super(code); this.code=code;this.status=status;this.details=details; }
 }
 
-export async function loadReading67WebGrader({snapshotPath, expectedSha256, provider, fetchImpl=fetch,validation=false}) {
+export async function loadReading67WebGrader({snapshotPath, expectedSha256, provider, fetchImpl=fetch,validation=false,referenceJobs=process.env.READING67_REFERENCE_JOBS!=='0'}) {
   const bytes=await readFile(snapshotPath);
   if(!expectedSha256||sha256(bytes.toString('utf8'))!==expectedSha256)throw new WebGradingError('GRADER_PIN_MISMATCH',503);
   const workflow=JSON.parse(bytes);
@@ -72,7 +74,10 @@ export async function loadReading67WebGrader({snapshotPath, expectedSha256, prov
     const prompt=value.semantic_targets.length?run('Tập hợp prompt',value,states,operationId):null;
     return {gate:states.get('Đánh giá mức hoàn thành'),graded:value,prompt,states,operationId,pins,eligible:true};
   }
-  function prepareWeb(answers,operationId){return prepareParsed(parseWeb(answers),operationId);}
+  function prepareWeb(answers,operationId){
+    const parsed=parseWeb(answers);
+    return {...prepareParsed(parsed,operationId),rawAnswers:{...answers},rawSourceDigest:reading67RawAnswerFingerprint(answers)};
+  }
   function inspectWeb(answers){const states=new Map();const validated=run('Kiểm tra parser registry',{parsed:parseWeb(answers)},states,'inspect');return run('Đánh giá mức hoàn thành',validated,states,'inspect');}
   function prepareLegacy(markdown,operationId=randomUUID()){
     const states=new Map();const parsed=run('Đọc target qua source adapter',{markdown,requestedTabId:'t.0'},states,operationId).parsed;
@@ -99,16 +104,36 @@ export async function loadReading67WebGrader({snapshotPath, expectedSha256, prov
     if(!value)throw new WebGradingError('AI_SUPPLEMENT_INVALID',503);
     try{return JSON.parse(value);}catch{throw Object.assign(new WebGradingError('AI_SUPPLEMENT_INVALID',503),{message:'Phản hồi phải là JSON object thuần, không có Markdown fence, dấu backtick hoặc lời dẫn.'});}
   }
-  const validatedResponse=createReading67ValidationRunner({version:VALIDATION_VERSION,chooseIssue,feedbackStatesProblem,publicTextAllowed,decode,supplementalJson,callProvider,normalizeSpace:helpers.normalizeSpace,WebGradingError});
+  const makeRunner=version=>createReading67ValidationRunner({version,chooseIssue,feedbackStatesProblem,publicTextAllowed,decode,supplementalJson,callProvider,normalizeSpace:helpers.normalizeSpace,WebGradingError});
+  const validatedResponse=makeRunner(VALIDATION_VERSION), referenceResponse=makeRunner(SOURCE_VALIDATION_VERSION);
+  function referenceInput(prepared,state){
+    if(!prepared.rawAnswers||!state.sourceDigest)throw new WebGradingError('SOURCE_SNAPSHOT_MISSING',503);
+    if(state.sourceDigest!==prepared.rawSourceDigest)throw new WebGradingError('SOURCE_VERSION_MISMATCH',409);
+    const sources=new Map(prepared.graded.semantic_targets.map(({target_id})=>[target_id,indexSourceEvidence({
+      operationId:prepared.operationId,sourceVersion:state.sourceDigest,targetId:target_id,text:prepared.rawAnswers[target_id]
+    })]));
+    if(!prepared.prompt)return {prepared,sources};
+    const oldRule='student_span phải là đoạn NGUYÊN VĂN, liên tục, ngắn nhất có thể từ student_response. present/contradicted bắt buộc có span; absent bắt buộc null.';
+    if(!prepared.prompt.prompt.includes(oldRule))throw new WebGradingError('GRADER_SOURCE_CONTRACT_CHANGED',503);
+    const positions=Object.fromEntries([...sources].map(([id,source])=>[id,sourceEvidencePositions(source)]));
+    const prompt=prepared.prompt.prompt.replace(oldRule,SOURCE_REFERENCE_RULE)
+      + '\n<SOURCE_POSITIONS>'+JSON.stringify(positions)+'</SOURCE_POSITIONS>';
+    return {prepared:{...prepared,prompt:{...prepared.prompt,prompt,prompt_hash:sha256(prompt)}},sources};
+  }
   async function finish(prepared,options={}){
     const {replayResponse,onProviderResponse,signal}=options;
     if(!prepared.eligible)throw new WebGradingError('BELOW_COMPLETION_THRESHOLD',422,prepared.gate.completeness);
+    const sourceState=validation&&options.validationState?.version===SOURCE_VALIDATION_VERSION?options.validationState:null;
+    const reference=sourceState?referenceInput(prepared,sourceState):null;
     const {states,operationId}=prepared;let grading,audit=null,response=null;
     if(prepared.prompt){
       let value;
       if(validation){
-        const checked=await validatedResponse(prepared,options);response=checked.response;
-        value={ai_value:checked.state.aiValue};
+        const checked=reference
+          ? await referenceResponse(reference.prepared,{...options,evidenceSources:reference.sources})
+          : await validatedResponse(prepared,options);
+        response=checked.response;
+        value={ai_value:checked.verifiedValue};
         for(const name of RESULT_NODES.slice(2))value=run(name,value,states,operationId);
         if(states.get('Quyết định verdict từ unit audit').unit_audit_summary?.some(t=>t.normalization_flags?.length))throw new WebGradingError('AI_VALIDATION_CONTRACT_MISMATCH',503);
         for(const row of checked.state.aiValue.results){
@@ -123,20 +148,29 @@ export async function loadReading67WebGrader({snapshotPath, expectedSha256, prov
           }
         }
         // Lời giải thích đã được AI hoàn thiện và kiểm nội dung; không dùng fallback từ normalization.
-        value.grading.validation={version:VALIDATION_VERSION,rounds:checked.state.round,reviewedHash:checked.state.reviewedHash};
+        value.grading.validation={version:checked.state.version,rounds:checked.state.round,reviewedHash:checked.state.reviewedHash};
+        if(reference)value.grading.validation.sourceAuditHash=checked.state.sourceAuditHash;
       }else{
         response=replayResponse??await callProvider(prepared.prompt,{signal,operationId});
         if(onProviderResponse)await onProviderResponse(clone(response));
         value=response;for(const name of RESULT_NODES)value=run(name,value,states,operationId);
       }
       grading=value.grading;
-      audit={gateway:states.get('Lấy output AI chính')?.gateway_audit||null,unitAudit:states.get('Quyết định verdict từ unit audit').unit_audit_summary,promptHash:prepared.prompt.prompt_hash,inputFingerprint:prepared.prompt.input_fingerprint};
-    }else grading=run('Merge không cần AI',prepared.graded,states,operationId).grading;
+      audit={gateway:states.get('Lấy output AI chính')?.gateway_audit||null,unitAudit:states.get('Quyết định verdict từ unit audit').unit_audit_summary,promptHash:(reference?.prepared??prepared).prompt.prompt_hash,inputFingerprint:prepared.prompt.input_fingerprint};
+    }else{
+      grading=run('Merge không cần AI',prepared.graded,states,operationId).grading;
+      if(sourceState){
+        const reviewedHash=sha256('[]');
+        await options.onCheckpoint?.({...sourceState,phase:'complete',reviewedHash,sourceAuditHash:reviewedHash,sourceAudit:[]});
+        grading.validation={version:sourceState.version,rounds:0,reviewedHash,sourceAuditHash:reviewedHash};
+      }
+    }
     if(grading?.target_results?.length!==20)throw new WebGradingError('GRADING_RESULT_INCOMPLETE',503);
     const allowed=['correct','partial','incorrect','missing'];
     if(grading.target_results.some(t=>!allowed.includes(t.verdict)))throw new WebGradingError('GRADING_VERDICT_INVALID',503);
     const feedback=Object.fromEntries(grading.target_results.map(result=>[result.target_id,{status:result.verdict==='missing'?'blank':result.verdict,modelAnswer:result.correct_answer,reason:result.feedback||'Bộ chấm xác nhận phần trả lời này đúng.',sourceMeaning:result.why_official_right||'',nextStep:result.next_step||'Giữ cách nén và đối chiếu các ý cốt lõi.',raw:result}]));
     return {grading,feedback,completeness:prepared.gate.completeness,pins,audit,providerResponse:response,context:{operationId,sourceDigest:reading67AnswerFingerprint(prepared.gate.parsed)}};
   }
-  return {pins,config,profile,parseWeb,inspectWeb,prepareWeb,prepareLegacy,finish,validationVersion:validation?VALIDATION_VERSION:null};
+  return {pins,config,profile,parseWeb,inspectWeb,prepareWeb,prepareLegacy,finish,validationVersion:validation?VALIDATION_VERSION:null,
+    ...(validation?{sourceValidationVersion:SOURCE_VALIDATION_VERSION,newJobValidationVersion:referenceJobs?SOURCE_VALIDATION_VERSION:null}:{})};
 }

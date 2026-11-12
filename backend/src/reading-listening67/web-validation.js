@@ -1,11 +1,15 @@
 /** Kiểm đủ audit và nhận xét; trả danh sách lỗi để AI sửa đúng ô, không tạo lời giải thay AI. */
+import { isDeepStrictEqual } from 'node:util';
+import { resolveSourceEvidence } from './source-evidence.js';
+
 export const VALIDATION_VERSION = 'materials-validation-20261026-v2';
+export const SOURCE_VALIDATION_VERSION = 'materials-source-references-v1';
 const copy=value=>JSON.parse(JSON.stringify(value));
 const text=value=>String(value??'').normalize('NFKC').replace(/[\u200B-\u200D\u2060\uFEFF]/g,'').replace(/\s+/g,' ').trim();
 const evidence=value=>text(value).toLocaleLowerCase('vi').replace(/[^\p{L}\p{N}]+/gu,' ').trim();
 const keys=(value,wanted)=>value&&typeof value==='object'&&!Array.isArray(value)&&JSON.stringify(Object.keys(value).sort())===JSON.stringify([...wanted].sort());
 const resultKeys=['target_id','unit_audit','relation_status','economy_status','critical_failure','primary_issue_unit_id','proposed_error_code','why_student_wrong'];
-export function validateAudit(value,targets,profile,chooseIssue,feedbackStatesProblem=value=>/(chưa|thiếu|nhầm|sai|không|quá)/iu.test(value),publicTextAllowed=()=>true) {
+export function validateAudit(value,targets,profile,chooseIssue,feedbackStatesProblem=value=>/(chưa|thiếu|nhầm|sai|không|quá)/iu.test(value),publicTextAllowed=()=>true,{evidenceSources}={}) {
   const issues=[],decisions={},accepted={};
   const add=(targetId,field,code,message,scope='audit')=>issues.push({targetId,field,code,message,scope});
   if(!keys(value,['schema_version','lesson_id','prompt_version','oracle_version','results']))return {issues:[{targetId:null,field:'response',code:'AI_SCHEMA_INVALID',message:'Phản hồi thiếu/thừa trường hoặc không phải JSON object.',scope:'response'}],accepted,decisions};
@@ -22,6 +26,9 @@ export function validateAudit(value,targets,profile,chooseIssue,feedbackStatesPr
     if(!oracle)throw Object.assign(Error('GRADER_ORACLE_MISSING'),{code:'GRADER_ORACLE_MISSING'});
     if(!raw){if(!byId.has(id))add(id,'result','AI_TARGET_MISSING','Thiếu kết quả ô này.');continue;}
     if(!keys(raw,resultKeys)){add(id,'result','AI_FIELDS_INVALID','Kết quả ô thiếu/thừa trường.');continue;}
+    const source=evidenceSources?.get(id);
+    if(evidenceSources&&!source){add(id,'unit_audit','SOURCE_SNAPSHOT_MISSING','Thiếu câu trả lời thô của ô đang chấm.','identity');continue;}
+    const resolvedSpans=new Map();
     const start=issues.length,units=[...oracle.core_units,...oracle.secondary_required_units,...oracle.optional_units];
     if(typeof raw.why_student_wrong!=='string')add(id,'why_student_wrong','AI_EXPLANATION_TYPE','Lời giải thích phải là chuỗi.','feedback');
     if(!Array.isArray(raw.unit_audit)||raw.unit_audit.length!==units.length)add(id,'unit_audit','AI_UNITS_INVALID','Phải phân tích đủ mỗi ý đúng một lần.');
@@ -30,7 +37,20 @@ export function validateAudit(value,targets,profile,chooseIssue,feedbackStatesPr
       if(observed.size!==units.length)add(id,'unit_audit','AI_UNIT_DUPLICATE','Ý bị trùng.');
       for(const unit of units){
         const row=observed.get(unit.id);
-        if(!keys(row,['unit_id','status','student_span'])||!['present','absent','contradicted','uncertain'].includes(row?.status)){add(id,`unit_audit.${unit.id}`,'AI_UNIT_INVALID','Thiếu ý hoặc trạng thái không hợp lệ.');continue;}
+        const hasSpan=keys(row,['unit_id','status','student_span']);
+        const missingSpan=source&&keys(row,['unit_id','status']);
+        if((!hasSpan&&!missingSpan)||!['present','absent','contradicted','uncertain'].includes(row?.status)){add(id,`unit_audit.${unit.id}`,'AI_UNIT_INVALID','Thiếu ý hoặc trạng thái không hợp lệ.');continue;}
+        if(source){
+          const field=`unit_audit.${unit.id}.student_span`;
+          if(row.student_span===null&&['absent','uncertain'].includes(row.status))continue;
+          if(row.status==='absent'&&row.student_span!==undefined){
+            add(id,field,'SOURCE_REF_INVALID','Ý vắng mặt phải có dẫn chứng null.');continue;
+          }
+          const match=resolveSourceEvidence(source,row.student_span);
+          if(match.code||!evidence(match.text))add(id,field,match.code||'SOURCE_REF_INVALID','Chọn mốc đầu và cuối có thật trong đúng ô đang chấm.');
+          else resolvedSpans.set(unit.id,match.text);
+          continue;
+        }
         if(row.status==='absent'&&row.student_span!==null)add(id,`unit_audit.${unit.id}.student_span`,'AI_EVIDENCE_INVALID','Ý vắng mặt phải có dẫn chứng null.');
         if(row.student_span!==null&&typeof row.student_span!=='string')add(id,`unit_audit.${unit.id}.student_span`,'AI_EVIDENCE_TYPE','Dẫn chứng phải là chuỗi hoặc null.');
         if(['present','contradicted'].includes(row.status)&&(!evidence(row.student_span)||!evidence(target.student_response).includes(evidence(row.student_span))))add(id,`unit_audit.${unit.id}.student_span`,'AI_EVIDENCE_INVALID','Dẫn chứng phải là đoạn thật trong bài làm.');
@@ -44,7 +64,11 @@ export function validateAudit(value,targets,profile,chooseIssue,feedbackStatesPr
     if(raw.primary_issue_unit_id!==null&&!unitIds.includes(raw.primary_issue_unit_id))add(id,'primary_issue_unit_id','AI_ISSUE_INVALID','Ý lỗi không có trong tiêu chí.');
     if(raw.proposed_error_code!==null&&!profile.error_codes.includes(raw.proposed_error_code))add(id,'proposed_error_code','AI_ERROR_CODE_INVALID','Mã lỗi ngoài danh sách.');
     if(issues.slice(start).some(issue=>issue.scope==='audit'))continue;
-    const normalized=copy(raw);normalized.unit_audit=units.map(u=>normalized.unit_audit.find(row=>row.unit_id===u.id));
+    const normalized=copy(raw);normalized.unit_audit=units.map(u=>{
+      const row=normalized.unit_audit.find(entry=>entry.unit_id===u.id);
+      if(resolvedSpans.has(u.id))row.student_span=resolvedSpans.get(u.id);
+      return row;
+    });
     const decision=chooseIssue(normalized,oracle);decisions[id]=decision;accepted[id]=normalized;
     if(decision.verdict!=='correct'){
       const explanation=text(raw.why_student_wrong);
@@ -72,10 +96,10 @@ export function mergeRepair(value,response,issues,targets,profile) {
     if(fields.size===1&&fields.has('why_student_wrong')&&!keys(row,['target_id','why_student_wrong']))throw Object.assign(Error('AI_REPAIR_LOCKED_FIELD'),{code:'AI_REPAIR_LOCKED_FIELD'});
     if(fields.has('*')||!previous)byId.set(row.target_id,row);
     else{
-      for(const field of Object.keys(row))if(field!=='target_id'&&!fields.has(field)&&JSON.stringify(row[field])!==JSON.stringify(previous[field]))throw Object.assign(Error('AI_REPAIR_LOCKED_FIELD'),{code:'AI_REPAIR_LOCKED_FIELD'});
+      for(const field of Object.keys(row))if(field!=='target_id'&&!fields.has(field)&&!isDeepStrictEqual(row[field],previous[field]))throw Object.assign(Error('AI_REPAIR_LOCKED_FIELD'),{code:'AI_REPAIR_LOCKED_FIELD'});
       for(const issue of issues.filter(i=>i.targetId===row.target_id&&i.field?.startsWith('unit_audit.'))){
         const dirtyUnits=new Set(issues.filter(i=>i.targetId===row.target_id&&i.field?.startsWith('unit_audit.')).map(i=>i.field.split('.')[1]));
-        for(const unit of row.unit_audit||[])if(!dirtyUnits.has(unit.unit_id)&&JSON.stringify(unit)!==JSON.stringify(previous.unit_audit?.find(u=>u.unit_id===unit.unit_id)))throw Object.assign(Error('AI_REPAIR_LOCKED_FIELD'),{code:'AI_REPAIR_LOCKED_FIELD'});
+        for(const unit of row.unit_audit||[])if(!dirtyUnits.has(unit.unit_id)&&!isDeepStrictEqual(unit,previous.unit_audit?.find(u=>u.unit_id===unit.unit_id)))throw Object.assign(Error('AI_REPAIR_LOCKED_FIELD'),{code:'AI_REPAIR_LOCKED_FIELD'});
         break;
       }
       byId.set(row.target_id,{...previous,...row});

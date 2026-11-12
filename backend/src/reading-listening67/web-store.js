@@ -4,7 +4,7 @@
  * Mỗi callback cần lease đúng lượt; thiếu/sai chủ hoặc xung đột trả lỗi rõ.
  */
 import { randomUUID } from 'node:crypto';
-import { sha256, WebGradingError,reading67AnswerFingerprint } from './web-grader.js';
+import { sha256, WebGradingError,reading67AnswerFingerprint,reading67RawAnswerFingerprint } from './web-grader.js';
 import {reading67ResultSummary} from './web-result-summary.js';
 import {createValidationStore} from './web-validation-store.js';
 const emptyBody=()=>({answers:{},annotations:[],notes:'',flags:[]});
@@ -59,7 +59,12 @@ export function createReading67WebStore({db,grader,homework,resultSummary=readin
       const attemptId=cached?.id||randomUUID();
       if(!cached){
         await tx.query('INSERT INTO reading_listening67.web_attempt(id,owner_id,course_id,assignment_code,content_version,draft_revision,snapshot,input_hash,grader_hash,completeness,run_no) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10::jsonb,$11)',[attemptId,...args,revision,JSON.stringify(row.body),inputHash,grader.pins.sha256,JSON.stringify(gate.completeness),row.run_no]);
-        await tx.query("INSERT INTO reading_listening67.web_job(id,attempt_id,status) VALUES($1,$2,'queued')",[randomUUID(),attemptId]);
+        const jobId=randomUUID();
+        await tx.query("INSERT INTO reading_listening67.web_job(id,attempt_id,status) VALUES($1,$2,'queued')",[jobId,attemptId]);
+        if(grader.newJobValidationVersion){
+          const state={version:grader.newJobValidationVersion,sourceDigest:reading67RawAnswerFingerprint(row.body.answers),phase:'initial',round:0,issues:[]};
+          await tx.query('INSERT INTO reading_listening67.web_validation(job_id,state) VALUES($1,$2::jsonb)',[jobId,JSON.stringify(state)]);
+        }
       }
       await tx.query('INSERT INTO reading_listening67.web_request(owner_id,course_id,assignment_code,content_version,request_id,request_hash,attempt_id) VALUES($1,$2,$3,$4,$5,$6,$7)',[...args,requestId,requestHash,attemptId]);
       if(afterSubmit)await afterSubmit(tx,scope,attemptId);
@@ -107,16 +112,32 @@ export function createReading67WebStore({db,grader,homework,resultSummary=readin
   async function recordProvider(job,response){return db.transaction(async tx=>{await assertOwner(tx,job);await tx.query('UPDATE reading_listening67.web_job SET provider_response=$2::jsonb WHERE id=$1',[job.jobId,JSON.stringify(response)]);});}
   async function finish(job,result){return db.transaction(async tx=>{
     const owned=await assertOwner(tx,job);
-    if(validation){const state=(await tx.query('SELECT state FROM reading_listening67.web_validation WHERE job_id=$1',[job.jobId])).rows[0]?.state;if(state?.phase!=='complete'||state.version!==grader.validationVersion||result.grading?.validation?.version!==state.version||result.grading?.validation?.reviewedHash!==state.reviewedHash)throw new WebGradingError('RESULT_VALIDATION_REQUIRED',409);}
+    let validationVersion;
+    if(validation){
+      const state=(await tx.query('SELECT state FROM reading_listening67.web_validation WHERE job_id=$1',[job.jobId])).rows[0]?.state;
+      if(state?.phase!=='complete'||!state.version||![grader.validationVersion,grader.sourceValidationVersion].includes(state.version)||result.grading?.validation?.version!==state.version||result.grading?.validation?.reviewedHash!==state.reviewedHash)throw new WebGradingError('RESULT_VALIDATION_REQUIRED',409);
+      validationVersion=state.version;
+      if(validationVersion===grader.sourceValidationVersion){
+        const stored=(await tx.query('SELECT snapshot FROM reading_listening67.web_attempt WHERE id=$1',[job.attemptId])).rows[0]?.snapshot;
+        if(!stored?.answers)throw new WebGradingError('SOURCE_SNAPSHOT_MISSING',503);
+        if(state.sourceDigest!==reading67RawAnswerFingerprint(stored.answers))throw new WebGradingError('SOURCE_VERSION_MISMATCH',409);
+        if(!Array.isArray(state.sourceAudit)||state.sourceAuditHash!==sha256(canonical(state.sourceAudit))
+          ||result.grading.validation.sourceAuditHash!==state.sourceAuditHash)throw new WebGradingError('SOURCE_READBACK_MISMATCH',409);
+      }
+    }
     const ids=result.grading?.target_results?.map(t=>t.target_id)||[];
     const expected=grader.profile.expected_target_ids;
     if(result.context?.operationId!==job.jobId||result.context?.sourceDigest!==job.inputHash||result.pins?.sha256!==job.graderHash||ids.length!==expected.length||new Set(ids).size!==expected.length||expected.some(id=>!ids.includes(id)))throw new WebGradingError('RESULT_IDENTITY_MISMATCH',409);
     const {providerResponse:_private,...data}=result;
-    await tx.query('INSERT INTO reading_listening67.web_result(attempt_id,data) VALUES($1,$2::jsonb)',[job.attemptId,JSON.stringify(data)]);
+    const inserted=await tx.query('INSERT INTO reading_listening67.web_result(attempt_id,data) VALUES($1,$2::jsonb) RETURNING attempt_id,data',[job.attemptId,JSON.stringify(data)]);
+    if(grader.sourceValidationVersion&&validationVersion===grader.sourceValidationVersion){
+      const saved=inserted.rows[0];
+      if(saved?.attempt_id!==job.attemptId||canonical(saved.data)!==canonical(data))throw new WebGradingError('SOURCE_READBACK_MISMATCH',409);
+    }
     await tx.query("UPDATE reading_listening67.web_job SET status='done',finished_at=now(),lease_until=NULL WHERE id=$1",[job.jobId]);
-    if(homework)await homework.outcome(tx,{ownerId:job.ownerId,courseId:owned.course_id,code:owned.assignment_code,version:owned.content_version},validation?job.jobId+':'+grader.validationVersion+':complete':job.jobId);
+    if(homework)await homework.outcome(tx,{ownerId:job.ownerId,courseId:owned.course_id,code:owned.assignment_code,version:owned.content_version},validationVersion?job.jobId+':'+validationVersion+':complete':job.jobId);
   });}
-  async function fail(job,error){return db.transaction(async tx=>{const owned=await assertOwner(tx,job);const code=String(error.code||'GRADING_VALIDATION_FAILED').slice(0,100);const status=['AI_OUTCOME_UNKNOWN','AI_VALIDATION_NEEDS_REVIEW'].includes(code)?'needs_review':'failed';await tx.query('UPDATE reading_listening67.web_job SET status=$2,error_code=$3,finished_at=now(),lease_until=NULL WHERE id=$1',[job.jobId,status,code]);if(homework)await homework.outcome(tx,{ownerId:job.ownerId,courseId:owned.course_id,code:owned.assignment_code,version:owned.content_version},job.jobId);});}
+  async function fail(job,error){return db.transaction(async tx=>{const owned=await assertOwner(tx,job);const code=String(error.code||'GRADING_VALIDATION_FAILED').slice(0,100);const status=['AI_OUTCOME_UNKNOWN','AI_VALIDATION_NEEDS_REVIEW','SOURCE_SNAPSHOT_MISSING','SOURCE_VERSION_MISMATCH','SOURCE_READBACK_MISMATCH'].includes(code)?'needs_review':'failed';await tx.query('UPDATE reading_listening67.web_job SET status=$2,error_code=$3,finished_at=now(),lease_until=NULL WHERE id=$1',[job.jobId,status,code]);if(homework)await homework.outcome(tx,{ownerId:job.ownerId,courseId:owned.course_id,code:owned.assignment_code,version:owned.content_version},job.jobId);});}
   async function recoverExpired(){return db.transaction(async tx=>{
     if(validation){
       const expired=(await tx.query("SELECT j.id FROM reading_listening67.web_job j WHERE j.status='processing' AND j.lease_until<=now()"+jobFilter+" FOR UPDATE OF j SKIP LOCKED",jobArgs)).rows;

@@ -7,37 +7,17 @@ import {randomUUID} from 'node:crypto';
 import {PGlite} from '@electric-sql/pglite';
 import {createReading67WebStore} from '../src/reading-listening67/web-store.js';
 import {createReading67Homework} from '../src/reading-listening67/web-homework.js';
-import {HOMEWORK_CTA,HOMEWORK_STATUS,HOMEWORK_PREFIX} from '../src/reading-listening67/web-homework-docs.js';
+import {memoryDocs} from '../test-support/reading67-memory-docs.js';
+import {HOMEWORK_PREFIX} from '../src/reading-listening67/web-homework-docs.js';
 const A='11111111-1111-4111-8111-111111111111',B='22222222-2222-4222-8222-222222222222';
 const code='67-reading-materials-beyond-concrete-matching-information-nen-cap-1',version='fixture-v1';
 const scope={ownerId:A,courseId:'1124',code,version},targets=[...'ABCDEFGH'].map(x=>'p.'+x).concat([1,2,3,4].flatMap(n=>['radar','evidence_l1','section'].map(x=>'q.'+n+'.'+x)));
 const body={answers:Object.fromEntries(targets.map(id=>[id,'Bài tự viết'])),notes:'Ghi chú riêng',flags:[],annotations:[]};
 const grader={pins:{sha256:'a'.repeat(64)},profile:{expected_target_ids:targets},inspectWeb:answers=>({parsed:{targets:Object.entries(answers).map(([target_id,source_text])=>({target_id,source_text}))},completeness:{filled_cells:Object.keys(answers).length,eligible_for_grading:Object.keys(answers).length>=16}})};
 const result=job=>({pins:grader.pins,context:{operationId:job.jobId,sourceDigest:job.inputHash},grading:{target_results:targets.map(target_id=>({target_id,verdict:'correct'}))},feedback:{}});
-function memoryDocs(){
- const values=new Map(),calls={read:0,write:0};let loseAck=false;
- const chars=text=>[...text].map(text=>({text,style:{link:{url:'https://manual.test/keep'},bold:true}}));
- // Fixture chỉ dùng ký tự BMP; index Google/JS cùng đơn vị UTF-16.
- const get=id=>{if(!values.has(id))values.set(id,{chars:chars('Chữ tay giữ nguyên'),cta:{},revision:1});return values.get(id);};
- const paragraph=(start,text,style={})=>({paragraph:{elements:[{startIndex:start,textRun:{content:text+'\n',textStyle:style}}]}});
- function document(id){const state=get(id),elements=state.chars.map((c,i)=>({startIndex:500+i,textRun:{content:c.text,textStyle:c.style}}));elements.push({startIndex:500+state.chars.length,textRun:{content:'\n',textStyle:{}}});
-  return {documentId:id,revisionId:'r'+state.revision,tabs:[{tabProperties:{tabId:'child'},documentTab:{body:{content:[{table:{tableRows:[{tableCells:[{content:[paragraph(1,HOMEWORK_CTA,state.cta),paragraph(100,code)]}]},{tableCells:[{content:[paragraph(300,HOMEWORK_STATUS)]}]},{tableCells:[{content:[{paragraph:{elements}}]}]}]}},paragraph(5000,'Bài Reading khác: nguyên văn/link giữ nguyên',{link:{url:'https://manual.test/other'}})]}}}]};
- }
- return {calls,values,get,loseNextAck(){loseAck=true;},read:async id=>{calls.read++;return document(id);},write:async(id,plan)=>{
-  const state=get(id);assert.equal(plan.revisionId,'r'+state.revision);calls.write++;
-  for(const r of plan.requests){
-   if(r.insertText){const at=r.insertText.location.index-500;assert.ok(at>=0);state.chars.splice(at,0,...chars(r.insertText.text));}
-   if(r.deleteContentRange){const {startIndex,endIndex}=r.deleteContentRange.range;assert.ok(startIndex>=500);state.chars.splice(startIndex-500,endIndex-startIndex);}
-   if(r.updateTextStyle){const {range,textStyle,fields}=r.updateTextStyle;if(range.startIndex===1){state.cta={...state.cta,...textStyle};continue;}
-    for(let i=range.startIndex-500;i<range.endIndex-500;i++)for(const field of fields.split(',')){if(textStyle[field]===undefined)delete state.chars[i].style[field];else state.chars[i].style[field]=structuredClone(textStyle[field]);}
-   }
-  }
-  state.revision++;if(loseAck){loseAck=false;throw Error('Mất ACK sau khi Google đã ghi');}
- }};
-}
 async function fixture(t,{managedCodes=[],ownerEntry,practiceRequired=false}={}){
  const db=new PGlite();t.after(()=>db.close());for(const name of ['web','identity','homework'])await db.exec(await fs.readFile(new URL('../../docs/migrations/2026-10-22-reading67-'+name+'.sql',import.meta.url),'utf8'));
- const docs=memoryDocs(),control={missing:false,wrong:false,failQueue:false};
+ const docs=memoryDocs(code),control={missing:false,wrong:false,failQueue:false};
  const target=s=>({classId:s.courseId,studentRef:s.ownerId,code:s.code,version:s.version,courseId:'classroom',courseWorkId:'work78',submissionId:'sub-'+s.ownerId,documentId:'doc-'+s.ownerId,tabId:'child'});
  const owner={verify:async t=>t,resolve:async s=>{if(control.missing)throw Object.assign(Error('Chưa giao'),{code:'HOMEWORK_NOT_FOUND'});const value=target(s);return control.wrong?{...value,studentRef:B}:value;}};
  if(practiceRequired)await db.exec(await fs.readFile(new URL('../../docs/migrations/2026-10-29-reading67-share-practice.sql',import.meta.url),'utf8'));

@@ -68,3 +68,17 @@ test('Reading Share malformed or empty JSON is an explicit analysis failure, nev
   await assert.rejects(()=>analyzeReadingStop(messages,target,call(raw)),{code:'SHARE_RESULT_INVALID'});
  }
 });
+
+test('Reading Share selects the exact paragraph when one message has two stopping candidates',async()=>{
+ const final='**Hôm nay dừng buổi** để tránh quá\ttải.';
+ const chat=[messages[0],{role:'assistant',text:'Có thể tạm nghỉ giữa hai câu.\r\n\r\n'+final}];
+ const checked=await analyzeReadingStop(chat,target,async(url,options)=>{
+  const {prompt}=JSON.parse(options.body);
+  const candidates=JSON.parse(prompt.match(/<CANDIDATES>([\s\S]*?)<\/CANDIDATES>/u)[1]);
+  assert.deepEqual(candidates.map(candidate=>candidate.id),['m1.p1','m1.p2']);
+  return call(JSON.stringify({...value,candidateId:'m1.p2'}))(url,options);
+ });
+ assert.equal(checked.quote,final);
+ assert.equal(checked.message,2);
+ await assert.rejects(()=>analyzeReadingStop(chat,target,call(JSON.stringify(value))),{code:'SHARE_EVIDENCE_INVALID'});
+});

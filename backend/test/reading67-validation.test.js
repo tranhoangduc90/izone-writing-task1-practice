@@ -1,11 +1,68 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {validateAudit,mergeRepair} from '../src/reading-listening67/web-validation.js';
+import {indexSourceEvidence,resolveSourceEvidence} from '../src/reading-listening67/source-evidence.js';
 const profile={ai_schema_version:'audit-v1',lesson_id:'l10',prompt_version:'prompt-v1',oracle_version:'oracle-v1',error_codes:['MISSING'],structured_oracles:{a:{core_units:[{id:'U1'}],secondary_required_units:[],optional_units:[],required_relation:{applicable:false,id:'R'},economy_applicable:false,critical_failures:[]},b:{core_units:[{id:'U1'}],secondary_required_units:[],optional_units:[],required_relation:{applicable:false,id:'R'},economy_applicable:false,critical_failures:[]}}};
 const targets=[{target_id:'a',student_response:'Coal creates fly ash.'},{target_id:'b',student_response:'Transport can reduce the benefit.'}];
 const choose=row=>row.unit_audit[0].status==='present'?{verdict:'correct',feedback:null}:{verdict:'partial',feedback:'Em còn thiếu nguồn gốc vật liệu.'};
 const row=id=>({target_id:id,unit_audit:[{unit_id:'U1',status:'absent',student_span:null}],relation_status:'not_applicable',economy_status:'not_applicable',critical_failure:null,primary_issue_unit_id:null,proposed_error_code:null,why_student_wrong:'Em chưa nêu nguồn gốc của vật liệu đang được nói tới.'});
 const output=()=>({schema_version:'audit-v1',lesson_id:'l10',prompt_version:'prompt-v1',oracle_version:'oracle-v1',results:[row('a'),row('b')]});
+
+test('Materials: a rewritten citation cannot pass source-bound evidence validation', () => {
+  const value = output();
+  value.results[0].unit_audit[0] = {
+    unit_id: 'U1',
+    status: 'present',
+    student_span: 'coal creates fly ash',
+  };
+  const original = 'Coal,\ncreates fly ash.';
+  const gradingTargets = [{ ...targets[0], student_response: original }, targets[1]];
+  const evidenceSources = new Map(gradingTargets.map(target => [
+    target.target_id,
+    indexSourceEvidence({
+      operationId: 'materials-fixture',
+      sourceVersion: 'v1',
+      targetId: target.target_id,
+      text: target.student_response,
+    }),
+  ]));
+  const result = validateAudit(value, gradingTargets, profile, choose, undefined, undefined, {
+    evidenceSources,
+  });
+  assert.deepEqual(result.issues.map(issue => [issue.targetId, issue.code]), [
+    ['a', 'SOURCE_REF_INVALID'],
+  ]);
+  assert.equal(result.accepted.a, undefined);
+  value.results[0].unit_audit[0].student_span = evidenceSources.get('b').scope + ':1-1';
+  const wrongTarget = validateAudit(value, gradingTargets, profile, choose, undefined, undefined, {
+    evidenceSources,
+  });
+  assert.equal(wrongTarget.issues[0].code, 'SOURCE_VERSION_MISMATCH');
+  value.results[0].unit_audit[0].student_span = evidenceSources.get('a').scope + ':1-6';
+  const verified = validateAudit(value, gradingTargets, profile, choose, undefined, undefined, {
+    evidenceSources,
+  });
+  assert.deepEqual(verified.issues, []);
+  assert.equal(verified.accepted.a.unit_audit[0].student_span, original);
+  assert.equal(verified.decisions.a.verdict, 'correct');
+});
+
+test('Source references are scoped to an operation, a revision, and a position', () => {
+  const input={operationId:'A',sourceVersion:'v1',targetId:'a',text:'Fly ash.\r\nFly ash.'};
+  const source=indexSourceEvidence(input);
+  const ref=(from,to)=>`${source.scope}:${from}-${to}`;
+  assert.deepEqual(resolveSourceEvidence(source,ref(1,6)),{text:input.text});
+  assert.deepEqual(resolveSourceEvidence(source,ref(4,6)),{text:'Fly ash.'});
+  assert.deepEqual(resolveSourceEvidence(source,ref(1,3)),{text:'Fly ash.'});
+  assert.deepEqual(resolveSourceEvidence(source,ref(6,1)),{code:'SOURCE_REF_INVALID'});
+  assert.deepEqual(resolveSourceEvidence(source,ref(1,7)),{code:'SOURCE_REF_INVALID'});
+  assert.deepEqual(resolveSourceEvidence(source,null),{code:'SOURCE_REF_MISSING'});
+  for(const change of [{operationId:'B'},{sourceVersion:'v2'},{targetId:'b'},{text:'Fly ash.\nFly ash.'}]){
+    assert.deepEqual(resolveSourceEvidence(indexSourceEvidence({...input,...change}),ref(1,3)),{
+      code:'SOURCE_VERSION_MISMATCH',
+    });
+  }
+});
 test('Kiểm toàn bộ ô: gom thiếu giải thích, dẫn chứng giả và trạng thái sai',()=>{
  const value=output();value.results[0].why_student_wrong='';value.results[1].unit_audit[0]={unit_id:'U1',status:'present',student_span:'A fabricated quote'};value.results[1].economy_status='invalid';
  const result=validateAudit(value,targets,profile,choose);

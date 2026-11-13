@@ -7,6 +7,8 @@ import {randomUUID} from 'node:crypto';
 import {PGlite} from '@electric-sql/pglite';
 import {createReading67WebStore} from '../src/reading-listening67/web-store.js';
 import {createReading67Homework} from '../src/reading-listening67/web-homework.js';
+import {createReading67HomeworkOwner} from '../src/reading-listening67/web-homework-owner.js';
+import {createReading67CtaRegistrar} from '../src/reading-listening67/web-homework-cta.js';
 import {memoryDocs} from '../test-support/reading67-memory-docs.js';
 import {HOMEWORK_PREFIX} from '../src/reading-listening67/web-homework-docs.js';
 const A='11111111-1111-4111-8111-111111111111',B='22222222-2222-4222-8222-222222222222';
@@ -15,19 +17,48 @@ const scope={ownerId:A,courseId:'1124',code,version},targets=[...'ABCDEFGH'].map
 const body={answers:Object.fromEntries(targets.map(id=>[id,'Bài tự viết'])),notes:'Ghi chú riêng',flags:[],annotations:[]};
 const grader={pins:{sha256:'a'.repeat(64)},profile:{expected_target_ids:targets},inspectWeb:answers=>({parsed:{targets:Object.entries(answers).map(([target_id,source_text])=>({target_id,source_text}))},completeness:{filled_cells:Object.keys(answers).length,eligible_for_grading:Object.keys(answers).length>=16}})};
 const result=job=>({pins:grader.pins,context:{operationId:job.jobId,sourceDigest:job.inputHash},grading:{target_results:targets.map(target_id=>({target_id,verdict:'correct'}))},feedback:{}});
-async function fixture(t,{managedCodes=[],ownerEntry,practiceRequired=false}={}){
+async function fixture(t,{managedCodes=[],ownerEntry,practiceRequired=false,realOwner=false}={}){
  const db=new PGlite();t.after(()=>db.close());for(const name of ['web','identity','homework'])await db.exec(await fs.readFile(new URL('../../docs/migrations/2026-10-22-reading67-'+name+'.sql',import.meta.url),'utf8'));
  const docs=memoryDocs(code),control={missing:false,wrong:false,failQueue:false};
  const target=s=>({classId:s.courseId,studentRef:s.ownerId,code:s.code,version:s.version,courseId:'classroom',courseWorkId:'work78',submissionId:'sub-'+s.ownerId,documentId:'doc-'+s.ownerId,tabId:'child'});
- const owner={verify:async t=>t,resolve:async s=>{if(control.missing)throw Object.assign(Error('Chưa giao'),{code:'HOMEWORK_NOT_FOUND'});const value=target(s);return control.wrong?{...value,studentRef:B}:value;}};
+ const work={id:'work78',courseId:'classroom',title:'HW Lesson 5',state:'PUBLISHED',workType:'ASSIGNMENT',materials:[{driveFile:{shareMode:'STUDENT_COPY',driveFile:{id:'template'}}}]};
+ const submission={id:target(scope).submissionId,courseId:work.courseId,courseWorkId:work.id,userId:'google-A',assignmentSubmission:{attachments:[{driveFile:{id:target(scope).documentId}}]}};
+ const person={studentRef:A,classId:scope.courseId,courseId:work.courseId,googleUserId:submission.userId};
+ const owner=realOwner?createReading67HomeworkOwner({docs,metadata:{code,version,homeworkLesson:78},
+  auth:{getAccessToken:async()=>'fixture'},ownerSource:{member:async()=>person,resolveClassroom:async()=>person},
+  fetcher:async url=>{const path=new URL(url).pathname;return Response.json(path.includes('/studentSubmissions/')?submission:work);}
+ }):{verify:async t=>t,resolve:async s=>{if(control.missing)throw Object.assign(Error('Chưa giao'),{code:'HOMEWORK_NOT_FOUND'});const value=target(s);return control.wrong?{...value,studentRef:B}:value;}};
  if(practiceRequired)await db.exec(await fs.readFile(new URL('../../docs/migrations/2026-10-29-reading67-share-practice.sql',import.meta.url),'utf8'));
  const homework=createReading67Homework({db,docs,owner,managedCodes,ownerEntry,metadata:{code,version,homeworkLesson:78,practiceRequired},pageBase:'https://page.test/reading-skills67/'});
  const store=createReading67WebStore({db,grader,homework});
  const jobs=async()=> (await db.query('SELECT * FROM reading_listening67.web_homework_job ORDER BY sequence')).rows;
  const due=()=>db.query('UPDATE reading_listening67.web_homework_job SET available_at=now()');
  const drain=async()=>{for(let i=0;i<30;i++)if(!await homework.once())return;throw Error('Queue did not drain');};
- return {db,docs,control,homework,store,target,jobs,due,drain};
+ return {db,docs,control,homework,store,target,jobs,due,drain,owner,work,submission};
 }
+
+test('CTA dưới tên Lesson khác đi qua registrar, worker và ghi tiến độ đúng bài/lượt',async t=>{
+ const ownerEntry={url(base,s,target){if(!target)return base;const url=new URL(base);url.searchParams.set('documentId',target.documentId);return url.href;}};
+ const f=await fixture(t,{realOwner:true,ownerEntry}),target=f.target(scope);
+ const register=createReading67CtaRegistrar({homework:f.homework,owner:f.owner,docs:f.docs,metadata:{code,version},
+  identity:{member:async()=>({className:'IC-TEST'})},sleep:f.drain});
+ const event={doc_id:target.documentId,classroom_course_id:target.courseId,coursework_id:target.courseWorkId,
+  submission_id:target.submissionId,student_id:f.submission.userId,class_name:'IC-TEST'};
+ const linked=await register(event);
+ assert.equal(linked.status,'verified');
+ assert.equal(f.docs.get(target.documentId).cta.link.url,linked.entryUrl);
+ assert.equal(new URL(linked.entryUrl).searchParams.get('assignmentCode'),code);
+ assert.equal(new URL(linked.entryUrl).searchParams.get('documentId'),target.documentId);
+ const writes=f.docs.calls.write;await register(event);assert.equal(f.docs.calls.write,writes);
+ await f.store.save(scope,{baseRevision:0,mutationId:randomUUID(),body});
+ const submitted=await f.store.submit(scope,{revision:1,requestId:randomUUID()});
+ const job=await f.store.claim();await f.store.finish(job,result(job));await f.drain();
+ const last=(await f.jobs()).at(-1);
+ assert.equal(last.status,'verified');
+ assert.equal(new URL(last.payload.link).searchParams.get('attemptId'),submitted.attemptId);
+ assert.equal(new URL(last.payload.link).searchParams.get('studentRef'),A);
+ assert.match(f.docs.get(target.documentId).chars.map(c=>c.text).join(''),/^Chữ tay giữ nguyên/);
+});
 
 test('Share before Reading starts writes a valid teacher link to Docs without claiming a Reading attempt',async t=>{
  const f=await fixture(t,{practiceRequired:true});await f.homework.register(scope,f.target(scope));await f.drain();

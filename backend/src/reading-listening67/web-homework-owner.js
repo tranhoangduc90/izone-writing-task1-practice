@@ -5,15 +5,11 @@
  */
 import {z} from 'zod';
 import {sha256,WebGradingError} from './web-grader.js';
-import {locateReading67Homework} from './web-homework-docs.js';
+import {homeworkMarkerTabs,locateReading67Homework} from './web-homework-docs.js';
 const fail=(code,status=409)=>{throw new WebGradingError(code,status);};
-const allTabs=tabs=>(tabs||[]).flatMap(t=>[t,...allTabs(t.childTabs)]);
-const tabText=content=>(content||[]).map(e=>(e.paragraph?.elements||[]).map(p=>p.textRun?.content||'').join('')+(e.table?.tableRows||[]).map(r=>(r.tableCells||[]).map(c=>tabText(c.content)).join('')).join('')).join('');
 const sourceSchema=z.object({apiVersion:z.literal(1),classId:z.string(),studentRef:z.uuid(),courseId:z.string().min(1),googleUserId:z.string().min(1),capturedAt:z.iso.datetime(),sourceRevision:z.string().regex(/^[a-f0-9]{64}$/)}).strict();
 
 export function createReading67HomeworkOwner({url,key,headerName='x-reading-owner-key',auth,docs,metadata,ownerSource,fetcher=fetch,clock=Date.now,locate=locateReading67Homework}){
- if(!Number.isInteger(metadata.homeworkLesson)||metadata.homeworkLesson<1||metadata.homeworkLesson>99)throw Error('HOMEWORK_LESSON_REQUIRED');
- const titleMatch=new RegExp('\\b(?:lesson|buổi)\\s*0?'+metadata.homeworkLesson+'\\b','i');
  async function mapping(input,reverse=false){
   if(ownerSource)return reverse?ownerSource.resolveClassroom(input):ownerSource.member(input.classId,input.studentRef);
   const query=new URLSearchParams(reverse?{courseId:input.courseId,googleUserId:input.googleUserId}:{classId:input.classId,studentRef:input.studentRef});
@@ -40,11 +36,14 @@ export function createReading67HomeworkOwner({url,key,headerName='x-reading-owne
    if(pageToken){if(seen.has(pageToken)||seen.size>=9)fail('HOMEWORK_LOOKUP_LIMIT',503);seen.add(pageToken);}
   }while(pageToken);return items;
  }
+ function eligible(work,source){
+  return work.courseId===source.courseId&&work.id&&work.state==='PUBLISHED'&&work.workType==='ASSIGNMENT'&&
+   (work.assigneeMode!=='INDIVIDUAL_STUDENTS'||work.individualStudentsOptions?.studentIds?.includes(source.googleUserId));
+ }
+ const templatesFor=work=>(work.materials||[]).filter(m=>m.driveFile?.shareMode==='STUDENT_COPY').map(m=>m.driveFile.driveFile?.id).filter(Boolean);
  function checkWork(work,source){
-  if(work.courseId!==source.courseId||!work.id)fail('DOCUMENT_OWNER_MISMATCH',403);
-  if(!/\b(?:homework|btvn)\b/i.test(work.title||'')||!titleMatch.test(work.title||''))fail('HOMEWORK_LESSON_MISMATCH',403);
-  if(work.assigneeMode==='INDIVIDUAL_STUDENTS'&&!work.individualStudentsOptions?.studentIds?.includes(source.googleUserId))fail('DOCUMENT_OWNER_MISMATCH',403);
-  const templates=(work.materials||[]).filter(m=>m.driveFile?.shareMode==='STUDENT_COPY').map(m=>m.driveFile.driveFile?.id).filter(Boolean);
+  if(!eligible(work,source))fail('DOCUMENT_OWNER_MISMATCH',403);
+  const templates=templatesFor(work);
   if(!templates.length)fail('DOCUMENT_OWNER_MISMATCH',403);return templates;
  }
  function checkSubmission(s,source,workId){
@@ -68,24 +67,34 @@ export function createReading67HomeworkOwner({url,key,headerName='x-reading-owne
   if(identity.code!==metadata.code||identity.version!==metadata.version)fail('DOC_CODE_MISMATCH');
   if(cached){if(Object.keys(identity).some(k=>identity[k]!==cached[k]))fail('DOC_IDENTITY_MISMATCH');return verify(cached);}
   const source=await mapping(identity),deadline=clock()+40000,base='courses/'+encodeURIComponent(source.courseId);
-  const works=await list(base+'/courseWork','courseWork',{},deadline),targets=[];
-  for(const work of works){
-   if(!/\b(?:homework|btvn)\b/i.test(work.title||'')||!titleMatch.test(work.title||''))continue;
-   if(work.assigneeMode==='INDIVIDUAL_STUDENTS'&&!work.individualStudentsOptions?.studentIds?.includes(source.googleUserId))continue;
-   if(!(work.materials||[]).some(m=>m.driveFile?.shareMode==='STUDENT_COPY'&&m.driveFile.driveFile?.id))continue;
-   const templates=checkWork(work,source);
-   const submissions=await list(base+'/courseWork/'+encodeURIComponent(work.id)+'/studentSubmissions','studentSubmissions',{userId:source.googleUserId},deadline);
-   for(const s of submissions){checkSubmission(s,source,work.id);
-    for(const a of s.assignmentSubmission?.attachments||[]){
-     const documentId=a.driveFile?.id;if(!documentId||templates.includes(documentId))continue;
-     const doc=await docs.read(documentId);if(doc.documentId!==documentId)fail('DOC_IDENTITY_MISMATCH');
-     for(const tab of allTabs(doc.tabs))if(tabText(tab.documentTab?.body?.content).includes(metadata.code))targets.push({...identity,courseId:source.courseId,courseWorkId:work.id,submissionId:s.id,documentId,tabId:tab.tabProperties.tabId});
+  const works=await list(base+'/courseWork','courseWork',{courseWorkStates:'PUBLISHED'},deadline);
+  const candidates=new Map(works.filter(w=>eligible(w,source)&&templatesFor(w).length).map(w=>[w.id,templatesFor(w)]));
+  if(!candidates.size)fail('HOMEWORK_NOT_FOUND');
+  const submissions=await list(base+'/courseWork/-/studentSubmissions','studentSubmissions',{userId:source.googleUserId},deadline);
+  const documents=new Map(),targets=new Map();
+  for(const s of submissions){
+   const templates=candidates.get(s.courseWorkId);
+   if(!templates)continue;
+   checkSubmission(s,source,s.courseWorkId);
+   for(const a of s.assignmentSubmission?.attachments||[]){
+    const documentId=a.driveFile?.id;if(!documentId||templates.includes(documentId))continue;
+    if(!documents.has(documentId)){
+     const remaining=deadline-clock();
+     if(remaining<=0)fail('HOMEWORK_LOOKUP_TIMEOUT',503);
+     const doc=await docs.read(documentId,{timeoutMs:remaining});
+     if(doc.documentId!==documentId)fail('DOC_IDENTITY_MISMATCH');
+     documents.set(documentId,homeworkMarkerTabs(doc,metadata.code));
     }
+    const markers=documents.get(documentId);
+    if(markers.length>1)fail('DOC_CODE_MISMATCH');
+    if(!markers.length)continue;
+    const target={...identity,courseId:source.courseId,courseWorkId:s.courseWorkId,submissionId:s.id,documentId,tabId:markers[0]};
+    targets.set(JSON.stringify(target),target);
+    if(targets.size>1)fail('DOC_STATUS_AMBIGUOUS');
    }
   }
-  const unique=[...new Map(targets.map(t=>[JSON.stringify(t),t])).values()];
-  if(unique.length!==1)fail(unique.length?'DOC_STATUS_AMBIGUOUS':'HOMEWORK_NOT_FOUND');
-  return verify(unique[0]);
+  if(!targets.size)fail('HOMEWORK_NOT_FOUND');
+  return verify(targets.values().next().value);
  }
  return {verify,resolve,resolveClassroom:input=>mapping(input,true)};
 }

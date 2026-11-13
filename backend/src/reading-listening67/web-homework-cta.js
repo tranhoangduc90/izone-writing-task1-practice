@@ -4,9 +4,7 @@
  * pending là lỗi có thể thử lại cùng event, không giả đã gắn hoặc đã nộp Classroom.
  */
 import {WebGradingError} from './web-grader.js';
-import {locateReading67Homework,planReading67HomeworkWrite} from './web-homework-docs.js';
-const tabs=list=>(list||[]).flatMap(t=>[t,...tabs(t.childTabs)]);
-const text=content=>(content||[]).map(e=>(e.paragraph?.elements||[]).map(r=>r.textRun?.content||'').join('')+(e.table?.tableRows||[]).map(r=>(r.tableCells||[]).map(c=>text(c.content)).join('')).join('')).join('');
+import {homeworkMarkerTabs,locateReading67Homework,planReading67HomeworkWrite} from './web-homework-docs.js';
 const fail=(code,status=409)=>{throw new WebGradingError(code,status);};
 // Chọn đúng bài trước bất kỳ ghi nào; một Docs chứa hai mã được quản lý phải dừng.
 export function createReading67CtaDispatcher({docs,registrars}){
@@ -14,7 +12,7 @@ export function createReading67CtaDispatcher({docs,registrars}){
  return async (event,{allowPending=true}={})=>{
   const document=await docs.read(event.doc_id);
   if(document.documentId!==event.doc_id)fail('DOC_IDENTITY_MISMATCH');
-  const matching=document=>{const body=tabs(document.tabs).map(t=>text(t.documentTab?.body?.content)).join('\n');return registrars.filter(r=>body.includes(r.code));};
+  const matching=document=>registrars.filter(r=>homeworkMarkerTabs(document,r.code).length);
   const matches=matching(document);
   if(matches.length>1)fail('DOC_CODE_MISMATCH');
   if(!matches.length)return {documentId:event.doc_id,status:'not_applicable',assignmentCode:registrars[0].code};
@@ -29,10 +27,10 @@ export function createReading67CtaRegistrar({homework,owner,docs,identity,metada
   const document=await docs.read(event.doc_id);
   if(document.documentId!==event.doc_id)fail('DOC_IDENTITY_MISMATCH');
   documentGuard?.(document);
-  const found=tabs(document.tabs).filter(t=>text(t.documentTab?.body?.content).includes(metadata.code));
+  const found=homeworkMarkerTabs(document,metadata.code);
   if(!found.length)return {documentId:event.doc_id,status:'not_applicable',assignmentCode:metadata.code};
   if(found.length!==1)fail('DOC_CODE_MISMATCH');
-  const tabId=found[0].tabProperties.tabId;
+  const tabId=found[0];
   locate(document,{document_id:event.doc_id,tab_id:tabId,code:metadata.code});
   const checkOpen=async()=>{
    if(!allowPending||!ownerEntry?.publicPolicy.classes.some(c=>c.classCode===event.class_name)||

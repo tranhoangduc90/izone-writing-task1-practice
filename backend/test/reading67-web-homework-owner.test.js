@@ -13,7 +13,7 @@ function doc(id){return {documentId:id,revisionId:'revision-fixture',tabs:[{tabP
 function fixture(){
  let now=Date.parse('2026-10-22T06:00:00Z');
  const source={apiVersion:1,classId:'1124',studentRef:A,courseId:'course-A',googleUserId:'google-A'};
- const work={id:'work78',courseId:'course-A',title:'LỚP THỬ — Homework Lesson 78',materials:[{driveFile:{shareMode:'STUDENT_COPY',driveFile:{id:'template'}}}]};
+ const work={id:'work78',courseId:'course-A',title:'HW Lesson 5',state:'PUBLISHED',workType:'ASSIGNMENT',materials:[{driveFile:{shareMode:'STUDENT_COPY',driveFile:{id:'template'}}}]};
  const submission={id:'submission-A',courseId:'course-A',courseWorkId:'work78',userId:'google-A',assignmentSubmission:{attachments:[{driveFile:{id:'copy-A'}}]}};
  const state={source,work,submission,age:0,extra:[],duplicate:false,calls:[],pages:true,manualDoc:doc('copy-A'),badHash:false};
  const response=value=>new Response(JSON.stringify(value));
@@ -24,20 +24,23 @@ function fixture(){
    return response({...source,capturedAt:new Date(now-state.age).toISOString(),sourceRevision:state.badHash?'a'.repeat(64):hash});
   }
   if(u.pathname.endsWith('/courseWork')){
-   if(state.pages&&!u.searchParams.get('pageToken'))return response({courseWork:[{...work,id:'work780',title:'Homework Lesson 780'},...state.extra],nextPageToken:'second'});
+   if(state.pages&&!u.searchParams.get('pageToken'))return response({courseWork:[{...work,id:'work780',state:'DRAFT'},...state.extra],nextPageToken:'second'});
    return response({courseWork:[work,...(state.duplicate?[{...work,id:'work78-again'}]:[])]});
   }
-  if(u.pathname.endsWith('/studentSubmissions'))return response({studentSubmissions:[{...submission,courseWorkId:u.pathname.includes('work78-again')?'work78-again':submission.courseWorkId}]});
+  if(u.pathname.endsWith('/-/studentSubmissions'))return response({studentSubmissions:[submission,...(state.duplicate?[{...submission,id:'submission-B',courseWorkId:'work78-again'}]:[])]});
+  if(u.pathname.endsWith('/studentSubmissions'))return response({studentSubmissions:[submission]});
   if(u.pathname.includes('/studentSubmissions/'))return response(submission);
   if(u.pathname.endsWith('/work78')||u.pathname.endsWith('/work78-again'))return response(work);
   throw Error('Unexpected route '+u.pathname);
  }});
  return {api,state,advance:ms=>{now+=ms;}};
 }
-test('Tìm đủ trang Homework mới, bỏ buổi gần giống, đúng bản sao và child tab; cache vẫn xác minh lại',async()=>{
+test('Mã CTA chọn đúng bản sao và child tab dù tên và số Lesson khác cấu hình, kể cả khi kiểm lại đích đã lưu',async()=>{
  const f=fixture(),found=await f.api.resolve(scope);assert.equal(found.documentId,'copy-A');assert.equal(found.tabId,'child');assert.equal(found.submissionId,'submission-A');
  assert.ok(f.state.calls.some(c=>c.includes('pageToken=second')));
  const before=f.state.calls.length;await f.api.resolve(scope,found);assert.ok(f.state.calls.length>before);
+ f.state.work.title='Bài về nhà thứ Sáu';
+ assert.equal((await f.api.verify(target)).documentId,'copy-A');
  f.state.submission.userId='google-other';await assert.rejects(f.api.resolve(scope,found),e=>e.code==='DOCUMENT_OWNER_MISMATCH');
 });
 test('Không chọn theo tên, không nhận UUID/lớp/Google user sai hoặc nguồn mapping cũ/hash hỏng',async()=>{
@@ -54,13 +57,13 @@ test('Homework cùng buổi chỉ có tài liệu tham khảo bị bỏ qua, kh�
  const f=fixture();f.state.extra=[{...f.state.work,id:'reference-only',materials:[{driveFile:{shareMode:'VIEW',driveFile:{id:'reference'}}}]}];
  assert.equal((await f.api.resolve(scope)).documentId,'copy-A');assert.ok(!f.state.calls.some(c=>c.includes('reference-only/studentSubmissions')));
 });
-test('Không ghi bản mẫu, bản sao không nằm trong submission, sai số buổi hoặc sai lớp Classroom',async()=>{
- for(const change of [f=>{f.state.submission.assignmentSubmission.attachments[0].driveFile.id='template';},f=>{f.state.work.title='Homework Lesson 79';},f=>{f.state.work.courseId='course-other';},f=>{f.state.submission.courseWorkId='other-work';},f=>{f.state.submission.id='other-submission';}]){
-  const f=fixture();change(f);await assert.rejects(f.api.verify(target),e=>['DOCUMENT_OWNER_MISMATCH','HOMEWORK_LESSON_MISMATCH'].includes(e.code));
+test('Không ghi bản mẫu, bản sao sai chủ/lớp/lượt, bài đã gỡ hoặc bài chưa xuất bản',async()=>{
+ for(const change of [f=>{f.state.submission.assignmentSubmission.attachments[0].driveFile.id='template';},f=>{f.state.work.state='DELETED';},f=>{f.state.work.state='DRAFT';},f=>{f.state.work.workType='SHORT_ANSWER_QUESTION';},f=>{f.state.work.courseId='course-other';},f=>{f.state.submission.courseWorkId='other-work';},f=>{f.state.submission.id='other-submission';}]){
+  const f=fixture();change(f);await assert.rejects(f.api.verify(target),e=>e.code==='DOCUMENT_OWNER_MISMATCH');
  }
 });
 test('Chưa có Homework giữ lỗi chờ; nhiều đích, tab/mã sai hoặc đích cache đổi chủ không được chọn đích đầu',async()=>{
- const missing=fixture();missing.state.work.title='Homework Lesson 79';await assert.rejects(missing.api.resolve(scope),e=>e.code==='HOMEWORK_NOT_FOUND');
+ const missing=fixture();missing.state.work.state='DELETED';await assert.rejects(missing.api.resolve(scope),e=>e.code==='HOMEWORK_NOT_FOUND');
  const duplicate=fixture();duplicate.state.duplicate=true;await assert.rejects(duplicate.api.resolve(scope),e=>e.code==='DOC_STATUS_AMBIGUOUS');
  const other=fixture();await assert.rejects(other.api.resolve(scope,{...target,studentRef:B}),e=>e.code==='DOC_IDENTITY_MISMATCH');
  await assert.rejects(other.api.verify({...target,tabId:'missing'}),e=>e.code==='DOC_TAB_NOT_FOUND');

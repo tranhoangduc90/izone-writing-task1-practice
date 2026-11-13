@@ -28,6 +28,11 @@ function scan(content,parents=[],found={paragraphs:[],statuses:[]},statusLabel=H
  }
  return found;
 }
+// Match visible standalone markers, not old hyperlinks or longer assignment codes.
+export function homeworkMarkerTabs(document,code){
+ return allTabs(document.tabs).flatMap(tab=>scan(tab.documentTab?.body?.content).paragraphs
+  .filter(p=>p.text.trim()===code).map(()=>tab.tabProperties?.tabId));
+}
 function indexAt(rs,offset){
  let used=0;
  for(const r of rs){if(offset<used+r.text.length)return r.start+offset-used;used+=r.text.length;}
@@ -49,8 +54,9 @@ export function locateReading67Homework(document,binding,contract={}){
  const tab=allTabs(document.tabs).find(t=>t.tabProperties?.tabId===binding.tab_id);
  if(!tab)fail('DOC_TAB_NOT_FOUND');
  const found=scan(tab.documentTab?.body?.content,[],{paragraphs:[],statuses:[]},contract.status||HOMEWORK_STATUS),paragraphs=found.paragraphs.filter(p=>p.text.trim());
- const mentions=paragraphs.filter(p=>p.text.includes(binding.code));
- if(mentions.length!==1||mentions[0].text.trim()!==binding.code)fail('DOC_CODE_MISMATCH');
+ const mentions=paragraphs.filter(p=>p.text.trim()===binding.code);
+ const markerTabs=homeworkMarkerTabs(document,binding.code);
+ if(mentions.length!==1||markerTabs.length!==1||markerTabs[0]!==binding.tab_id)fail('DOC_CODE_MISMATCH');
  const ctaLabel=contract.cta||HOMEWORK_CTA;
  const code=mentions[0],at=paragraphs.indexOf(code),cta=paragraphs[at-1];
  if(!cta||cta.text.trim()!==ctaLabel)fail('DOC_CTA_PAIR_INVALID');
@@ -87,13 +93,13 @@ export function planReading67HomeworkWrite(document,binding,job,contract={}){
 
 // Adapter nhận token qua auth private. Không nhận documentId hoặc token từ URL public.
 export function createReading67GoogleDocs(auth,{fetcher=fetch}={}){
- async function call(documentId,suffix,body){
+ async function call(documentId,suffix,body,timeoutMs=10000){
   const access=await auth.getAccessToken(),token=typeof access==='string'?access:access.token;
-  const response=await fetcher('https://docs.googleapis.com/v1/documents/'+encodeURIComponent(documentId)+suffix,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(10000)});
+  const response=await fetcher('https://docs.googleapis.com/v1/documents/'+encodeURIComponent(documentId)+suffix,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(Math.min(10000,timeoutMs))});
   if(!response.ok){const code=[401,403,404,429].includes(response.status)||response.status>=500?'DOC_HTTP_'+response.status:'DOC_RETRY';throw new WebGradingError(code,503);}
   return response.json();
  }
- return {read:id=>call(id,'?includeTabsContent=true'),write:(id,plan)=>{
+ return {read:(id,{timeoutMs}={})=>call(id,'?includeTabsContent=true',undefined,timeoutMs),write:(id,plan)=>{
   requireReading67DocsRevision(plan);
   return call(id,':batchUpdate',{requests:plan.requests,writeControl:{requiredRevisionId:plan.revisionId}});
  }};

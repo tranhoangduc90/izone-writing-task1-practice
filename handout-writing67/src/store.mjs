@@ -44,7 +44,7 @@ export function createStore(db,{clock=Date.now}={}) {
       const result = await db.query('SELECT payload FROM handout67.session WHERE ref=$1', [ref]);
       return result.rows[0]?.payload;
     },
-    async edit(ref, change) {
+    async edit(ref, change, saveRequestId) {
       return db.transaction(async tx => {
         const result = await tx.query('SELECT payload FROM handout67.session WHERE ref=$1 FOR UPDATE', [ref]);
         if (!result.rows[0]) return undefined;
@@ -54,7 +54,7 @@ export function createStore(db,{clock=Date.now}={}) {
         if(JSON.stringify(before)===JSON.stringify(session))return answer;
         markDashboardActivity(before,session,clock());
         await tx.query('UPDATE handout67.session SET payload=$2::jsonb, updated_at=now() WHERE ref=$1', [ref,JSON.stringify(session)]);
-        await auditChange(tx,before,session,clock());
+        await auditChange(tx,before,session,clock(),saveRequestId);
         return answer;
       });
     },

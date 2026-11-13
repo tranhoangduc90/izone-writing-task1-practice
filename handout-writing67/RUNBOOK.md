@@ -92,6 +92,16 @@ Frontend riêng `writing-handouts/lesson5-thu/` nối API thật, demo mô phỏ
 
 Trước mở lớp thật còn cần roster/quyền lớp, kiểm tải30 và canary, người trực, quota AI và retention/archival. Không tự xóa lịch sử. Chưa có vulnerability scan image hoặc cảnh báo hàng chờ tự động; không dùng kiểm liveness thay readback nghiệp vụ. Cổng backend giữ `not_ready` cho mở lớp thật. Bộ chứng cứ riêng: `E:/Codex-Data/handout67-isolation-20261005/native/`, các file DB_PROOF, DB_WRITE_PROOF, PIN_IMAGE, NATIVE_TRANSPORT, NATIVE_LEASE, NATIVE_RESTART, N8N_AI_PROOF, ISOLATION_AFTER, NATIVE_ROUTE_PROOF và log browser.
 
+## Tra lỗi mất chữ sau lưu dàn ý
+
+Chạy [truy vấn theo lượt Handout](tools/save-diagnostics.sql) trên kết nối chỉ đọc vào `handout_writing67`. Truyền mã lượt bằng `psql -v session_ref=...`. Truy vấn trả tên ô, giờ, phiên bản nháp, mã thao tác, độ dài UTF-16 trước/sau và phiên bản frontend nếu có báo cáo. Kết quả không chứa bài làm.
+
+- `browser_observation = ui_became_empty` nghĩa là trình duyệt báo ô đang focus trở về rỗng sau khi cập nhật giao diện. Máy chủ chỉ nhận báo cáo có bản lưu cùng lượt, phiên bản, mã thao tác và trường với độ dài đã lưu lớn hơn 0.
+- `server_change = server_shortened` hoặc `server_cleared` xác nhận bản ghi máy chủ ngắn đi hoặc bị xóa. `server_updated` là thay đổi khác trên ô đã có chữ. Các tín hiệu này không xác định thao tác là vô tình hay do học viên chủ động sửa.
+- `server_change = not_recorded` là bản ghi không có số đo. `browser_observation` trống nghĩa là không có báo cáo cho lần lưu đó. Báo cáo phía trình duyệt chỉ phát khi có chênh lệch và có thể không đến máy chủ khi mất mạng.
+
+Lưu phiên bản log trong JSON hiện hành, giữ hai tháng theo bản ghi lưu gốc. Phát hành backend trước Pages. Dùng bản sao chính xác của image đang chạy nếu `main` còn thiếu các bản vá đã phát. Không cần migration.
+
 ## Production IC2304 · 05/10/2026, cập nhật sau checkpoint thử
 
 Đã mở16học viên IC2304; runtime698c623ea584222aee1029fa8cb34ac8f25ce120, image riêng sha256:0be8599fcc2168eb4bef1f7498e986312433904b21be137a592cecc336d0b886. Trang học viên: https://tranhoangduc90.github.io/izone-ai-team-pages/writing-handouts/lesson5/ ; giảng viên: https://tranhoangduc90.github.io/izone-ai-team-pages/writing-handouts/lesson5/teacher.html . Google thật và cookie reload đã kiểm; ACL3 subject-bound chỉIC2304. Góp ýfixture thấy ởHV, currentAI Topic trả1Comment; canaryhọc viên thật rỗng, không tạo bài giả.

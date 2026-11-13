@@ -67,9 +67,9 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     const expected = sign(`${owner}.${expiry}`);
     if (extra.length || owner!==ref || !/^\d+$/.test(expiry||'') || Number(expiry)<=clock() || typeof sig!=='string' || Buffer.byteLength(sig)!==Buffer.byteLength(expected) || !timingSafeEqual(Buffer.from(sig),Buffer.from(expected))) fail('SESSION_UNAUTHORIZED',401);
   };
-  const edit = async (ref, token, change) => {
+  const edit = async (ref, token, change, saveRequestId) => {
     authorize(ref,token);
-    const result = await store.edit(ref, change);
+    const result = await store.edit(ref, change, saveRequestId);
     if (!result) fail('SESSION_NOT_FOUND',404);
     return result;
   };
@@ -195,7 +195,11 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
         // Giữ tối đa 200 biên nhận lưu gần nhất; version vẫn chặn replay cũ bị loại.
         if(Object.keys(s.saves).length>200)delete s.saves[Object.keys(s.saves)[0]];
         return publicSession(s);
-      });
+      },input.requestId);
+    },
+    async reportSaveDisplay(ref,token,input) {
+      authorize(ref,token);
+      return store.audit.reportSaveDisplay(ref,input,clock());
     },
     async check(ref,token,input) {
       if(!object(input) || typeof input.section!=='string' || !id(input.requestId) || !Number.isSafeInteger(input.baseVersion))fail('CHECK_INVALID');

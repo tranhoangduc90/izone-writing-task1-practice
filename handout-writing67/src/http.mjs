@@ -105,7 +105,12 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
         if(!match||!uuid.test(match[1]))fail('NOT_FOUND',404);
         const ref=match[1],token=req.headers.authorization?.replace(/^Bearer /,'');
         if(req.method==='GET'&&!match[2])value={session:await service.read(ref,token)};
-        else if(req.method==='PUT'&&match[2]==='responses')value={session:await service.save(ref,token,await jsonBody(req))};
+        else if(req.method==='PUT'&&match[2]==='responses'){
+          const input=await jsonBody(req);
+          value=Object.hasOwn(input??{},'displayLoss')
+            ? await service.reportSaveDisplay(ref,token,input.displayLoss)
+            : {session:await service.save(ref,token,input)};
+        }
         else if(req.method==='POST'&&match[2]==='checks'){value=await service.check(ref,token,await jsonBody(req));status=202;}
         else if(req.method==='POST'&&match[2]==='attest')value={session:await service.attest(ref,token,await jsonBody(req))};
         else if(req.method==='POST'&&match[2]==='edit')value={session:await service.revise(ref,token,await jsonBody(req))};

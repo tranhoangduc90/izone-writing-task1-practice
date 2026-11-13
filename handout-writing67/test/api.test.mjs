@@ -40,6 +40,45 @@ async function setup(t) {
   return {db,service,base,call,open,read,save,check,claim,complete,grade,internalSecret,advance:ms=>{now+=ms;}};
 }
 
+test('save diagnostics separate browser reports, committed draft changes, and older logs',async t=>{
+  const h=await setup(t),who=await h.open(),other=await h.open('s-b');
+  const field='idea1',text='Nội dung thử có dấu',operationId=crypto.randomUUID();
+  const save=async (baseVersion,requestId,value)=>h.call(`/sessions/${who.ref}/responses`,{
+    method:'PUT',token:who.token,body:{baseVersion,requestId,responses:{[field]:value}}
+  });
+  const report=async (token,displayLoss)=>h.call(`/sessions/${who.ref}/responses`,{method:'PUT',token,body:{displayLoss}});
+  assert.equal((await save(0,crypto.randomUUID(),'cũ')).status,200);
+  await h.db.query("UPDATE handout67.activity_event SET details=details-'saveEvidence' WHERE session_ref=$1 AND kind='responses_saved'",[who.ref]);
+  assert.equal((await save(1,operationId,text)).status,200);
+  const observation={operationId,version:2,field,build:'20261113-save-log-v1'};
+  assert.equal((await report(other.token,observation)).status,401);
+  assert.equal((await report(who.token,{...observation,build:text})).status,400);
+  assert.equal((await report(who.token,{...observation,operationId:crypto.randomUUID()})).body.recorded,false);
+  assert.equal((await report(who.token,{...observation,field:'idea2'})).body.recorded,false);
+  assert.equal((await report(who.token,observation)).body.recorded,true);
+  assert.equal((await report(who.token,observation)).body.recorded,false);
+  assert.equal((await h.read(who)).responses[field],text);
+  assert.equal((await h.read(who)).version,2);
+  assert.equal((await save(2,crypto.randomUUID(),'mới')).status,200);
+  const clearId=crypto.randomUUID();
+  assert.equal((await save(3,clearId,'')).status,200);
+  assert.equal((await report(who.token,{...observation,version:4,operationId:clearId})).body.recorded,false);
+  const sql=await readFile(new URL('../tools/save-diagnostics.sql',import.meta.url),'utf8');
+  const {rows}=await h.db.query(sql.replace(":'session_ref'",'$1'),[who.ref]);
+  assert.deepEqual(rows.map(row=>[row.draft_version,row.field,row.server_change,row.browser_observation,row.saved_length]),[
+    [1,field,'not_recorded',null,null],
+    [2,field,'server_updated','ui_became_empty',text.length],
+    [3,field,'server_shortened',null,3],
+    [4,field,'server_cleared',null,0]
+  ]);
+  assert.equal(rows[1].operation_id,operationId);
+  assert.equal(rows[1].frontend_build,observation.build);
+  assert.equal((await h.read(who)).responses[field],'');
+  const logged=await h.db.query("SELECT details FROM handout67.activity_event WHERE session_ref=$1",[who.ref]);
+  assert.ok(!JSON.stringify(logged.rows).includes(text));
+  assert.ok(!JSON.stringify(logged.rows).includes(who.token));
+});
+
 test('T-HP · đủ Topic, B1/A1/X1 và B2/A2/X2; vocab chỉ mở đúng ý',async t=>{
   const h=await setup(t),who=await h.open();
   for(const step of ['topic','b1','a1','x1'])await h.grade(who,step);

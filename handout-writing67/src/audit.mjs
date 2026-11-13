@@ -5,10 +5,12 @@ const iso=ms=>new Date(ms).toISOString();
 const terminal=status=>['completed','failed','superseded'].includes(status);
 // SQL tính tháng lịch trong UTC, không lấy 60 ngày hoặc phụ thuộc timezone của connection.
 const expiry="((($1::timestamptz AT TIME ZONE 'UTC') + interval '2 months') AT TIME ZONE 'UTC')";
+const saveId=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const fieldName=/^[A-Za-z][A-Za-z0-9_]{0,49}$/;
 
 // Nhận trạng thái trước/sau transaction; chỉ ghi sự kiện chuyển trạng thái có ích.
 // Lỗi SQL làm toàn bộ thay đổi rollback; không ACK giả. Không ghi token hay leaseToken.
-export async function auditChange(tx,before,after,now){
+export async function auditChange(tx,before,after,now,saveRequestId){
   async function event(key,kind,job=null,details={}){
     await tx.query(`INSERT INTO handout67.activity_event(event_key,session_ref,class_ref,student_ref,job_ref,attempt_index,section,idea_index,kind,event_at,expires_at,details)
       VALUES($2,$3,$4,$5,$6,$7,$8,$9,$10,$1::timestamptz,CASE WHEN $6::uuid IS NULL THEN ${expiry} ELSE NULL END,$11::jsonb)
@@ -20,7 +22,9 @@ export async function auditChange(tx,before,after,now){
     const operations=Object.entries(after.operations||{}).filter(([key])=>!before.operations?.[key]);
     const edited=operations.some(([,operation])=>operation.action==='edit');
     if(operations.some(([,operation])=>operation.action==='swapBodies'))await event(`${after.ref}:swap:${after.version}`,'outline_bodies_swapped',null,{version:after.version,activity:after.activity});
-    await event(`${after.ref}:save:${after.version}`,edited?'content_edited':'responses_saved',null,{version:after.version,fields,...(edited?{before:Object.fromEntries(fields.map(k=>[k,before.responses[k]])),after:Object.fromEntries(fields.map(k=>[k,after.responses[k]]))}:{})});
+    const saveEvidence=saveRequestId===undefined?{}:{saveEvidence:{version:1,operationId:saveId.test(saveRequestId)?saveRequestId:null,
+      fieldLengths:Object.fromEntries(fields.map(field=>[field,{before:(before.responses[field]||'').length,after:after.responses[field].length}]))}};
+    await event(`${after.ref}:save:${after.version}`,edited?'content_edited':'responses_saved',null,{version:after.version,fields,...saveEvidence,...(edited?{before:Object.fromEntries(fields.map(k=>[k,before.responses[k]])),after:Object.fromEntries(fields.map(k=>[k,after.responses[k]]))}:{})});
   }
   for(const [section,step] of Object.entries(after.steps))if(step.approval?.source==='student_attested_teacher_permission'&&JSON.stringify(step.approval)!==JSON.stringify(before?.steps[section]?.approval))await event(`${after.ref}:attest:${section}`,'student_attested_teacher_permission',null,{section,approval:step.approval,responses:after.responses});
   if(before&&!before.idea2Open&&after.idea2Open)await event(`${after.ref}:idea2`,'idea2_opened');
@@ -69,6 +73,20 @@ export async function auditChange(tx,before,after,now){
 // Replay nguyên phản hồi giữ một bản; phản hồi khác cùng attempt bị chặn, không ghi đè evidence.
 export function createAudit(db){
   return {
+    async reportSaveDisplay(ref,input,now){
+      const {operationId,version,field,build}=input??{};
+      if(typeof operationId!=='string'||!saveId.test(operationId)||!Number.isSafeInteger(version)||version<1||
+        typeof field!=='string'||!fieldName.test(field)||typeof build!=='string'||!/^\d{8}-save-log-v\d{1,3}$/.test(build))
+        throw Object.assign(new Error('SAVE_DISPLAY_REPORT_INVALID'),{status:400});
+      const result=await db.query(`INSERT INTO handout67.activity_event(event_key,session_ref,class_ref,student_ref,kind,event_at,expires_at,details)
+        SELECT $1,session_ref,class_ref,student_ref,'save_display_empty',$2::timestamptz,expires_at,$3::jsonb
+        FROM handout67.activity_event WHERE event_key=$4 AND session_ref=$5 AND kind='responses_saved'
+          AND expires_at>$2::timestamptz AND details->'saveEvidence'->>'operationId'=$6
+          AND (details->'saveEvidence'->'fieldLengths'->$7::text->>'after')::int>0
+        ON CONFLICT(event_key) DO NOTHING RETURNING event_key`,[`${ref}:save-display:${version}:${field}`,iso(now),
+        JSON.stringify({schemaVersion:1,operationId,version,field,build}),`${ref}:save:${version}`,ref,operationId,field]);
+      return {recorded:result.rows.length===1};
+    },
     async capture(job,attempt,body,now){
       if(typeof body.outputText!=='string'||Buffer.byteLength(body.outputText)>262144)throw Object.assign(new Error('AI_RESPONSE_TOO_LARGE'),{status:413});
       const digest=hash(body.outputText);

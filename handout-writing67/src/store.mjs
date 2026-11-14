@@ -28,7 +28,21 @@ const fullQueue="SELECT ref,payload FROM handout67.session WHERE EXISTS (SELECT 
 
 // Nhận adapter PostgreSQL có transaction; lưu/đọc lại đúng phiên, khóa trước thay đổi.
 // Không biết hoặc truy cập bảng của sản phẩm khác. Lỗi SQL trả về caller, không giả thành công.
-export function createStore(db,{clock=Date.now}={}) {
+export function createStore(db,{clock=Date.now,onQueueCommitted,onQueueError=()=>{}}={}) {
+  function notifyCommitted(ready) {
+    if (ready) void Promise.resolve().then(onQueueCommitted).catch(onQueueError);
+  }
+  async function saveChanged(tx,before,session,saveRequestId) {
+    const now=clock();
+    markDashboardActivity(before,session,now);
+    await tx.query('UPDATE handout67.session SET payload=$2::jsonb, updated_at=now() WHERE ref=$1', [before.ref,JSON.stringify(session)]);
+    await auditChange(tx,before,session,now,saveRequestId);
+    if (!onQueueCommitted) return false;
+    const ready=job=>job.status==='queued'&&(job.nextAttemptAt??0)<=now
+      &&(job.deadlineAt??Infinity)>now&&(job.tries??0)<3;
+    const previous=new Set(before.jobs.filter(ready).map(job=>job.jobRef));
+    return session.jobs.some(job=>ready(job)&&!previous.has(job.jobRef));
+  }
   return {
     audit:createAudit(db),
     async open(identity, initial) {
@@ -44,19 +58,63 @@ export function createStore(db,{clock=Date.now}={}) {
       const result = await db.query('SELECT payload FROM handout67.session WHERE ref=$1', [ref]);
       return result.rows[0]?.payload;
     },
-    async edit(ref, change, saveRequestId) {
+    async claimLesson4Share(now) {
       return db.transaction(async tx => {
+        const result = await tx.query(`SELECT payload FROM handout67.session
+          WHERE payload->>'activity'='lesson4' AND (
+            payload#>>'{practice,status}'='queued' OR
+            (payload#>>'{practice,status}'='processing' AND (payload#>>'{practice,leaseUntil}')::bigint <= $1))
+          ORDER BY updated_at,ref LIMIT 1 FOR UPDATE SKIP LOCKED`, [now]);
+        if (!result.rows[0]) return null;
+        const session = result.rows[0].payload;
+        const before = structuredClone(session);
+        const practice = session.practice;
+        const uncertain = practice.status === 'processing' && Boolean(practice.analysisStartedAt);
+        Object.assign(practice, uncertain ? {
+          status: 'needs_review', message: 'Chưa rõ kết quả kiểm. Link đã được giữ để đối soát.',
+          errorCode: 'SHARE_LEASE_EXPIRED', finishedAt: now,
+        } : {
+          status: 'processing', message: 'Đang đọc và kiểm tra hội thoại.',
+          leaseToken: randomUUID(), leaseUntil: now + 300000, startedAt: now,
+        });
+        await tx.query('UPDATE handout67.session SET payload=$2::jsonb,updated_at=now() WHERE ref=$1', [session.ref, JSON.stringify(session)]);
+        await auditChange(tx, before, session, now);
+        return uncertain ? null : session;
+      });
+    },
+    async readForPoll(ref, knownRevision, maxJobMs) {
+      // Include the row version because changes to feedback or a lease need not change draft version.
+      const result = await db.query(`
+        SELECT revision,
+          CASE WHEN revision IS DISTINCT FROM $2::text THEN payload END AS payload,
+          CASE WHEN revision = $2::text THEN (
+            SELECT min(least(
+              COALESCE((job->>'deadlineAt')::bigint, (job->>'createdAt')::bigint + $3::bigint),
+              CASE WHEN job->>'status' = 'leased' THEN (job->>'leaseUntil')::bigint END
+            ))
+            FROM jsonb_array_elements(payload->'jobs') job
+            WHERE job->>'status' IN ('queued', 'leased')
+          ) END AS next_transition_at
+        FROM (
+          SELECT payload, xmin::text || ':' || extract(epoch FROM updated_at)::text AS revision
+          FROM handout67.session WHERE ref=$1
+        ) session`, [ref, knownRevision, maxJobMs]);
+      return result.rows[0];
+    },
+    async edit(ref, change, saveRequestId) {
+      let ready=false;
+      const result=await db.transaction(async tx => {
         const result = await tx.query('SELECT payload FROM handout67.session WHERE ref=$1 FOR UPDATE', [ref]);
         if (!result.rows[0]) return undefined;
         const session = result.rows[0].payload;
         const before=structuredClone(session);
         const answer = await change(session);
         if(JSON.stringify(before)===JSON.stringify(session))return answer;
-        markDashboardActivity(before,session,clock());
-        await tx.query('UPDATE handout67.session SET payload=$2::jsonb, updated_at=now() WHERE ref=$1', [ref,JSON.stringify(session)]);
-        await auditChange(tx,before,session,clock(),saveRequestId);
+        ready=await saveChanged(tx,before,session,saveRequestId);
         return answer;
       });
+      notifyCommitted(ready);
+      return result;
     },
     async findJob(ref,sessionRef) {
       // Envelope đã có mã phiên: tìm bằng khóa chính, không đọc bài của cả lớp cho mỗi phản hồi.
@@ -70,7 +128,8 @@ export function createStore(db,{clock=Date.now}={}) {
       return result.rows.flatMap(row=>row.payload.jobs).find(job=>job.jobRef===ref);
     },
     async queue(change,select=null) {
-      return db.transaction(async tx => {
+      let ready=false;
+      const answer=await db.transaction(async tx => {
         // Một khóa riêng cho hàng của sản phẩm: hai consumer không cùng vượt trần lease.
         await tx.query('SELECT id FROM handout67.queue_lock WHERE id=1 FOR UPDATE');
         // Chụp giờ sau khi có khóa. Sweep cũ vẫn đọc đủ; claim dùng đúng phiên cần đổi.
@@ -84,9 +143,7 @@ export function createStore(db,{clock=Date.now}={}) {
           const answer = await change(sessions,scope?{now:scope.now,activeLeases}:undefined);
           for (const session of sessions) {
             if(JSON.stringify(session)===originals.get(session.ref))continue;
-            markDashboardActivity(JSON.parse(originals.get(session.ref)),session,clock());
-            await tx.query('UPDATE handout67.session SET payload=$2::jsonb, updated_at=now() WHERE ref=$1', [session.ref,JSON.stringify(session)]);
-            await auditChange(tx,JSON.parse(originals.get(session.ref)),session,clock());
+            if(await saveChanged(tx,JSON.parse(originals.get(session.ref)),session))ready=true;
           }
           if(!scope||!Array.isArray(answer)||answer.length||pass>=16||(scope.maxLeases!==null&&activeLeases>=scope.maxLeases))return answer;
           // Nếu người dùng đổi bài trong lúc chờ khóa dòng, chọn lại; không báo hàng rỗng giả.
@@ -94,6 +151,8 @@ export function createStore(db,{clock=Date.now}={}) {
           if(!pending.rows[0].waiting)return answer;
         }
       });
+      notifyCommitted(ready);
+      return answer;
     }
   };
 }

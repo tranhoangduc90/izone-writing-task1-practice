@@ -10,9 +10,11 @@ const preparationKindOf=s=>s.activity==='lesson15'&&s.preparationKind===OPINION?
 export const AGREEMENT_LEVELS=['Đồng ý hoàn toàn','Phản đối hoàn toàn','Đồng ý một phần'];
 export const OUTLINE_DIRECTIONS={agree:'Nghiêng về đồng ý',disagree:'Nghiêng về phản đối',balanced:'Cân bằng hai phía'};
 export const isBodyOutline=s=>s.outlineOnly===true;
+export const isTwoQuestionOutline=s=>isBodyOutline(s)&&s.activity==='lesson4';
 export const validOutlineDirection=value=>typeof value==='string'&&Object.hasOwn(OUTLINE_DIRECTIONS,value);
 export function outlineRelation(s){
  const steps=[s.steps?.body1_topic,s.steps?.body2_topic];
+ if(isTwoQuestionOutline(s))return steps.every(step=>step?.status==='passed')?'passed':'waiting';
  const stance=s.responses?.stance;
  if(!validOutlineDirection(stance)||steps.some(step=>step?.status!=='passed'||!validOutlineDirection(step.direction)))return 'waiting';
  const [first,second]=steps.map(step=>step.direction);

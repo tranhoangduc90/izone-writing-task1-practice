@@ -7,8 +7,11 @@ export const LEGACY_LESSON5={
  ideaHint:'Chọn tác hại bạn sẽ bàn luận trong thân bài này.',promptVersion:'lesson5-rubric-v3'
 };
 const fields=['preparationMode','preparationKind','solutionOptions','rosterScope','handoutMode','bodies','helpTitle','helpItems','description','workflowMode','workflowVersion','whyOptions','objective','activity','number','title','shortTitle','body','topic','aInstruction','ideaHint','promptVersion','classes','defaultClass'];
-export function publicLesson(lesson){return Object.fromEntries([...fields,'outlineOnly'].filter(k=>lesson[k]!==undefined).map(k=>[k,lesson[k]]));}
+import {LESSON4_SHARE_POLICY,LESSON4_TITLE,LESSON4_TOPIC} from './writing-lesson4-share.mjs';
+
+export function publicLesson(lesson){return Object.fromEntries([...fields,'outlineOnly','sharePolicy'].filter(k=>lesson[k]!==undefined).map(k=>[k,lesson[k]]));}
 export function validateLesson(value,key){
+ if((key==='lesson4'||value?.sharePolicy!==undefined)&&(key!=='lesson4'||value?.sharePolicy!==LESSON4_SHARE_POLICY||value.outlineOnly!==true||value.title!==LESSON4_TITLE||value.topic!==LESSON4_TOPIC))throw new Error('LESSON_CONFIG_INVALID');
  if(value?.outlineOnly!==undefined&&(value.outlineOnly!==true||value.handoutMode!=='two-bodies-v1'||value.preparationMode!==undefined))throw new Error('LESSON_CONFIG_INVALID');
  if(value?.rosterScope!==undefined&&value.rosterScope!=='lesson')throw new Error('LESSON_CONFIG_INVALID');
  if(value?.preparationKind!==undefined&&(!['opinion-v1','discussion-v1'].includes(value.preparationKind)||value.preparationMode!=='ideas-first-v1'||value.handoutMode!=='two-bodies-v1'||!Array.isArray(value.solutionOptions)||value.solutionOptions.length!==2||value.solutionOptions.some(x=>typeof x!=='string'||!x.trim()||x.length>120)||new Set(value.solutionOptions).size!==2))throw new Error('LESSON_CONFIG_INVALID');

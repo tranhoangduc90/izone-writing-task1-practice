@@ -14,7 +14,7 @@ async function jsonBody(req,maxBytes=32768) {
 
 // Nhận HTTP, kiểm origin/token và dữ liệu trước khi gọi nghiệp vụ; chỉ trả mã lỗi an toàn.
 // ACK Check sau transaction. Không in bài, credential hoặc token khi SQL/AI lỗi.
-export function createApi({service,teacher=null,processor=null,origins,internalSecret,trustedProxyAddresses=[],verifySharedTeacher=null,ssoBootstrapKey=null}) {
+export function createApi({service,teacher=null,processor=null,origins,internalSecret,trustedProxyAddresses=[],verifySharedTeacher=null,ssoBootstrapKey=null,writingEntryKey=null}) {
   const normalize=ip=>ip?.startsWith('::ffff:')?ip.slice(7):ip;
   const trusted=new Set(trustedProxyAddresses.map(normalize));
   function networkAddress(req){
@@ -37,7 +37,7 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
       const teacherPath=requestUrl.pathname.startsWith(prefix+'/teacher/');
       if(origin && !origins.includes(origin))fail('ORIGIN_NOT_ALLOWED',403);
       if(origin){res.setHeader('Access-Control-Allow-Origin',origin);res.setHeader('Vary','Origin');if(teacherPath)res.setHeader('Access-Control-Allow-Credentials','true');}
-      if(req.method==='OPTIONS') {res.setHeader('Access-Control-Allow-Methods','GET,POST,PUT,DELETE,OPTIONS');res.setHeader('Access-Control-Allow-Headers','Content-Type,Authorization,X-Handout67-CSRF');res.writeHead(204);res.end();return;}
+      if(req.method==='OPTIONS') {res.setHeader('Access-Control-Allow-Methods','GET,POST,PUT,DELETE,OPTIONS');res.setHeader('Access-Control-Allow-Headers','Content-Type,Authorization,X-Handout67-CSRF,If-None-Match');res.writeHead(204);res.end();return;}
       const path=requestUrl.pathname;
       const internal=path.startsWith(prefix+'/internal/');
       if(internal && !equal(req.headers.authorization,`Bearer ${internalSecret}`))fail('INTERNAL_UNAUTHORIZED',401);
@@ -86,8 +86,16 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
         }
       }else if(path===prefix+'/health'&&req.method==='GET')value={productId:PRODUCT,version:'0.1.0',status:'alive'};
       else if(path.startsWith(prefix+'/lessons/')&&req.method==='GET')value={lesson:service.lesson(path.slice((prefix+'/lessons/').length))};
-      else if(path===prefix+'/roster'&&req.method==='GET')value={classes:await service.roster(requestUrl.searchParams.get('activity')||'lesson5')};
-      else if(path===prefix+'/sessions'&&req.method==='POST'){value=await service.open(await jsonBody(req));status=201;}
+      else if(path===prefix+'/roster'&&req.method==='GET'){
+        const activity=requestUrl.searchParams.get('activity')||'lesson5';
+        if(activity==='lesson4'&&!equal(req.headers.authorization,writingEntryKey&&'Bearer '+writingEntryKey))fail('WRITING_ENTRY_REQUIRED',403);
+        value={classes:await service.roster(activity)};
+      }
+      else if(path===prefix+'/sessions'&&req.method==='POST'){
+        const input=await jsonBody(req);
+        if(input?.activity==='lesson4'&&!equal(req.headers.authorization,writingEntryKey&&'Bearer '+writingEntryKey))fail('WRITING_ENTRY_REQUIRED',403);
+        value=await service.open(input);status=201;
+      }
       else if(path===prefix+'/internal/jobs/claim'&&req.method==='POST'){await jsonBody(req);value={jobs:await service.claim()};}
       else if(internal){
         const match=path.match(/^\/api\/handout67\/v1\/internal\/jobs\/([^/]+)(\/(?:complete|response|process))?$/);
@@ -101,10 +109,21 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
         }
         else fail('NOT_FOUND',404);
       } else {
-        const match=path.match(/^\/api\/handout67\/v1\/sessions\/([^/]+)(?:\/(responses|checks|attest|edit|threads|idea2|vocabulary\/(?:[012]|all)\/retry))?$/);
+        const match=path.match(/^\/api\/handout67\/v1\/sessions\/([^/]+)(?:\/(practice|responses|checks|attest|edit|threads|idea2|vocabulary\/(?:[012]|all)\/retry))?$/);
         if(!match||!uuid.test(match[1]))fail('NOT_FOUND',404);
         const ref=match[1],token=req.headers.authorization?.replace(/^Bearer /,'');
-        if(req.method==='GET'&&!match[2])value={session:await service.read(ref,token)};
+        if(token?.startsWith('writing4-')&&!equal(req.headers['x-handout67-writing-entry'],writingEntryKey))fail('WRITING_ENTRY_REQUIRED',403);
+        if(req.method==='GET'&&!match[2]){
+          const result=await service.readForPoll(ref,token,req.headers['if-none-match']);
+          if(result.etag){
+            res.setHeader('ETag',result.etag);
+            if(origin)res.setHeader('Access-Control-Expose-Headers','ETag');
+          }
+          if(result.notModified){res.writeHead(304);res.end();return;}
+          value={session:result.session};
+        }
+        else if(req.method==='GET'&&match[2]==='practice')value={practice:await service.practice(ref,token)};
+        else if(req.method==='POST'&&match[2]==='practice'){value={practice:await service.savePractice(ref,token,await jsonBody(req))};status=['queued','processing'].includes(value.practice.status)?202:200;}
         else if(req.method==='PUT'&&match[2]==='responses'){
           const input=await jsonBody(req);
           value=Object.hasOwn(input??{},'displayLoss')

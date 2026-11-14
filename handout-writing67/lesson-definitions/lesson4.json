@@ -1,0 +1,44 @@
+{
+  "activity": "lesson4",
+  "number": 4,
+  "title": "Chuẩn bị ý tưởng · Mua sắm không cần thiết",
+  "shortTitle": "Mua sắm không cần thiết",
+  "topic": "Many people buy products that they do not really need and replace old products with new ones unnecessarily. Why do people buy things they do not need? Do you think this is a good thing?",
+  "aInstruction": "Chọn thông điệp và hai idea cho mỗi thân bài.",
+  "ideaHint": "Chọn các idea bạn cảm thấy dễ viết nhất, tránh các idea quá “mới lạ, sáng tạo, sâu sắc”.",
+  "description": "Hoàn thành đoạn chat Writing Lesson 4, rồi chốt thông điệp và hai idea cho mỗi thân bài.",
+  "outlineOnly": true,
+  "sharePolicy": "writing67-lesson4-chat-v1",
+  "workflowMode": "whole-chain-v1",
+  "workflowVersion": 1,
+  "handoutMode": "two-bodies-v1",
+  "objective": "BAX",
+  "helpTitle": "Chọn idea như thế nào?",
+  "helpItems": [
+    "Lấy ý từ cuộc trò chuyện và chọn ý dễ triển khai.",
+    "Thân bài 1 giải thích vì sao người ta mua đồ không cần thiết.",
+    "Thân bài 2 nêu việc mua đồ không cần thiết là tốt hay xấu."
+  ],
+  "bodies": [
+    {
+      "body": 1,
+      "objective": "BAX",
+      "title": "Thân bài 1",
+      "focus": "Giải thích lý do người ta mua đồ không cần thiết.",
+      "ideaHint": "Viết ngắn gọn.",
+      "topicInstruction": "Viết một câu hoàn chỉnh về lý do người ta mua đồ mình không cần.",
+      "chainInstruction": "Check thông điệp và hai idea cùng lúc.",
+      "comparisonInstruction": "Đối chiếu với câu hỏi Why."
+    },
+    {
+      "body": 2,
+      "objective": "BAX",
+      "title": "Thân bài 2",
+      "focus": "Nêu đánh giá về việc mua đồ không cần thiết.",
+      "ideaHint": "Viết ngắn gọn.",
+      "topicInstruction": "Viết một câu hoàn chỉnh nêu việc người ta mua đồ mình không cần là tốt hay xấu.",
+      "chainInstruction": "Check thông điệp và hai idea cùng lúc.",
+      "comparisonInstruction": "Đối chiếu với câu hỏi Good or Bad."
+    }
+  ]
+}

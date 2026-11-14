@@ -2,7 +2,8 @@ import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto
 import {parseAiResult} from './processor.mjs';
 import {publicThreads, changeThread} from './comments.mjs';
 import {LEGACY_LESSON5,publicLesson} from './lessons.mjs';
-import {isBodyOutline,outlineRelation,validOutlineDirection} from './workflow.mjs';
+import {isBodyOutline,isTwoQuestionOutline,outlineRelation,validOutlineDirection} from './workflow.mjs';
+import {lesson4ShareEnabled, normalizeLesson4Share, practiceStatus, queueLesson4Share} from './writing-lesson4-share.mjs';
 
 export const PRODUCT = 'handout-writing67';
 import {ORDER,FIELDS,workflowFor,isWhole,isMulti,isPrepared,isOpinion,PREPARATION,planFields,solutionsFor,preparationContext,preparationError,requiredFields,AGREEMENT_LEVELS,bodyView,bodyKey,bodyIndexOf,localKey,vocabularyKey,jobStateKey,sectionFor,ideaPassed,available,vocabEligible,vocabFields,GUIDED} from './workflow.mjs';
@@ -58,18 +59,26 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     // Lấy job cuối của từng bước/ý trước khi lọc, không hiện lỗi cũ sau lượt mới đã đạt.
     const latest=Object.fromEntries(s.jobs.map(j=>[jobStateKey(j),j]));
     const processing=Object.fromEntries(Object.entries(latest).filter(([,j])=>['queued','leased','failed'].includes(j.status)).map(([key,j])=>[key,{jobRef:j.jobRef,status:j.status,tries:j.tries,maxTries:3,createdAt:j.createdAt,deadlineAt:j.deadlineAt??j.createdAt+maxJobMs,leaseUntil:j.leaseUntil,nextAttemptAt:j.nextAttemptAt??null,error:j.error??null}]));
-    return withBodies({ref:s.ref,activity:s.activity,...(isBodyOutline(s)?{outlineOnly:true}:{}),...(isMulti(s)?{handoutMode:s.handoutMode,bodyProgress:s.bodyProgress,...(isPrepared(s)?{preparationMode:s.preparationMode,...preparationContext(s)}:{})}:{}),workflowMode:s.workflowMode||GUIDED,workflowVersion:s.workflowVersion||1,body:s.body||2,classRef:s.classRef,studentRef:s.studentRef,responses:s.responses,version:s.version,idea2Open:s.idea2Open,steps:s.steps,vocabulary:s.vocabulary,teacherComments:publicTeacherComments(s),commentThreads:publicThreads(s),commentVersion:s.commentVersion||0,submittedSections:[...new Set(s.jobs.filter(j=>j.kind==='grade').map(j=>j.section))],processing});
+    return withBodies({ref:s.ref,activity:s.activity,...(isBodyOutline(s)?{outlineOnly:true}:{}),...(isMulti(s)?{handoutMode:s.handoutMode,bodyProgress:s.bodyProgress,...(isPrepared(s)?{preparationMode:s.preparationMode,...preparationContext(s)}:{})}:{}),workflowMode:s.workflowMode||GUIDED,workflowVersion:s.workflowVersion||1,body:s.body||2,classRef:s.classRef,studentRef:s.studentRef,responses:s.responses,version:s.version,idea2Open:s.idea2Open,steps:s.steps,vocabulary:s.vocabulary,teacherComments:publicTeacherComments(s),commentThreads:publicThreads(s),commentVersion:s.commentVersion||0,submittedSections:[...new Set(s.jobs.filter(j=>j.kind==='grade').map(j=>j.section))],processing,...(isTwoQuestionOutline(s)?{practice:practiceStatus(s.practice),writingEntry:s.writingEntry}:{})});
   };
-  const issue = ref => {const content=`${ref}.${clock()+sessionMs}`;return `${content}.${sign(content)}`;};
+  const expiryDue = (session, now) => session.jobs.some(job =>
+    ['queued', 'leased'].includes(job.status) && (now >= (job.deadlineAt ?? job.createdAt + maxJobMs) ||
+      (job.status === 'leased' && job.leaseUntil <= now)));
+  const issue = (ref,writingEntry=false) => {const content=`${writingEntry?'writing4-':''}${ref}.${clock()+sessionMs}`;return `${content}.${sign(content)}`;};
   const authorize = (ref,token) => {
     if (typeof token!=='string') fail('SESSION_UNAUTHORIZED',401);
     const [owner,expiry,sig,...extra] = token.split('.');
     const expected = sign(`${owner}.${expiry}`);
-    if (extra.length || owner!==ref || !/^\d+$/.test(expiry||'') || Number(expiry)<=clock() || typeof sig!=='string' || Buffer.byteLength(sig)!==Buffer.byteLength(expected) || !timingSafeEqual(Buffer.from(sig),Buffer.from(expected))) fail('SESSION_UNAUTHORIZED',401);
+    if (extra.length || (owner!==ref&&owner!=='writing4-'+ref) || !/^\d+$/.test(expiry||'') || Number(expiry)<=clock() || typeof sig!=='string' || Buffer.byteLength(sig)!==Buffer.byteLength(expected) || !timingSafeEqual(Buffer.from(sig),Buffer.from(expected))) fail('SESSION_UNAUTHORIZED',401);
   };
-  const edit = async (ref, token, change, saveRequestId) => {
+  const edit = async (ref, token, change, saveRequestId, practiceAccess=false) => {
     authorize(ref,token);
-    const result = await store.edit(ref, change, saveRequestId);
+    const result = await store.edit(ref, s=>{
+      if(isTwoQuestionOutline(s)&&!practiceAccess&&
+        (!lesson4ShareEnabled(lessonFor(s.activity))||s.practice?.status!=='accepted'||s.practice.policy!==lessonFor(s.activity).sharePolicy))
+        fail('PRACTICE_NOT_ACCEPTED',422);
+      return change(s);
+    }, saveRequestId);
     if (!result) fail('SESSION_NOT_FOUND',404);
     return result;
   };
@@ -121,7 +130,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
   function resultValid(job,result) {
     if (!object(result)) return false;
     if(job.kind==='grade'){
-      const outline=isBodyOutline(job);
+      const outline=isBodyOutline(job)&&!isTwoQuestionOutline({...job,activity:job.snapshot?.activity});
       const keys=outline?['resultStatus','feedback','direction']:['resultStatus','feedback'];
       return ['passed','needs_revision'].includes(result.resultStatus)&&string(result.feedback)&&result.feedback.trim().split(/\s+/).length<=(isWhole(job)?100:150)&&Object.keys(result).every(k=>keys.includes(k))
         &&(!outline||validOutlineDirection(result.direction)||result.resultStatus==='needs_revision'&&result.direction==='unclear');
@@ -157,15 +166,49 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
       if (!object(input) || !id(input.activity) || !id(input.classRef) || !id(input.studentRef)) fail('IDENTITY_INVALID');
       const rows=await api.roster(input.activity);
       if (!rows.some(c=>c.classRef===input.classRef && c.students.some(s=>s.studentRef===input.studentRef))) fail('STUDENT_OUT_OF_SCOPE',403);
-      const key=JSON.stringify([input.activity,input.classRef,input.studentRef]);
       const lesson=lessonFor(input.activity),policy=workflowFor(lesson);
-      const s=await store.open(key,ref=>({ref,activity:input.activity,...(isBodyOutline(lesson)?{outlineOnly:true}:{}),handoutMode:lesson.handoutMode,...(isPrepared(lesson)?{preparationMode:lesson.preparationMode,...preparationContext(lesson)}:{}),...(isMulti(lesson)?{bodyProgress:{1:{idea2Open:false},2:{idea2Open:false}}}:{}),workflowMode:lesson.workflowMode||GUIDED,workflowVersion:1,body:lesson.body,classRef:input.classRef,studentRef:input.studentRef,responses:Object.fromEntries([...Object.values(policy.fields).flat(),...(isBodyOutline(lesson)?['stance']:[])].map(k=>[k,''])),version:0,idea2Open:false,steps:Object.fromEntries(policy.order.map(k=>[k,{status:'draft',history:[],error:null}])),jobs:[],vocabulary:{},saves:{}}));
-      return {session:publicSession(s),token:issue(s.ref)};
+      const writingEntry=isTwoQuestionOutline(lesson)?input.writingEntry:undefined;
+      if(isTwoQuestionOutline(lesson)&&(!object(writingEntry)||!/^hw-k67-writing-lesson4-\d+$/.test(writingEntry.assignmentId||'')||
+        !Number.isSafeInteger(writingEntry.contentVersion)||writingEntry.contentVersion<1))fail('WRITING_ENTRY_REQUIRED',403);
+      const key=JSON.stringify([input.activity,input.classRef,input.studentRef,...(writingEntry?[writingEntry.assignmentId,writingEntry.contentVersion]:[])]);
+      const s=await store.open(key,ref=>({ref,activity:input.activity,...(writingEntry?{writingEntry:{assignmentId:writingEntry.assignmentId,contentVersion:writingEntry.contentVersion}}:{}),...(isBodyOutline(lesson)?{outlineOnly:true}:{}),handoutMode:lesson.handoutMode,...(isPrepared(lesson)?{preparationMode:lesson.preparationMode,...preparationContext(lesson)}:{}),...(isMulti(lesson)?{bodyProgress:{1:{idea2Open:false},2:{idea2Open:false}}}:{}),workflowMode:lesson.workflowMode||GUIDED,workflowVersion:1,body:lesson.body,classRef:input.classRef,studentRef:input.studentRef,responses:Object.fromEntries([...Object.values(policy.fields).flat(),...(isBodyOutline(lesson)&&!isTwoQuestionOutline(lesson)?['stance']:[])].map(k=>[k,''])),version:0,idea2Open:false,steps:Object.fromEntries(policy.order.map(k=>[k,{status:'draft',history:[],error:null}])),jobs:[],vocabulary:{},saves:{}}));
+      return {session:publicSession(s),token:issue(s.ref,isTwoQuestionOutline(s))};
     },
     async read(ref,token) {
       authorize(ref,token);const s=await store.read(ref);if(!s)fail('SESSION_NOT_FOUND',404);
-      if(s.jobs.some(j=>['queued','leased'].includes(j.status)&&(clock()>=(j.deadlineAt??j.createdAt+maxJobMs)||(j.status==='leased'&&j.leaseUntil<=clock()))))return edit(ref,token,current=>{expire(current);return publicSession(current);});
+      if(expiryDue(s,clock()))return edit(ref,token,current=>{expire(current);return publicSession(current);},undefined,true);
       return publicSession(s);
+    },
+    async readForPoll(ref, token, ifNoneMatch) {
+      authorize(ref, token);
+      const prefix = `W/"handout67-session-v1:${ref}:`;
+      const knownRevision = typeof ifNoneMatch === 'string' && ifNoneMatch.startsWith(prefix) && ifNoneMatch.endsWith('"')
+        ? ifNoneMatch.slice(prefix.length, -1) : null;
+      const row = await store.readForPoll(ref, knownRevision, maxJobMs);
+      if (!row) fail('SESSION_NOT_FOUND', 404);
+      const etag = `${prefix}${row.revision}"`;
+      const now = clock();
+      const needsExpiry = row.payload
+        ? expiryDue(row.payload, now)
+        : row.next_transition_at !== null && Number(row.next_transition_at) <= now;
+      // Expiry can change the stored row during the read. The next poll can obtain its new ETag.
+      if (needsExpiry) return {session:await edit(ref, token, current => {expire(current);return publicSession(current);},undefined,true)};
+      if (!row.payload) return {etag, notModified:true};
+      return {etag, session:publicSession(row.payload)};
+    },
+    async practice(ref,token){
+      authorize(ref,token);
+      const s=await store.read(ref);
+      if(!s||!isTwoQuestionOutline(s)||!lesson4ShareEnabled(lessonFor(s.activity)))fail('PRACTICE_NOT_FOUND',404);
+      return practiceStatus(s.practice);
+    },
+    async savePractice(ref,token,input){
+      if(!object(input)||!id(input.requestId))fail('SHARE_REQUEST_INVALID');
+      const url=normalizeLesson4Share(input.url);
+      return edit(ref,token,s=>{
+        if(!isTwoQuestionOutline(s)||!lesson4ShareEnabled(lessonFor(s.activity)))fail('PRACTICE_NOT_FOUND',404);
+        return queueLesson4Share(s,{url,requestId:input.requestId},clock());
+      },undefined,true);
     },
     async save(ref,token,input) {
       if (!object(input) || !Number.isSafeInteger(input.baseVersion) || !id(input.requestId) || !object(input.responses)) fail('SAVE_INVALID');
@@ -174,7 +217,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
         if(s.saves[input.requestId]) {if(s.saves[input.requestId]!==signature)fail('REQUEST_ID_CONFLICT',409);return publicSession(s);}
         if(s.version!==input.baseVersion)fail('VERSION_CONFLICT',409);
         for(const [field,value] of Object.entries(input.responses)) {
-          if(isBodyOutline(s)&&field==='stance'){
+          if(isBodyOutline(s)&&!isTwoQuestionOutline(s)&&field==='stance'){
             if(value!==''&&!validOutlineDirection(value))fail('OUTLINE_STANCE_INVALID');
             s.responses.stance=value;continue;
           }
@@ -211,7 +254,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
         if(prior) {if(prior.section!==input.section || prior.requestHash!==hash(input))fail('REQUEST_ID_CONFLICT',409);return {jobRef:prior.jobRef,session:publicSession(s)};}
         if(s.version!==input.baseVersion)fail('VERSION_CONFLICT',409);
         if(!available(s,input.section) || ['passed','pending'].includes(s.steps[input.section].status))fail('STEP_LOCKED',409);
-        if(isBodyOutline(s)&&!validOutlineDirection(s.responses.stance))fail('OUTLINE_STANCE_INVALID');
+        if(isBodyOutline(s)&&!isTwoQuestionOutline(s)&&!validOutlineDirection(s.responses.stance))fail('OUTLINE_STANCE_INVALID');
         if(requiredFields(s,input.section).some(k=>!string(s.responses[k])))fail('EMPTY_RESPONSE');
         if(isPrepared(s)){const error=preparationError(s);if(error)fail(error);}
         const n=input.section==='outline'?0:localKey(input.section)==='topic'?null:Number(input.section.at(-1));
@@ -337,7 +380,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
           const step=s.steps[j.section];step.status=input.result.resultStatus==='passed'?'passed':'revision';step.error=null;
           step.history.push({number:step.history.length+1,status:step.status,feedback:input.result.feedback,snapshot:Object.fromEntries(workflowFor(s).fields[j.section].map(k=>[k,j.snapshot.responses[k]])),jobRef:j.jobRef});
           if(step.status==='passed')pass(s,j.section,'ai');
-          if(isBodyOutline(s))step.direction=input.result.direction;
+          if(isBodyOutline(s)&&!isTwoQuestionOutline(s))step.direction=input.result.direction;
         } else {
           if(!vocabEligible(s,j.ideaIndex,j.bodyIndex)||s.vocabulary[vocabularyKey(s,j.ideaIndex,j.bodyIndex)]?.jobRef!==j.jobRef)fail('VOCAB_STALE',409);
           s.vocabulary[vocabularyKey(s,j.ideaIndex,j.bodyIndex)]={status:'ready',jobRef:j.jobRef,sourceHash:j.snapshotHash,groups:input.result};

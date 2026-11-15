@@ -100,7 +100,7 @@ test('both SW dashboards enter the real native session immediately and carry pen
   const origin = tls ? `https://pages.sw-fixture.test:${server.address().port}` : `http://127.0.0.1:${server.address().port}`;
   const apiOrigin = tls ? `https://api.izone-fixture.test:${server.address().port}` : origin;
   const origins = new Set([origin]);
-  const registry = createSwRosterRegistry({ pool: adapt(registryDb), invitationKey: 'fixture-only-key-'.repeat(3) });
+  const registry = createSwRosterRegistry({ pool: adapt(registryDb) });
   let failPeer = true;
   const peerProjection = createSwRosterProjection({ pool: twoPool, product: 'task2' });
   const peerApply = peerProjection.apply;
@@ -112,7 +112,7 @@ test('both SW dashboards enter the real native session immediately and carry pen
   };
   const makeRoster = (product, projection) => createSwRosterApi({
     z, product, registry, projection, allowedOrigins: origins,
-    allowAdds: true, cookieSecure: Boolean(tls), log: () => {},
+    allowAdds: true, log: () => {},
   });
   const task1Roster = makeRoster('task1', createSwRosterProjection({ pool: one.pool, product: 'task1' }));
   const task2Roster = makeRoster('task2', peerProjection);
@@ -194,6 +194,8 @@ test('both SW dashboards enter the real native session immediately and carry pen
   const studentContext = await browserContext(null, 390);
   const teacherPage = await teacherContext.newPage();
   const studentPage = await studentContext.newPage();
+  const claims = [];
+  studentContext.on('request', req => { if (req.url().endsWith('/class-members/claim')) claims.push(req.url()); });
   const task2SaveRequests = [];
   teacherPage.on('request', req => {
     if (req.method() === 'POST' && req.url().endsWith('/' + currentTask2 + '/class-members')) {
@@ -248,26 +250,24 @@ test('both SW dashboards enter the real native session immediately and carry pen
       await form.getByRole('textbox', { name: 'Họ và tên' }).fill(displayName);
       await form.getByRole('button', { name: 'Lưu', exact: true }).click();
     }
-    const link = teacherPage.getByRole('link', { name: 'Mở liên kết vào bài' });
+    const link = teacherPage.getByRole('link', { name: 'Mở handout của lớp' });
+    await teacherPage.getByText('Học viên có thể vào handout của lớp, chọn tên và làm bài ngay.').waitFor();
     await link.waitFor();
-    assert.match(await teacherPage.locator('.sw-roster-dialog [role=status]').innerText(), /Có thể làm bài ngay/u);
     return link.getAttribute('href');
   }
 
   const firstLink = await addName(oneTeacher, 'Học viên thử', true);
   const firstOpen = studentPage.waitForResponse(resp => resp.url().endsWith('/api/v1/sessions') && resp.status() === 201);
+  assert.equal(new URL(firstLink).hash, '');
   await studentPage.goto(firstLink);
+  const [firstMember] = await registry.listActive('999001');
+  await studentPage.locator('#student-name').selectOption(firstMember.studentRef);
+  await studentPage.locator('#identity-form button[type=submit]').click();
+  await studentPage.locator('#confirm-open').click();
   await studentPage.locator('#workspace').waitFor({ state: 'visible' });
   const { session: first } = await (await firstOpen).json();
   assert.notEqual(first.studentRef, one.studentRef);
-  assert.doesNotMatch(studentPage.url(), /sw-invite/u);
-  if (tls) {
-    const cookies = await studentContext.cookies(apiOrigin);
-    const credential = cookies.find(item => item.name === '__Host-izone_sw_' + first.studentRef);
-    assert.equal(credential?.httpOnly, true);
-    assert.equal(credential?.secure, true);
-    assert.ok(credential.partitionKey);
-  }
+  assert.equal((await studentContext.cookies(apiOrigin)).some(item => /izone_sw_/u.test(item.name)), false);
   assert.equal((await one.service.sessionDetails(one.sessionRef)).overview, 'Bản cũ thuộc người khác');
   await task2Roster.runSweep();
   const partial = (await registry.listDelivery('999001')).find(item => item.product === 'task2');
@@ -292,7 +292,9 @@ test('both SW dashboards enter the real native session immediately and carry pen
   await oneLater.locator('#workspace').waitFor({ state: 'visible' });
   assert.equal((await (await laterOpen1).json()).session.studentRef, first.studentRef);
 
-  const twoLater = await studentContext.newPage();
+  const newDevice = await browserContext(null, 390);
+  const twoLater = await newDevice.newPage();
+  newDevice.on('request', req => { if (req.url().endsWith('/class-members/claim')) claims.push(req.url()); });
   await twoLater.goto(entry('sw-task2-writing', 'index', futureTask2, later2));
   await twoLater.locator('#identity-person').selectOption(first.studentRef);
   const laterOpen2 = twoLater.waitForResponse(resp => resp.url().endsWith('/lesson9/sessions') && resp.request().method() === 'POST');
@@ -308,7 +310,18 @@ test('both SW dashboards enter the real native session immediately and carry pen
   assert.equal(task2SaveRequests.length, 2);
   assert.equal(task2SaveRequests[0], task2SaveRequests[1]);
   const secondOpen = studentPage.waitForResponse(resp => resp.url().endsWith('/lesson9/sessions') && resp.status() === 201);
+  assert.equal(new URL(secondLink).hash, '');
   await studentPage.goto(secondLink);
+  await studentPage.locator('#identity-person').waitFor();
+  // A student already on the old invitation URL can recover with an ordinary reload.
+  await studentPage.evaluate(url => history.replaceState(history.state, '', url + '#sw-invite=expired-fixture'), secondLink);
+  await studentPage.reload();
+  const secondMember = (await registry.listActive('999001')).find(item => item.displayName === 'Người học mới Task 2');
+  await studentPage.locator('#identity-person').selectOption(secondMember.studentRef);
+  await studentPage.getByRole('button', { name: /Tiếp tục/u }).click();
+  await studentPage.getByRole('button', { name: /Đúng là tôi/u }).click();
+  assert.doesNotMatch(studentPage.url(), /sw-invite/u);
+  assert.deepEqual(claims, []);
   await studentPage.locator('#save-state').waitFor();
   const { session: second } = await (await secondOpen).json();
   assert.notEqual(second.studentRef, first.studentRef);

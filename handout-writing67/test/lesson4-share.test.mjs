@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
+import https from 'node:https';
+import { EventEmitter } from 'node:events';
+import { Readable } from 'node:stream';
+import { readSpeakingShare } from '../src/vendor/chatgpt-share-reader.mjs';
 import { PGlite } from '@electric-sql/pglite';
 import { createApi } from '../src/http.mjs';
 import { createService } from '../src/service.mjs';
@@ -33,6 +37,17 @@ const complete = {
 const shareUrl = id => 'https://chatgpt.com/share/00000000-0000-4000-8000-00000000000' + id;
 
 test('Share unlocks only its Writing session and gates the native HTTP save and check', async t => {
+  const rows = [{ frame: { id: 'opening', role: 'user', text: '', fileAttachments: [{ kind: 'file' }] } }];
+  t.mock.method(https, 'get', (url, options, callback) => {
+    assert.equal(url, shareUrl(5));
+    const response = Readable.from([Buffer.from(`<!doctype html><script id="octane-conversation-transcript">${JSON.stringify({ rows })}</script>`)]);
+    Object.assign(response, { statusCode: 200, headers: {} });
+    callback(response);
+    return new EventEmitter();
+  });
+  const fetchHttp = globalThis.fetch;
+  t.mock.method(globalThis, 'fetch', (url, options) => String(url).startsWith('http://127.0.0.1:')
+    ? fetchHttp(url, options) : Promise.resolve(new Response('{}')));
   const db = new PGlite();
   for (const file of ['001-initial.sql', '002-activity-log.sql']) {
     await db.exec(await readFile(new URL('../db/' + file, import.meta.url), 'utf8'));
@@ -48,6 +63,7 @@ test('Share unlocks only its Writing session and gates the native HTTP save and 
     store,
     readShare: async url => {
       if (url === shareUrl(4)) throw Error('reader unavailable');
+      if (url === shareUrl(5)) return readSpeakingShare(url);
       return { messages: complete.messages.slice(0, url === LESSON4_STARTER ? 2 : url === shareUrl(2) ? 10 : 12) };
     },
     analyze: async ({ messages }) => ({ milestones: lesson4Stages.slice(0, messages.length === 9 ? 4 : 6).map((stage, i) => ({
@@ -85,10 +101,15 @@ test('Share unlocks only its Writing session and gates the native HTTP save and 
   assert.equal((await send('/responses', draft, 'PUT')).body.error, 'PRACTICE_NOT_ACCEPTED');
   assert.equal((await send('/checks', check)).body.error, 'PRACTICE_NOT_ACCEPTED');
   assert.equal((await call(path + '/practice', { token: other.token })).status, 401);
-  for (const [url, expected] of [[LESSON4_STARTER, 'rejected'], [shareUrl(2), 'rejected'], [shareUrl(4), 'retry'], [shareUrl(3), 'accepted']]) {
+  for (const [url, expected, message] of [[LESSON4_STARTER, 'rejected'], [shareUrl(2), 'rejected'],
+    [shareUrl(4), 'retry', 'Chưa đọc được link. Kiểm tra link chia sẻ công khai rồi thử lại.'],
+    [shareUrl(5), 'retry', 'Chưa đọc được nội dung đoạn chat của em vì nó khởi đầu bằng một tệp. Em hãy quay lại nhấn Mở bài luyện và chat ngay trong đoạn chat vừa mở. Nếu vẫn không được, hãy gửi link cho giảng viên kèm theo ảnh chụp màn hình để được hỗ trợ.'],
+    [shareUrl(3), 'accepted']]) {
     assert.equal((await send('/practice', { url, requestId: 'try-' + url.at(-1) })).status, 202);
     assert.equal(await worker(), true);
-    assert.equal((await get('/practice')).body.practice.status, expected);
+    const { practice } = (await get('/practice')).body;
+    assert.equal(practice.status, expected);
+    if (message) assert.equal(practice.message, message);
   }
   assert.equal((await call('/sessions/' + other.session.ref, { token: other.token })).body.session.practice.status, 'not_started');
   assert.equal((await send('/responses', draft, 'PUT')).status, 200);
@@ -111,6 +132,9 @@ test('Share unlocks only its Writing session and gates the native HTTP save and 
   assert.equal(Object.keys(restored.responses).length, 6);
   const events = (await db.query("SELECT kind,details FROM handout67.activity_event WHERE session_ref=$1 AND kind LIKE 'share_%'", [session.ref])).rows;
   assert.ok(['share_accepted', 'share_rejected', 'share_retry'].every(kind => events.some(event => event.kind === kind)));
+  const classified = events.filter(event => event.details.readDetail === 'FIRST_USER_ATTACHMENT_ONLY');
+  assert.equal(classified.length, 1);
+  assert.equal(classified[0].details.error, 'SHARE_READ_FAILED');
   assert.ok(!JSON.stringify(events).includes('chatgpt.com'));
   const changed = await send('/responses', { requestId: 'edit-1', baseVersion: 2, responses: { body1_idea1: 'Mua sắm để cải thiện tâm trạng' } }, 'PUT');
   assert.equal(changed.body.session.steps.body1_topic.status, 'revision');

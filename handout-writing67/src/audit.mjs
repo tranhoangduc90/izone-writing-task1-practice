@@ -23,6 +23,7 @@ export async function auditChange(tx,before,after,now,saveRequestId){
       practiceId:practice.id,policy:practice.policy,requestId:practice.requestId,
       durationMs:practice.finishedAt===undefined?null:practice.finishedAt-practice.queuedAt,
       stage:practice.stage??null,error:practice.errorCode??null,
+      ...(practice.readDetail ? { readDetail:practice.readDetail } : {}),
     });
   }
   if(before&&JSON.stringify(before.responses)!==JSON.stringify(after.responses)){

@@ -71,7 +71,12 @@ test('Share unlocks only its Writing session and gates the native HTTP save and 
     assert.equal(response.status, 201);
     return response.body;
   };
+  const readProgress=(studentRef='a',contentVersion=1,auth=entryKey)=>call('/integrations/homework/lesson4/progress',{
+    method:'POST',token:auth,body:{classRef:'IC9999',studentRef,assignmentId:'hw-k67-writing-lesson4-9999',contentVersion},
+  });
   const { session, token } = await open('a');
+  assert.equal((await readProgress('a',1,token)).status,403);
+  assert.equal((await readProgress('a',2)).body.progress,null);
   assert.equal((await call('/sessions', { method: 'POST', body: { activity: 'lesson4', classRef: 'IC9999', studentRef: 'a' } })).status, 403);
   const other = await open('b');
   const path = '/sessions/' + session.ref;
@@ -96,6 +101,8 @@ test('Share unlocks only its Writing session and gates the native HTTP save and 
   const first = (await service.claim()).find(job => job.section === 'body1_topic');
   assert.ok(first);
   await service.complete({ ...first, result: { resultStatus: 'passed', feedback: 'Hai ý giải thích đúng lý do.' } });
+  assert.deepEqual((await readProgress()).body.progress.bodies.map(b=>b.passed),[true,false]);
+  assert.deepEqual((await readProgress('b')).body.progress.bodies.map(b=>b.passed),[false,false]);
   const secondDraft = { requestId: 'save-2', baseVersion: 1, responses: {
     body2_topicSentence: 'Việc mua quá nhiều có hại vì gây lãng phí và thêm rác.',
     body2_idea1: 'Tốn tiền cho đồ ít dùng', body2_idea2: 'Vứt đồ cũ còn dùng được',
@@ -105,6 +112,10 @@ test('Share unlocks only its Writing session and gates the native HTTP save and 
   const second = (await service.claim()).find(job => job.section === 'body2_topic');
   assert.ok(second);
   await service.complete({ ...second, result: { resultStatus: 'passed', feedback: 'Hai ý làm rõ đánh giá tiêu cực.' } });
+  const progress=(await readProgress()).body.progress;
+  assert.deepEqual(progress.bodies.map(b=>b.passed),[true,true]);
+  assert.deepEqual(progress.bodies.map(b=>b.jobRef),[first.jobRef,second.jobRef]);
+  assert.deepEqual(Object.keys(progress).sort(),['accepted','bodies','ref','version']);
   const restored = (await get('')).body.session;
   assert.equal(restored.completed, true);
   assert.equal(restored.responses.body1_idea1, draft.responses.body1_idea1);

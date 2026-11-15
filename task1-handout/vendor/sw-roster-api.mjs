@@ -11,7 +11,7 @@ function caught(handler) {
 }
 
 export function createSwRosterApi({
-  z, product, registry, projection, allowedOrigins, allowAdds = false, cookieSecure = true,
+  z, product, registry, projection, allowedOrigins, allowAdds = false,
   log = event => console.info(JSON.stringify(event)), supportsActivity = () => true,
 }) {
   const uuid = z.uuid();
@@ -22,18 +22,9 @@ export function createSwRosterApi({
     requestId: uuid,
     duplicateConfirmed: z.boolean().optional(),
   }).strict();
-  const reissueInput = z.object({ classRef: uuid, studentRef: uuid, requestId: uuid }).strict();
-  const claimInput = z.object({ classRef: uuid, token: z.string().length(43) }).strict();
+  const retryInput = z.object({ classRef: uuid, studentRef: uuid }).strict();
   let sweep;
   const activitySyncs = new Map();
-  const cookieName = ref => `${cookieSecure ? '__Host-' : ''}izone_sw_${ref}`;
-
-  function credentialFor(req, member) {
-    const prefix = `${cookieName(member.studentRef)}=`;
-    return (req.get('cookie') || '').split(';').map(part => part.trim())
-      .find(part => part.startsWith(prefix))?.slice(prefix.length);
-  }
-
   function requireOrigin(req, _res, next) {
     if (allowedOrigins.has(req.get('origin')) && req.get('x-izone-csrf') === '1') return next();
     next(error(403, 'SW_ROSTER_ORIGIN_DENIED', 'Trang này không được phép gửi thao tác thêm học viên.'));
@@ -119,13 +110,18 @@ export function createSwRosterApi({
     };
   }
 
-  async function requireLearner(req, member) {
-    if (!member.open || !await registry.canAccess({ ...member, credential: credentialFor(req, member) })) {
-      throw error(401, 'SW_ROSTER_ACCESS_REQUIRED', 'Hãy mở liên kết giảng viên đã gửi để vào đúng hồ sơ của bạn.');
+  async function requireLearner(member, opening = false) {
+    const allowed = member.open && Boolean(await registry.findActive(member));
+    if (opening) {
+      emit('sw_roster_open_access', { erpClassId: member.erpClassId,
+        studentRef: member.studentRef, allowed });
+    }
+    if (!allowed) {
+      throw error(401, 'SW_ROSTER_ACCESS_REQUIRED', 'Hồ sơ này hiện chưa có quyền làm bài trong lớp.');
     }
   }
 
-  function install(app, { teacher, assertTeacher, getRoster, writeLimit }) {
+  function install(app, { teacher, assertTeacher, getRoster, writeLimit, disableStudentOpens = false }) {
     const activity = '/api/v1/admin/activities/:slug/class-members';
     const opens = ['/api/v1/sessions', '/api/v1/lesson-sessions', '/api/v1/lesson9/sessions'];
     const sessions = opens.map(path => `${path}/:swRef`);
@@ -136,15 +132,15 @@ export function createSwRosterApi({
       return scopeFor(activitySlug, classRef);
     }
 
-    async function save(req, res, mode) {
-      if (!allowAdds && mode === 'add') {
+    async function save(req, res, retry = false) {
+      if (!allowAdds && !retry) {
         throw error(503, 'SW_ROSTER_ADD_UNAVAILABLE', 'Thao tác thêm học viên đang tạm dừng.');
       }
-      const input = (mode === 'add' ? addInput : reissueInput).parse(req.body);
+      const input = (retry ? retryInput : addInput).parse(req.body);
       const scope = await authorized(req, input.classRef);
       const actor = req.reviewer.email.trim().toLowerCase();
       let result;
-      if (mode === 'add') {
+      if (!retry) {
         const { key: nameKey } = normalizeSwRosterName(input.displayName);
         const { classes } = await getRoster(scope.activitySlug);
         const existingName = classes.find(group => group.classRef === scope.classRef)?.students
@@ -152,7 +148,9 @@ export function createSwRosterApi({
             .toLocaleLowerCase('vi') === nameKey);
         result = await registry.add({ ...input, actor, scope, existingName });
       } else {
-        result = await registry.reissue({ ...input, actor, scope });
+        const member = await registry.findActive({ ...scope, studentRef: input.studentRef });
+        if (!member) throw error(404, 'SW_ROSTER_MEMBER_NOT_FOUND', 'Không tìm thấy hồ sơ còn quyền học trong lớp.');
+        result = { member, idempotent: true };
       }
 
       const fields = { requestId: input.requestId, erpClassId: scope.erpClassId,
@@ -183,29 +181,15 @@ export function createSwRosterApi({
         delivery: delivery.filter(item => item.studentRef === member.studentRef),
       })) });
     }));
-    app.post(activity, requireOrigin, writeLimit, teacher, caught((req, res) => save(req, res, 'add')));
-    app.post(`${activity}/invitation`, requireOrigin, writeLimit, teacher, caught((req, res) => save(req, res, 'reissue')));
-    app.post('/api/v1/activities/:slug/class-members/claim', requireOrigin, writeLimit, caught(async (req, res) => {
-      const input = claimInput.parse(req.body);
-      const scope = await scopeFor(slug.parse(req.params.slug), input.classRef);
-      const pending = await registry.invitationMember({ scope, token: input.token });
-      if (!pending) throw error(401, 'SW_ROSTER_INVITATION_INVALID', 'Liên kết vào bài không hợp lệ hoặc đã được dùng.');
-      if (!(await projection.managedStudent(scope.classRef, pending.studentRef))?.open) {
-        throw error(503, 'SW_ROSTER_READBACK_PENDING', 'Chưa xác nhận được danh sách ở bài này.');
-      }
-      const { member, credential } = await registry.redeem({ scope, token: input.token });
-      res.cookie(cookieName(member.studentRef), credential, {
-        httpOnly: true, secure: cookieSecure, sameSite: cookieSecure ? 'none' : 'lax',
-        partitioned: cookieSecure, path: '/', maxAge: 365 * 24 * 60 * 60 * 1000,
-      });
-      res.json({ ok: true, studentRef: member.studentRef, displayName: member.displayName, classRef: scope.classRef });
-    }));
+    app.post(activity, requireOrigin, writeLimit, teacher, caught((req, res) => save(req, res)));
+    app.post(`${activity}/retry`, requireOrigin, writeLimit, teacher, caught((req, res) => save(req, res, true)));
 
     app.post(opens, caught(async (req, _res, next) => {
+      if (disableStudentOpens) throw error(503, 'SW_ROSTER_CANARY_READ_ONLY', 'Phiên kiểm chỉ đọc.');
       const { classRef, studentRef } = req.body || {};
       if (uuid.safeParse(classRef).success && uuid.safeParse(studentRef).success) {
         const member = await projection.managedStudent(classRef, studentRef);
-        if (member) await requireLearner(req, member);
+        if (member) await requireLearner(member, true);
       }
       next();
     }));
@@ -214,15 +198,17 @@ export function createSwRosterApi({
         if (!uuid.safeParse(req.params.swRef).success) return next();
         const member = await projection.ownerOf(kind, req.params.swRef);
         if (!member) return next();
-        if (kind === 'session' && req.method === 'GET' && /^\/draft-result\/?$/iu.test(req.path) &&
-            !credentialFor(req, member)) {
-          // Existing teacher dashboards use the student draft-result URL with a teacher session.
-          return teacher(req, res, err => {
-            if (err) return next(err);
+        try {
+          await requireLearner(member);
+        } catch (err) {
+          if (err.code !== 'SW_ROSTER_ACCESS_REQUIRED' || kind !== 'session' ||
+              req.method !== 'GET' || !/^\/draft-result\/?$/iu.test(req.path)) throw err;
+          // Teachers with access may still read the saved result of a revoked class member.
+          return teacher(req, res, authError => {
+            if (authError) return next(authError);
             void assertTeacher(req, member).then(() => next(), next);
           });
         }
-        await requireLearner(req, member);
         next();
       });
     }

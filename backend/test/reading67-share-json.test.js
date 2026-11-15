@@ -31,7 +31,21 @@ test('Reading Share reads an Octane transcript with a pending empty final assist
  assert.equal(direct.mock.callCount(), 1);
  assert.equal(fallback.mock.callCount(), 0);
 
+ const file = {kind: 'file', name: 'huong-dan', key: 'test-file'};
+ const attachmentOnly = {frame: {...rows[0].frame, text: '', fileAttachments: [file]}};
+ activeRows = [attachmentOnly, ...rows.slice(1)];
+ await assert.rejects(() => readSpeakingShare(share), {
+  shareReadReason: 'OCTANE_MESSAGE_INVALID',
+  shareReadDetail: 'FIRST_USER_ATTACHMENT_ONLY',
+ });
+ activeRows = [rows[0], rows[1], {...attachmentOnly, frame: {...attachmentOnly.frame, id: '3'}}];
+ await assert.rejects(() => readSpeakingShare(share), error =>
+  error.shareReadReason === 'OCTANE_MESSAGE_INVALID' && error.shareReadDetail === undefined);
+ activeRows = [{frame: {...rows[0].frame, fileAttachments: [file]}}, ...rows.slice(1)];
+ assert.equal((await readSpeakingShare(share)).messages[0].text, question);
+
  for (const invalidRows of [
+  [{frame: {...rows[0].frame, text: '', fileAttachments: []}}, ...rows.slice(1)],
   [...rows, {...pending, source: {markdown: '', dil: {...pending.source.dil, status: 'complete'}}}],
   [...rows.slice(0, 2), pending, rows[2]],
   [...rows, {...pending, frame: {role: 'assistant'}}],

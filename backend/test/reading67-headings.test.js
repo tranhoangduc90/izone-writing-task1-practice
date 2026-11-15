@@ -165,6 +165,29 @@ test('Mercy Rule phát lại snapshot Share riêng đã từng bị từ chối'
 async function database(t){const db=new PGlite();await db.exec('CREATE SCHEMA reading_listening67');await db.exec(await fs.readFile(new URL('../../docs/migrations/2026-10-29-reading67-share-practice.sql',import.meta.url),'utf8'));t.after(()=>db.close());return db;}
 const a={ownerId:'11111111-1111-4111-8111-111111111111',courseId:'1293',code:'67-reading-the-desolenator',version:'v1'},b={...a,ownerId:'22222222-2222-4222-8222-222222222222'};
 const url=id=>'https://chatgpt.com/share/'+id;
+test('Chỉ link mở đầu bằng tệp nhận hướng dẫn riêng qua trạng thái Share',async t=>{
+ const db=await database(t);
+ const practice=createReadingSharePractice({db,content:{code:a.code,version:a.version,practice:{target:'Nén cấp 1'}},
+  readShare:async link=>{
+   const error=new Error('Share could not be read');
+   error.shareReadReason='OCTANE_MESSAGE_INVALID';
+   if(link===url(a.ownerId))error.shareReadDetail='FIRST_USER_ATTACHMENT_ONLY';
+   throw error;
+  },verify:async()=>assert.fail('Share đọc lỗi không được gọi bộ kiểm bài luyện')});
+ const {id}=await practice.save(a,{url:url(a.ownerId),requestId:randomUUID()});
+ await practice.save(b,{url:url(b.ownerId),requestId:randomUUID()});
+ await practice.once();await practice.once();
+ const notice='Chưa đọc được nội dung đoạn chat của em vì nó khởi đầu bằng một tệp. Em hãy quay lại nhấn Mở bài luyện và chat ngay trong đoạn chat vừa mở. Nếu vẫn không được, hãy gửi link cho giảng viên kèm theo ảnh chụp màn hình để được hỗ trợ.';
+ const specific=await practice.status(a);
+ assert.equal(specific.status,'retry');
+ assert.equal(specific.message,notice);
+ assert.equal((await practice.status(b)).message,'Chưa đọc được link. Kiểm tra link chia sẻ công khai rồi thử lại.');
+ const {rows:[{outcome,analysis_intent}]}=await db.query('SELECT outcome,analysis_intent FROM reading_listening67.web_share_practice WHERE id=$1',[id]);
+ assert.equal(outcome.errorCode,'SHARE_READ_FAILED');
+ assert.equal(outcome.readReason,'OCTANE_MESSAGE_INVALID');
+ assert.equal(outcome.readDetail,'FIRST_USER_ATTACHMENT_ONLY');
+ assert.equal(analysis_intent,false);
+});
 test('Mercy Rule chỉ mở đúng chủ sau khi worker lưu ba lần, có bằng chứng đọc lại được',async t=>{
  const db=await database(t);
  const practice=createReadingSharePractice({db,content:{code:a.code,version:a.version,practice:{target:'Nén cấp 1'}},

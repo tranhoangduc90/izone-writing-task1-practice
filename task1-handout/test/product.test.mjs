@@ -81,12 +81,17 @@ test('PIN access, wrong code and re-entry retain the same learner session',async
 });
 test('response validator rejects rewritten answer, overlong answer and truncated inference',()=>{
  assert.throws(()=>validateFeedback(revision+'\nCâu sửa: A complete sentence.','draft'),/WROTE_FOR_STUDENT/);
- assert.throws(()=>validateFeedback('Em '.repeat(151),'outline'),/TOO_LONG/);
+ for(const [section,label] of Object.entries(feedback)){
+  const atLimit=label+' '+Array(300-label.split(/\s+/u).length).fill('từ').join(' ');
+  assert.equal(normalizeFeedback(atLimit),atLimit);
+  assert.equal(validateFeedback(atLimit,section),'passed');
+  assert.throws(()=>validateFeedback(atLimit+' thêm',section),/TOO_LONG/);
+ }
  assert.throws(()=>readModel({candidates:[{finishReason:'MAX_TOKENS',content:{parts:[{text:feedback.draft}]}}]}),/INCOMPLETE/);
  assert.equal(validateFeedback(feedback.draft,'draft'),'passed');
- const long=revision+'\n\n2. **Chẩn đoán:** '+('Em '.repeat(151));assert.equal(normalizeFeedback(long,'draft'),revision);
- const commonStep=revision.split('\n**Next step:')[0]+'\n\n2. **Chẩn đoán:** '+('Em '.repeat(151))+'\n**Next step:** Em sửa hai ý.';
- assert.equal(validateFeedback(normalizeFeedback(commonStep,'draft'),'draft'),'needs_revision');
+ const long=revision+'\n\n2. **Chẩn đoán:** '+('Em '.repeat(301));assert.equal(normalizeFeedback(long),revision);
+ const commonStep=revision.split('\n**Next step:')[0]+'\n\n2. **Chẩn đoán:** '+('Em '.repeat(301))+'\n**Next step:** Em sửa hai ý.';
+ assert.equal(validateFeedback(normalizeFeedback(commonStep),'draft'),'needs_revision');
 });
 test('production refuses another product DB or missing shared SSO',()=>{
  const env={NODE_ENV:'test',TASK1_DATABASE_URL:'postgres://task1_api:fake@localhost/sw_task1_test',TASK1_INTERNAL_TOKEN:'x'.repeat(32),TASK1_PIN_PEPPER:'x'.repeat(32),TASK1_ALLOWED_ORIGINS:'http://fixture.invalid'};

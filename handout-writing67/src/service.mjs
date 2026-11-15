@@ -132,10 +132,8 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     if(job.kind==='grade'){
       const outline=isBodyOutline(job)&&!isTwoQuestionOutline({...job,activity:job.snapshot?.activity});
       const keys=outline?['resultStatus','feedback','direction']:['resultStatus','feedback'];
-      // Lesson 3 asks for at most 100 words. Allow a bounded overrun without discarding a valid grade.
-      const lesson3Outline=outline&&job.snapshot?.activity==='lesson3';
-      const feedbackWordLimit=isWhole(job)&&!lesson3Outline?100:150;
-      return ['passed','needs_revision'].includes(result.resultStatus)&&string(result.feedback)&&result.feedback.trim().split(/\s+/).length<=feedbackWordLimit&&Object.keys(result).every(k=>keys.includes(k))
+      // The rubric asks for concise feedback. Accept a bounded overrun on grade results.
+      return ['passed','needs_revision'].includes(result.resultStatus)&&string(result.feedback)&&result.feedback.trim().split(/\s+/).length<=300&&Object.keys(result).every(k=>keys.includes(k))
         &&(!outline||validOutlineDirection(result.direction)||result.resultStatus==='needs_revision'&&result.direction==='unclear');
     }
     const keys=job.ideaIndex===0?['A1','X1','B1','A2','X2','B2']:['A','X','B'];

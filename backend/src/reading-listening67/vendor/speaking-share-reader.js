@@ -303,6 +303,12 @@ function parseConversationHtml(html, source) {
       const text = role === 'user' ? row.frame.text
         : row.source?.markdown?.trim() ? row.source.markdown : row.source?.dil?.fallbackMarkdown;
       const id = row.frame.id || row.source?.messageId;
+      if (messages.length === 0 && role === 'user' && typeof id === 'string' && id
+        && typeof text === 'string' && !text.trim()
+        && Array.isArray(row.frame.fileAttachments)
+        && row.frame.fileAttachments.some(attachment => attachment?.kind === 'file')) {
+        throw Object.assign(new Error('OCTANE_MESSAGE_INVALID'), {shareReadDetail: 'FIRST_USER_ATTACHMENT_ONLY'});
+      }
       // An unfinished DIL response can be present in a public snapshot as an empty
       // tail frame. Keep the preceding student reply and all completed feedback.
       if (index === transcript.rows.length - 1 && role === 'assistant'
@@ -353,19 +359,25 @@ export async function readSpeakingShare(shareUrl, n8nOnly = false) {
   validateShareUrl(shareUrl);
   if (!n8nOnly) {
     let directError;
+    let directReadDetail;
     const deadline = Date.now() + 30_000;
     for (let attempt = 0; attempt < 2 && Date.now() < deadline; attempt++) {
       try {
         const html = await fetchDirectHtml(shareUrl, Math.min(deadline, Date.now() + 15_000));
         return parseConversationHtml(html, 'direct');
-      } catch (error) { directError = error; }
+      } catch (error) {
+        directError = error;
+        directReadDetail = error.shareReadDetail || directReadDetail;
+      }
     }
     try {
       const html = await fetchViaN8n(shareUrl);
       return parseConversationHtml(html, 'n8n_fallback');
     } catch (n8nError) {
       const error = new Error(`Đọc trực tiếp lỗi: ${directError?.message || 'SHARE_READ_LIMIT'} n8n fallback lỗi: ${n8nError.message}`);
-      if ([directError?.message, n8nError.message].includes('OCTANE_MESSAGE_INVALID')) error.shareReadReason = 'OCTANE_MESSAGE_INVALID';
+      const readDetail = directReadDetail || n8nError.shareReadDetail;
+      if (readDetail || [directError?.message, n8nError.message].includes('OCTANE_MESSAGE_INVALID')) error.shareReadReason = 'OCTANE_MESSAGE_INVALID';
+      if (readDetail) error.shareReadDetail = readDetail;
       throw error;
     }
   }

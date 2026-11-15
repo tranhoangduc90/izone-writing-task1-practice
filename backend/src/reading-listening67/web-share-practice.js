@@ -151,6 +151,10 @@ export function createReadingSharePractice({db,content,readShare=readSpeakingSha
    if(error.code==='SHARE_SCOPE_CHANGED')return;
    const outcome={message:called?'Chưa rõ kết quả kiểm; cần đối soát trước khi gọi lại.':'Chưa đọc được link. Kiểm tra link chia sẻ công khai rồi thử lại.',errorCode:error.code||'SHARE_READ_FAILED'};
    if(!called&&error.shareReadReason==='OCTANE_MESSAGE_INVALID')outcome.readReason=error.shareReadReason;
+   if(!called&&error.shareReadDetail==='FIRST_USER_ATTACHMENT_ONLY'){
+    outcome.readDetail=error.shareReadDetail;
+    outcome.message='Chưa đọc được nội dung đoạn chat của em vì nó khởi đầu bằng một tệp. Em hãy quay lại nhấn Mở bài luyện và chat ngay trong đoạn chat vừa mở. Nếu vẫn không được, hãy gửi link cho giảng viên kèm theo ảnh chụp màn hình để được hỗ trợ.';
+   }
    await update("status=$3,outcome=$4::jsonb,lease_token=NULL,lease_until=NULL,updated_at=now()",[called||error.code==='SHARE_OUTCOME_UNKNOWN'?'needs_review':'retry',JSON.stringify(outcome)]);
   }
  }

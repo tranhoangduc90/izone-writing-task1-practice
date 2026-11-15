@@ -4,7 +4,10 @@ import { createApi } from '../src/http.mjs';
 
 // Fixture chỉ thay DB bằng auth đã xác minh; rủi ro nằm ở HTTP bucket thật sau một proxy.
 test('T-PROXY · hai phiên qua cùng proxy không dùng chung giới hạn học viên; health độc lập',async t=>{
-  const service={authorizeSession(ref,token){assert.equal(token,'capability-'+ref);},read:async ref=>({ref})};
+  const service={
+    authorizeSession(ref,token){assert.equal(token,'capability-'+ref);},
+    async readForPoll(ref){return {session:{ref}};}
+  };
   const server=createApi({service,origins:[],internalSecret:'fixture'});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   t.after(()=>new Promise(resolve=>server.close(resolve)));
@@ -14,7 +17,7 @@ test('T-PROXY · hai phiên qua cùng proxy không dùng chung giới hạn họ
     const ref=refs[i%2];
     const response=await fetch(`${base}/sessions/${ref}`,{headers:{Authorization:'Bearer capability-'+ref}});
     assert.equal(response.status,200,`request ${i+1} không được chặn học viên khác cùng proxy`);
-    await response.text();
+    assert.deepEqual(await response.json(),{ok:true,session:{ref}});
   }
   // Một phiên vẫn bị giới hạn riêng; phiên còn lại và health không chịu quota của nó.
   for(let i=0;i<57;i++) {

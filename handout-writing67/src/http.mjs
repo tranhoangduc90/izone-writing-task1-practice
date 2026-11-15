@@ -96,6 +96,10 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
         if(input?.activity==='lesson4'&&!equal(req.headers.authorization,writingEntryKey&&'Bearer '+writingEntryKey))fail('WRITING_ENTRY_REQUIRED',403);
         value=await service.open(input);status=201;
       }
+      else if(path===prefix+'/integrations/homework/lesson4/progress'&&req.method==='POST'){
+        if(origin||!writingEntryKey||!equal(req.headers.authorization,'Bearer '+writingEntryKey))fail('WRITING_ENTRY_REQUIRED',403);
+        value={progress:await service.readLesson4Progress(await jsonBody(req))};
+      }
       else if(path===prefix+'/internal/jobs/claim'&&req.method==='POST'){await jsonBody(req);value={jobs:await service.claim()};}
       else if(internal){
         const match=path.match(/^\/api\/handout67\/v1\/internal\/jobs\/([^/]+)(\/(?:complete|response|process))?$/);

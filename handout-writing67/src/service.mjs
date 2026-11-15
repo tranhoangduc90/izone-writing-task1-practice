@@ -174,6 +174,28 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
       const s=await store.open(key,ref=>({ref,activity:input.activity,...(writingEntry?{writingEntry:{assignmentId:writingEntry.assignmentId,contentVersion:writingEntry.contentVersion}}:{}),...(isBodyOutline(lesson)?{outlineOnly:true}:{}),handoutMode:lesson.handoutMode,...(isPrepared(lesson)?{preparationMode:lesson.preparationMode,...preparationContext(lesson)}:{}),...(isMulti(lesson)?{bodyProgress:{1:{idea2Open:false},2:{idea2Open:false}}}:{}),workflowMode:lesson.workflowMode||GUIDED,workflowVersion:1,body:lesson.body,classRef:input.classRef,studentRef:input.studentRef,responses:Object.fromEntries([...Object.values(policy.fields).flat(),...(isBodyOutline(lesson)&&!isTwoQuestionOutline(lesson)?['stance']:[])].map(k=>[k,''])),version:0,idea2Open:false,steps:Object.fromEntries(policy.order.map(k=>[k,{status:'draft',history:[],error:null}])),jobs:[],vocabulary:{},saves:{}}));
       return {session:publicSession(s),token:issue(s.ref,isTwoQuestionOutline(s))};
     },
+    async readLesson4Progress(input) {
+      if (!object(input) || !/^IC[0-9]+$/.test(input.classRef || '') || !id(input.studentRef) ||
+          !/^hw-k67-writing-lesson4-[0-9]+$/.test(input.assignmentId || '') ||
+          !Number.isSafeInteger(input.contentVersion) || input.contentVersion < 1) fail('WRITING_ENTRY_REQUIRED',403);
+      const session = await store.readIdentity(JSON.stringify(['lesson4',input.classRef,input.studentRef,input.assignmentId,input.contentVersion]));
+      if (!session) return null;
+      if (session.activity !== 'lesson4' || session.classRef !== input.classRef || session.studentRef !== input.studentRef ||
+          session.writingEntry?.assignmentId !== input.assignmentId || session.writingEntry?.contentVersion !== input.contentVersion)
+        fail('WRITING_ENTRY_MISMATCH',409);
+      const accepted = session.practice?.status === 'accepted';
+      const bodies = [1,2].map(body => {
+        const step = session.steps[bodyKey(body,'topic')];
+        const result = step?.history?.at(-1);
+        return {
+          body, status: step?.status || 'draft',
+          passed: accepted && step?.status === 'passed' && result?.status === 'passed' && Boolean(result.jobRef),
+          jobRef: result?.jobRef || null,
+          passedAt: step?.approval?.at || null
+        };
+      });
+      return {ref:session.ref,version:session.version,accepted,bodies};
+    },
     async read(ref,token) {
       authorize(ref,token);const s=await store.read(ref);if(!s)fail('SESSION_NOT_FOUND',404);
       if(expiryDue(s,clock()))return edit(ref,token,current=>{expire(current);return publicSession(current);},undefined,true);

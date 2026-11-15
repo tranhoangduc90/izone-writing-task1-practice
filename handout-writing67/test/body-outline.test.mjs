@@ -30,7 +30,7 @@ test('Đối chiếu phân biệt hướng, thứ tự, cân bằng và bản ch
  ])assert.equal(outlineRelation(session(stance,first,second)),expected);
 });
 
-test('Lesson 3 lưu phản hồi 102 từ sau Check và vẫn từ chối phản hồi sai hợp đồng',async t=>{
+test('Lesson 3 lưu phản hồi 300 từ sau Check và từ chối phản hồi 301 từ hoặc sai hợp đồng',async t=>{
  const db=new PGlite();
  t.after(()=>db.close());
  for(const file of ['001-initial.sql','002-activity-log.sql']){
@@ -50,8 +50,8 @@ test('Lesson 3 lưu phản hồi 102 từ sau Check và vẫn từ chối phản
  await service.check(session.ref,token,{baseVersion:1,requestId:'check-body-2',section:'body2_topic',bodyIndex:2});
  const [job]=await service.claim();
  const feedback='Hai ý cùng làm rõ thông điệp.'.split(/\s+/);
- const result={resultStatus:'passed',direction:'disagree',feedback:Array.from({length:102},(_,i)=>feedback[i%feedback.length]).join(' ')};
- for(const invalid of [{...result,direction:'unclear'},{...result,extra:true},{...result,feedback:'từ '.repeat(151)}]){
+ const result={resultStatus:'passed',direction:'disagree',feedback:Array.from({length:300},(_,i)=>feedback[i%feedback.length]).join(' ')};
+ for(const invalid of [{...result,direction:'unclear'},{...result,extra:true},{...result,feedback:result.feedback+' thêm'}]){
   await assert.rejects(()=>service.complete({...job,result:invalid}),/RESULT_INVALID/);
  }
  const outputText='\x60\x60\x60json\n'+JSON.stringify(result)+'\n\x60\x60\x60';

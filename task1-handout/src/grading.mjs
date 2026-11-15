@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+const MAX_FEEDBACK_WORDS=300;
 export const sha=value=>crypto.createHash('sha256').update(typeof value==='string'?value:JSON.stringify(value)).digest('hex');
 const inputNames={de_bai:'taskPrompt',overview:'overview',body_1:'body1',body_2:'body2',draft1:'draft1',draft2:'draft2'};
 export function renderPrompt(context){
@@ -18,28 +19,26 @@ export function readModel(value){
  return {feedback,modelVersion:value.modelVersion||value.data?.modelVersion,usage:value.usageMetadata||value.data?.usageMetadata};
 }
 export function validateFeedback(feedback,section){
- const limit=section==='overview'?120:150;
- if(typeof feedback!=='string'||feedback.split(/\s+/u).filter(Boolean).length>limit)throw Error('AI_FEEDBACK_TOO_LONG');
+ if(typeof feedback!=='string'||feedback.split(/\s+/u).filter(Boolean).length>MAX_FEEDBACK_WORDS)throw Error('AI_FEEDBACK_TOO_LONG');
  const label={overview:'Overview đã đạt',outline:'Outline hai thân bài đã đạt',draft:'Draft đã đạt'}[section];
  const passed=feedback.startsWith(label+' 👍');
  if(!passed&&!['Chẩn đoán:','Phân tích:','Gợi mở:','Next step:'].every(x=>feedback.replaceAll('**','').includes(x)))throw Error('AI_FEEDBACK_CONTRACT');
  if(section==='draft'&&/câu sửa|revised[_ ](?:text|sentence)|```|_{3,}/iu.test(feedback))throw Error('AI_WROTE_FOR_STUDENT');
  return passed?'passed':'needs_revision';
 }
-export function normalizeFeedback(feedback,section){
- const limit=section==='overview'?120:150;
- if(feedback.split(/\s+/u).filter(Boolean).length<=limit)return feedback;
+export function normalizeFeedback(feedback){
+ if(feedback.split(/\s+/u).filter(Boolean).length<=MAX_FEEDBACK_WORDS)return feedback;
  // Preserve the first issue verbatim; do not cut sentences or generate academic content.
  const second=feedback.search(/\n\s*2\.\s+\*\*Chẩn đoán:/u);
  if(second<0)return feedback;
  let first=feedback.slice(0,second).trim();
  if(!first.replaceAll('**','').includes('Next step:'))first+='\n**Next step:** Em tự sửa phần vừa được hỏi và giữ các phần đúng.';
- return first.split(/\s+/u).filter(Boolean).length<=limit?first:feedback;
+ return first.split(/\s+/u).filter(Boolean).length<=MAX_FEEDBACK_WORDS?first:feedback;
 }
 export async function gradeJob({job,context,aiUrl,call=fetch}){
  const prompt=renderPrompt(context);
  const response=await call(aiUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt,anh_minh_hoa:''}),signal:AbortSignal.timeout(150000)});
  if(!response.ok)throw Error('AI_HTTP_FAILED');
- const value=readModel(await response.json()),feedback=normalizeFeedback(value.feedback,job.section);
+ const value=readModel(await response.json()),feedback=normalizeFeedback(value.feedback);
  return {resultStatus:validateFeedback(feedback,job.section),feedback,artifacts:{productId:'sw-task1',attemptRef:job.jobRef,mode:'socratic-v2',promptVersion:context.promptVersion,promptSha256:context.promptSha256,renderedPromptSha256:sha(prompt),snapshotSha256:sha(context.snapshot),rawFeedbackSha256:sha(value.feedback),feedbackReduced:feedback!==value.feedback,modelVersion:value.modelVersion,usage:value.usage}};
 }

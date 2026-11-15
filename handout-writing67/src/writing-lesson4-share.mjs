@@ -4,6 +4,7 @@ export const LESSON4_SHARE_POLICY = 'writing67-lesson4-chat-v1';
 export const LESSON4_TOPIC = 'Many people buy products that they do not really need and replace old products with new ones unnecessarily. Why do people buy things they do not need? Do you think this is a good thing?';
 export const LESSON4_STARTER = 'https://chatgpt.com/share/68ca652a-ef68-8011-bd01-3b627576af58';
 export const LESSON4_TITLE = 'Chuẩn bị ý tưởng · Mua sắm không cần thiết';
+const openingAttachmentNotice = 'Chưa đọc được nội dung đoạn chat của em vì nó khởi đầu bằng một tệp. Em hãy quay lại nhấn Mở bài luyện và chat ngay trong đoạn chat vừa mở. Nếu vẫn không được, hãy gửi link cho giảng viên kèm theo ảnh chụp màn hình để được hỗ trợ.';
 export const lesson4ShareEnabled = lesson => lesson?.activity === 'lesson4' && lesson.sharePolicy === LESSON4_SHARE_POLICY;
 export const practiceStatus = practice => practice ? {
   id: practice.id, url: practice.url, status: practice.status, message: practice.message,
@@ -172,10 +173,12 @@ export function createLesson4ShareWorker({ store, readShare, analyze, clock = Da
       await update({ ...outcome, finishedAt: clock() });
     } catch (failure) {
       if (failure.code !== 'SHARE_SUPERSEDED') {
+        const openingAttachment = !startedAnalysis && failure.shareReadDetail === 'FIRST_USER_ATTACHMENT_ONLY';
         await update({
           status: startedAnalysis ? 'needs_review' : 'retry',
           message: startedAnalysis ? 'Chưa rõ kết quả kiểm. Link đã được giữ để đối soát.' :
-            'Chưa đọc được link. Kiểm tra link chia sẻ công khai rồi thử lại.',
+            openingAttachment ? openingAttachmentNotice : 'Chưa đọc được link. Kiểm tra link chia sẻ công khai rồi thử lại.',
+          ...(openingAttachment ? { readDetail: failure.shareReadDetail } : {}),
           errorCode: /^[A-Z_]+$/.test(failure.code || '') ? failure.code : 'SHARE_READ_FAILED',
           finishedAt: clock(),
         });

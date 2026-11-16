@@ -74,6 +74,11 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
           if(path===prefix+'/teacher/session'&&req.method==='GET')value={reviewer:teacher.actor(actor)};
           else if(path===prefix+'/teacher/classes'&&req.method==='GET')value={classes:await teacher.classes(actor,requestUrl.searchParams.get('activity')||'lesson5')};
           else if(path===prefix+'/teacher/students'&&req.method==='GET')value=await teacher.summary(actor,requestUrl.searchParams.get('class'),requestUrl.searchParams.get('activity')||'lesson5');
+          else if(req.method==='GET'&&path.startsWith(prefix+'/teacher/lesson4-outline/')){
+            const ref=path.slice((prefix+'/teacher/lesson4-outline/').length);
+            if(!uuid.test(ref))fail('NOT_FOUND',404);
+            value={outline:await teacher.lesson4Outline(actor,ref)};
+          }
           else{
             const match=path.match(/^\/api\/handout67\/v1\/teacher\/sessions\/([^/]+)(\/(?:comments|threads|activity))?$/);
             if(!match||!uuid.test(match[1]))fail('NOT_FOUND',404);

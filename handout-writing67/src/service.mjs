@@ -48,6 +48,18 @@ function checkBody(s,input,key){
   if(isMulti(s)&&(!(isPrepared(s)&&(key==='outline'||planFields(s).includes(key))&&bodyIndexOf(key)===0?[0]:[1,2]).includes(input.bodyIndex)||bodyIndexOf(key)!==input.bodyIndex))fail('BODY_IDENTITY_MISMATCH',409);
 }
 
+export function lesson4BodyProgress(session, body) {
+  const step = session.steps[bodyKey(body,'topic')];
+  const result = step?.history?.at(-1);
+  return {
+    body, status: step?.status || 'draft',
+    passed: session.practice?.status === 'accepted' && step?.status === 'passed' &&
+      result?.status === 'passed' && Boolean(result.jobRef),
+    jobRef: result?.jobRef || null,
+    passedAt: step?.approval?.at || null
+  };
+}
+
 export function createService({store, roster, secret, clock=Date.now, leaseMs=300000, sessionMs=43200000, maxLeases=null, maxJobMs=1800000, retryDelays=[0,0,0], renderJob, promptVersion='lesson5-rubric-v3',lessons={lesson5:{...LEGACY_LESSON5,promptVersion}}}) {
   if (typeof secret!=='string' || secret.length<32 || leaseMs<=180000) fail('CONFIG_INVALID');
   if(maxLeases!==null&&(!Number.isSafeInteger(maxLeases)||maxLeases<1))fail('CONFIG_INVALID');
@@ -185,16 +197,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
           session.writingEntry?.assignmentId !== input.assignmentId || session.writingEntry?.contentVersion !== input.contentVersion)
         fail('WRITING_ENTRY_MISMATCH',409);
       const accepted = session.practice?.status === 'accepted';
-      const bodies = [1,2].map(body => {
-        const step = session.steps[bodyKey(body,'topic')];
-        const result = step?.history?.at(-1);
-        return {
-          body, status: step?.status || 'draft',
-          passed: accepted && step?.status === 'passed' && result?.status === 'passed' && Boolean(result.jobRef),
-          jobRef: result?.jobRef || null,
-          passedAt: step?.approval?.at || null
-        };
-      });
+      const bodies = [1,2].map(body => lesson4BodyProgress(session, body));
       return {ref:session.ref,version:session.version,accepted,bodies};
     },
     async read(ref,token) {

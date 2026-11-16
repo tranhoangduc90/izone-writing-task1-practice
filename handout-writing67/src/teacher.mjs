@@ -1,6 +1,6 @@
 import {createHmac,randomUUID,timingSafeEqual} from 'node:crypto';
-import {fail,publicTeacherComments,withBodies} from './service.mjs';
-import {workflowFor,GUIDED,preparationContext} from './workflow.mjs';
+import {fail,lesson4BodyProgress,publicTeacherComments,withBodies} from './service.mjs';
+import {bodyKey,isTwoQuestionOutline,workflowFor,GUIDED,preparationContext} from './workflow.mjs';
 import {publicThreads,changeThread} from './comments.mjs';
 import {dashboardProjection} from './dashboard.mjs';
 import {LEGACY_LESSON5} from './lessons.mjs';
@@ -26,12 +26,15 @@ export function createTeacher({db,store,roster,registry,secret,verifyGoogleToken
     if(!row)fail('CLASS_NOT_OPEN',404);
     return row;
   }
-  async function sessionFor(actor,ref){
+  async function authorizedSession(actor,ref,lesson4Only=false){
     const s=await store.read(ref);if(!s)fail('SESSION_NOT_FOUND',404);
+    if(lesson4Only&&(!isTwoQuestionOutline(s)||!s.writingEntry))fail('SESSION_NOT_FOUND',404);
     const row=await context(actor,s.classRef,s.activity);
-    if(!row.students.some(x=>x.studentRef===s.studentRef))fail('TEACHER_FORBIDDEN',403);
-    return s;
+    const student=row.students.find(x=>x.studentRef===s.studentRef);
+    if(!student)fail('TEACHER_FORBIDDEN',403);
+    return {s,student};
   }
+  const sessionFor=async(actor,ref)=>(await authorizedSession(actor,ref)).s;
   const publicSession=s=>withBodies({ref:s.ref,activity:s.activity,...(s.outlineOnly?{outlineOnly:true}:{}),...(s.handoutMode?{handoutMode:s.handoutMode,bodyProgress:s.bodyProgress,...(s.preparationMode?{preparationMode:s.preparationMode,...preparationContext(s)}:{})}:{}),workflowMode:s.workflowMode||GUIDED,workflowVersion:s.workflowVersion||1,body:s.body||2,classRef:s.classRef,studentRef:s.studentRef,version:s.version,responses:s.responses,steps:s.steps,vocabulary:s.vocabulary,idea2Open:s.idea2Open,teacherComments:publicTeacherComments(s),commentThreads:publicThreads(s),commentVersion:s.commentVersion||0,dashboard:dashboardProjection(s,clock()),processing:dashboardProjection(s,clock()).processing});
   return {
     clientId:()=>registry().clientId,
@@ -66,6 +69,19 @@ export function createTeacher({db,store,roster,registry,secret,verifyGoogleToken
       })};
     },
     async detail(actor,ref){return publicSession(await sessionFor(actor,ref));},
+    async lesson4Outline(actor,ref){
+      const {s,student}=await authorizedSession(actor,ref,true);
+      const bodies=[1,2].map(body=>{
+        const progress=lesson4BodyProgress(s,body);
+        const result=s.steps[bodyKey(body,'topic')]?.history?.at(-1);
+        const fields=Object.fromEntries(['topicSentence','idea1','idea2'].map(key=>[key,s.responses[bodyKey(body,key)]||'']));
+        const feedbackMatches=result&&Object.entries(fields).every(([key,value])=>(result.snapshot?.[bodyKey(body,key)]||'')===value);
+        return {body,passed:progress.passed,status:progress.status,fields,
+          feedback:feedbackMatches?result.feedback||'':'',
+          feedbackFromEarlierVersion:Boolean(result?.feedback&&!feedbackMatches)};
+      });
+      return {ref:s.ref,classRef:s.classRef,displayName:student.displayName,passed:bodies.filter(body=>body.passed).length,bodies};
+    },
     // Quyền lớp/roster lấy lại từ backend; không lấy học viên/lớp hoặc quyền từ query client.
     async activity(actor,ref,query={}){await sessionFor(actor,ref);return store.audit.read(ref,query);},
     async thread(actor,ref,input){

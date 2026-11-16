@@ -5,10 +5,11 @@
  */
 import express from 'express';
 import {z} from 'zod';
-import {timingSafeEqual} from 'node:crypto';
+import {randomUUID,timingSafeEqual} from 'node:crypto';
 import {WebGradingError} from './web-grader.js';
 import {READING_ENTRY_HEADER} from './web-owner-entry.js';
-const makeSaveInput=(flagCount=4)=>z.object({baseRevision:z.number().int().nonnegative(),mutationId:z.uuid(),body:z.object({answers:z.record(z.string(),z.string().max(12000)),annotations:z.array(z.record(z.string(),z.unknown())).max(300),notes:z.string().max(16000),flags:z.array(z.number().int().min(1).max(flagCount)).max(flagCount)}).strict()}).strict();
+const ANNOTATION_LIMIT=300;
+const makeSaveInput=(flagCount=4)=>z.object({baseRevision:z.number().int().nonnegative(),mutationId:z.uuid(),body:z.object({answers:z.record(z.string(),z.string().max(12000)),annotations:z.array(z.record(z.string(),z.unknown())).max(ANNOTATION_LIMIT),notes:z.string().max(16000),flags:z.array(z.number().int().min(1).max(flagCount)).max(flagCount)}).strict()}).strict();
 const submitInput=z.object({revision:z.number().int().positive(),requestId:z.uuid()}).strict();
 const id=z.uuid();
 export function createReading67WebRouter({store,content,grader,authenticate,identity,config={},homework,registerCta,adminKey,practice,ownerEntry}){
@@ -57,13 +58,29 @@ export function createReading67WebRouter({store,content,grader,authenticate,iden
     router.post('/practice',route(async(q,r)=>r.status(202).json(await practice.save(scope(q),parse(z.object({url:z.string().min(1).max(500),requestId:z.uuid()}).strict(),q.body)))));
   }
   router.get('/homework',route(async(q,r)=>r.json({ok:true,...(homework?await homework.status(scope(q)):{status:'not_applicable'})})));
-  router.put('/draft',route(async(q,r)=>r.json({ok:true,...await store.save(scope(q),parse(lessonSaveInput,q.body))})));
+  router.put('/draft',route(async(q,r)=>{
+    const annotations=q.body?.body?.annotations;
+    if(Array.isArray(annotations)&&annotations.length>ANNOTATION_LIMIT)
+      throw new WebGradingError('ANNOTATION_LIMIT',400,{limit:ANNOTATION_LIMIT});
+    r.json({ok:true,...await store.save(scope(q),parse(lessonSaveInput,q.body))});
+  }));
   router.post('/submit',route(async(q,r)=>r.status(202).json({ok:true,...await store.submit(scope(q),parse(submitInput,q.body))})));
   router.get('/attempts',route(async(q,r)=>r.json({ok:true,attempts:await store.history(scope(q)),archives:await store.archives(scope(q)),firstCompleted:await store.firstCompleted(scope(q))})));
   router.post('/reset',route(async(q,r)=>r.json({ok:true,...await store.reset(scope(q),parse(z.object({baseRevision:z.number().int().nonnegative(),mutationId:z.uuid()}).strict(),q.body))})));
   router.get('/attempts/:id',route(async(q,r)=>r.json({ok:true,...await store.attempt(scope(q),parse(id,q.params.id))})));
-  router.use((error,_q,r,_next)=>{
+  router.use((error,q,r,_next)=>{
     const known=error instanceof WebGradingError;
-    r.status(known?error.status:error.type==='entity.parse.failed'?400:error.type==='entity.too.large'?413:503).json({ok:false,error:known?error.code:'WEB_UNAVAILABLE',...(known?{details:error.details}:{})});
+    const tooLarge=error.type==='entity.too.large';
+    if(q.method==='PUT'&&q.path==='/draft'&&(tooLarge||['ANNOTATION_LIMIT','WEB_INVALID_INPUT','DRAFT_REVISION_CONFLICT'].includes(error.code))){
+      const draft=q.body?.body;
+      console.warn(JSON.stringify({event:'reading_homework_draft_rejected',version:1,requestId:randomUUID(),action:'save',
+        lessonCode:content.code,classId:q.webIdentity?.courseId,studentRef:q.webIdentity?.ownerId,
+        mutationId:z.uuid().safeParse(q.body?.mutationId).data,
+        revision:Number.isSafeInteger(q.body?.baseRevision)?q.body.baseRevision:undefined,
+        reason:tooLarge?'DRAFT_TOO_LARGE':error.code,
+        annotationCount:Array.isArray(draft?.annotations)?draft.annotations.length:undefined,annotationLimit:ANNOTATION_LIMIT,
+        requestBytes:tooLarge?error.length:Buffer.byteLength(JSON.stringify(q.body??null))}));
+    }
+    r.status(known?error.status:error.type==='entity.parse.failed'?400:tooLarge?413:503).json({ok:false,error:known?error.code:tooLarge?'DRAFT_TOO_LARGE':'WEB_UNAVAILABLE',...(known?{details:error.details}:{})});
   });return router;
 }

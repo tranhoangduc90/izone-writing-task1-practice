@@ -10,7 +10,8 @@ import { createApi } from '../src/http.mjs';
 import { createService } from '../src/service.mjs';
 import { createStore } from '../src/store.mjs';
 import {
-  createLesson4ShareWorker, lesson4Stages, LESSON4_SHARE_POLICY, LESSON4_STARTER, LESSON4_TOPIC,
+  createLesson4ShareWorker, lesson4ShareAnalyzer, lesson4Stages, LESSON4_SHARE_POLICY,
+  LESSON4_STARTER, LESSON4_TOPIC, verifyLesson4Conversation,
 } from '../src/writing-lesson4-share.mjs';
 
 const lesson = {
@@ -35,6 +36,56 @@ const complete = {
   ].map(([role, text], i) => ({ id: 'm' + i, role, text })),
 };
 const shareUrl = id => 'https://chatgpt.com/share/00000000-0000-4000-8000-00000000000' + id;
+
+// Synthetic dialogue with the same order as the false rejection.
+const splitChoices = {
+  messages: [
+    ...complete.messages.slice(0, 7).map(({ role, text }) => [role, text]),
+    ['assistant', 'Chọn hai nguyên nhân và hai tác động.'],
+    ['user', 'Em đang cân nhắc tâm lý, quảng cáo và lời khuyên.'],
+    ['assistant', 'Em chọn tác động nào?'],
+    ['user', 'Em chọn tác động lên môi trường, vì sẽ có thêm rác thải.'],
+    ['assistant', 'Tác động thứ hai em chọn là gì?'],
+    ['user', 'Em chọn người tiêu dùng, vì họ có thể tốn tiền.'],
+    ['assistant', 'Em đánh giá xu hướng này thế nào?'],
+    ['user', 'Em nghĩ xu hướng này có hại.'],
+    ['assistant', 'Thân 1 còn phải chọn hai trong ba nguyên nhân. Thân 2 nói về môi trường và người mua.'],
+    ['user', 'Thân 1 em chọn tâm lý và quảng cáo.'],
+    ['assistant', 'Dàn ý cuối. Thân 1 giải thích tâm lý và quảng cáo. Thân 2 giải thích tác hại lên môi trường và người mua.'],
+  ].map(([role, text], i) => ({ id: 'm' + i, role, text })),
+};
+const introductoryMilestones = ['analysis', 'reasons', 'effects'].map((stage, i) => ({
+  stage, promptId: 'm' + (i * 2 + 1), answerId: 'm' + (i * 2 + 2),
+}));
+const splitMilestones = [
+  ...introductoryMilestones,
+  { stage: 'opinion', promptId: 'm13', answerId: 'm14' },
+  { stage: 'ideas', body1AnswerIds: ['m16'], body2AnswerIds: ['m10', 'm12'] },
+  { stage: 'summary', promptId: 'm17', answerId: null },
+];
+
+test('Share accepts separate selections and a body finalized after the opinion', async () => {
+  const analyze = lesson4ShareAnalyzer(async ({ prompt }) => ({
+    // Replay the old analyzer's first-three-stage outcome for the obsolete evidence contract.
+    outputText: JSON.stringify({ milestones: prompt.includes('body1AnswerIds') ? splitMilestones : introductoryMilestones }),
+  }));
+  const result = await verifyLesson4Conversation(splitChoices, analyze);
+  assert.equal(result.status, 'accepted');
+});
+
+test('Share requires selections from both bodies and a summary after the last selection', async () => {
+  const check = milestones => verifyLesson4Conversation(splitChoices, async () => ({ milestones }));
+  const missing = await check(splitMilestones.filter(proof => proof.stage !== 'ideas'));
+  assert.equal(missing.status, 'rejected');
+  assert.equal(missing.stage, 'ideas');
+  const early = await check(splitMilestones.map(proof =>
+    proof.stage === 'summary' ? { ...proof, promptId: 'm15' } : proof));
+  assert.equal(early.status, 'rejected');
+  assert.equal(early.stage, 'summary');
+  await assert.rejects(check(splitMilestones.map(proof =>
+    proof.stage === 'ideas' ? { ...proof, body2AnswerIds: ['m15'] } : proof)),
+    { code: 'SHARE_EVIDENCE_INVALID' });
+});
 
 test('Share unlocks only its Writing session and gates the native HTTP save and check', async t => {
   const rows = [{ frame: { id: 'opening', role: 'user', text: '', fileAttachments: [{ kind: 'file' }] } }];
@@ -64,11 +115,15 @@ test('Share unlocks only its Writing session and gates the native HTTP save and 
     readShare: async url => {
       if (url === shareUrl(4)) throw Error('reader unavailable');
       if (url === shareUrl(5)) return readSpeakingShare(url);
+      if (url === shareUrl(6)) return splitChoices;
       return { messages: complete.messages.slice(0, url === LESSON4_STARTER ? 2 : url === shareUrl(2) ? 10 : 12) };
     },
-    analyze: async ({ messages }) => ({ milestones: lesson4Stages.slice(0, messages.length === 9 ? 4 : 6).map((stage, i) => ({
-      stage, promptId: 'm' + (i * 2 + 1), answerId: stage === 'summary' ? null : 'm' + (i * 2 + 2),
-    })) }),
+    analyze: async ({ messages }) => {
+      if (messages.at(-1).id === 'm17') return { milestones: splitMilestones };
+      return { milestones: lesson4Stages.slice(0, messages.length === 9 ? 4 : 6).map((stage, i) => stage === 'ideas'
+        ? { stage, body1AnswerIds: ['m8'], body2AnswerIds: ['m8'] }
+        : { stage, promptId: 'm' + (i * 2 + 1), answerId: stage === 'summary' ? null : 'm' + (i * 2 + 2) }) };
+    },
   });
   const entryKey = 'test-writing-entry'.padEnd(40, 'x');
   const server = createApi({ service, origins: [], internalSecret: secret, writingEntryKey: entryKey });
@@ -109,7 +164,7 @@ test('Share unlocks only its Writing session and gates the native HTTP save and 
   for (const [url, expected, message] of [[LESSON4_STARTER, 'rejected'], [shareUrl(2), 'rejected'],
     [shareUrl(4), 'retry', 'Chưa đọc được link. Kiểm tra link chia sẻ công khai rồi thử lại.'],
     [shareUrl(5), 'retry', 'Chưa đọc được nội dung đoạn chat của em vì nó khởi đầu bằng một tệp. Em hãy quay lại nhấn Mở bài luyện và chat ngay trong đoạn chat vừa mở. Nếu vẫn không được, hãy gửi link cho giảng viên kèm theo ảnh chụp màn hình để được hỗ trợ.'],
-    [shareUrl(3), 'accepted']]) {
+    [shareUrl(3), 'accepted'], [shareUrl(6), 'accepted']]) {
     assert.equal((await send('/practice', { url, requestId: 'try-' + url.at(-1) })).status, 202);
     assert.equal(await worker(), true);
     const { practice } = (await get('/practice')).body;
@@ -146,6 +201,9 @@ test('Share unlocks only its Writing session and gates the native HTTP save and 
   const classified = events.filter(event => event.details.readDetail === 'FIRST_USER_ATTACHMENT_ONLY');
   assert.equal(classified.length, 1);
   assert.equal(classified[0].details.error, 'SHARE_READ_FAILED');
+  const checked = events.filter(event => event.details.recognizerVersion === 'lesson4-share-evidence-v2');
+  assert.equal(checked.filter(event => event.kind === 'share_accepted').length, 2);
+  assert.equal(checked.find(event => event.details.stage === 'opinion')?.kind, 'share_rejected');
   assert.ok(!JSON.stringify(events).includes('chatgpt.com'));
   const changed = await send('/responses', { requestId: 'edit-1', baseVersion: 2, responses: { body1_idea1: 'Mua sắm để cải thiện tâm trạng' } }, 'PUT');
   assert.equal(changed.body.session.steps.body1_topic.status, 'revision');

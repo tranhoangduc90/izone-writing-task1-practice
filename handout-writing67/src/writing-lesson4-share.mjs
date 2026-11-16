@@ -2,14 +2,22 @@ import { createHash, randomUUID } from 'node:crypto';
 
 export const LESSON4_SHARE_POLICY = 'writing67-lesson4-chat-v1';
 const RECOGNIZER_VERSION = 'lesson4-share-evidence-v2';
+const INVALID_EVIDENCE = 'SHARE_EVIDENCE_INVALID';
 export const LESSON4_TOPIC = 'Many people buy products that they do not really need and replace old products with new ones unnecessarily. Why do people buy things they do not need? Do you think this is a good thing?';
 export const LESSON4_STARTER = 'https://chatgpt.com/share/68ca652a-ef68-8011-bd01-3b627576af58';
 export const LESSON4_TITLE = 'Chuẩn bị ý tưởng · Mua sắm không cần thiết';
 const openingAttachmentNotice = 'Chưa đọc được nội dung đoạn chat của em vì nó khởi đầu bằng một tệp. Em hãy quay lại nhấn Mở bài luyện và chat ngay trong đoạn chat vừa mở. Nếu vẫn không được, hãy gửi link cho giảng viên kèm theo ảnh chụp màn hình để được hỗ trợ.';
+const evidenceRetryNotice = 'Chưa xác minh được dẫn chứng trong đoạn chat. Em có thể bấm Kiểm tra link để thử lại với cùng link.';
 export const lesson4ShareEnabled = lesson => lesson?.activity === 'lesson4' && lesson.sharePolicy === LESSON4_SHARE_POLICY;
-export const practiceStatus = practice => practice ? {
-  id: practice.id, url: practice.url, status: practice.status, message: practice.message,
-} : { url: '', status: 'not_started', message: 'Dán link chia sẻ sau khi luyện xong.' };
+const retryableEvidenceReview = practice =>
+  practice.status === 'needs_review' && practice.errorCode === INVALID_EVIDENCE;
+
+export function practiceStatus(practice) {
+  if (!practice) return { url: '', status: 'not_started', message: 'Dán link chia sẻ sau khi luyện xong.' };
+  const { id, url, status, message } = practice;
+  if (retryableEvidenceReview(practice)) return { id, url, status: 'retry', message: evidenceRetryNotice };
+  return { id, url, status, message };
+}
 
 export function queueLesson4Share(session, { url, requestId }, now) {
   const previous = session.practice;
@@ -20,7 +28,8 @@ export function queueLesson4Share(session, { url, requestId }, now) {
   if (session.practiceHistory?.some(entry => entry.requestId === requestId)) {
     throw error('SHARE_REQUEST_SUPERSEDED', 409);
   }
-  if (previous?.url === url && ['queued', 'processing', 'accepted', 'needs_review'].includes(previous.status)) {
+  if (previous?.url === url && ['queued', 'processing', 'accepted', 'needs_review'].includes(previous.status) &&
+      !retryableEvidenceReview(previous)) {
     return practiceStatus(previous);
   }
   if (previous) session.practiceHistory = [...(session.practiceHistory || []), previous].slice(-100);
@@ -76,11 +85,11 @@ function transcript(conversation) {
 
 function choiceAnswerIndices(ids, index, messages) {
   if (!Array.isArray(ids) || ids.length < 1 || ids.length > 2 || new Set(ids).size !== ids.length) {
-    throw error('SHARE_EVIDENCE_INVALID', 503);
+    throw error(INVALID_EVIDENCE, 503);
   }
   return ids.map(id => {
     const answer = index.get(id);
-    if (messages[answer]?.role !== 'user') throw error('SHARE_EVIDENCE_INVALID', 503);
+    if (messages[answer]?.role !== 'user') throw error(INVALID_EVIDENCE, 503);
     return answer;
   });
 }
@@ -105,7 +114,7 @@ export async function verifyLesson4Conversation(conversation, analyze) {
   if (!studentTurns.length) return rejected('analysis');
   const evidence = await analyze({ topic: LESSON4_TOPIC, messages: eligible, stages: lesson4Stages });
   if (!evidence || !Array.isArray(evidence.milestones) || evidence.milestones.length > lesson4Stages.length) {
-    throw error('SHARE_EVIDENCE_INVALID', 503);
+    throw error(INVALID_EVIDENCE, 503);
   }
   let latestAnswer = -1;
   let summary = -1;
@@ -113,7 +122,7 @@ export async function verifyLesson4Conversation(conversation, analyze) {
   const index = new Map(eligible.map((message, i) => [message.id, i]));
   for (const proof of evidence.milestones) {
     const stage = proof?.stage;
-    if (!lesson4Stages.includes(stage) || found.has(stage)) throw error('SHARE_EVIDENCE_INVALID', 503);
+    if (!lesson4Stages.includes(stage) || found.has(stage)) throw error(INVALID_EVIDENCE, 503);
     found.add(stage);
     if (stage === 'ideas') {
       latestAnswer = Math.max(latestAnswer,
@@ -122,16 +131,16 @@ export async function verifyLesson4Conversation(conversation, analyze) {
       continue;
     }
     const prompt = index.get(proof?.promptId);
-    if (eligible[prompt]?.role !== 'assistant') throw error('SHARE_EVIDENCE_INVALID', 503);
+    if (eligible[prompt]?.role !== 'assistant') throw error(INVALID_EVIDENCE, 503);
     if (stage === 'summary') {
-      if (proof.answerId !== null) throw error('SHARE_EVIDENCE_INVALID', 503);
+      if (proof.answerId !== null) throw error(INVALID_EVIDENCE, 503);
       summary = prompt;
       continue;
     }
     const answer = index.get(proof.answerId);
     if (eligible[answer]?.role !== 'user' || answer <= prompt ||
         eligible.slice(prompt + 1, answer).some(message => message.role === 'assistant')) {
-      throw error('SHARE_EVIDENCE_INVALID', 503);
+      throw error(INVALID_EVIDENCE, 503);
     }
     latestAnswer = Math.max(latestAnswer, answer);
   }
@@ -165,7 +174,7 @@ export function lesson4ShareAnalyzer(callAI) {
     try {
       return JSON.parse(result.outputText.trim().replace(/^```(?:json)?\s*|\s*```$/gi, ''));
     } catch {
-      throw error('SHARE_EVIDENCE_INVALID', 503);
+      throw error(INVALID_EVIDENCE, 503);
     }
   };
 }
@@ -193,10 +202,13 @@ export function createLesson4ShareWorker({ store, readShare, analyze, clock = Da
       await update({ ...outcome, recognizerVersion: RECOGNIZER_VERSION, finishedAt: clock() });
     } catch (failure) {
       if (failure.code !== 'SHARE_SUPERSEDED') {
+        const evidenceInvalid = startedAnalysis && failure.code === INVALID_EVIDENCE;
+        const needsReview = startedAnalysis && !evidenceInvalid;
         const openingAttachment = !startedAnalysis && failure.shareReadDetail === 'FIRST_USER_ATTACHMENT_ONLY';
         await update({
-          status: startedAnalysis ? 'needs_review' : 'retry',
-          message: startedAnalysis ? 'Chưa rõ kết quả kiểm. Link đã được giữ để đối soát.' :
+          status: needsReview ? 'needs_review' : 'retry',
+          message: needsReview ? 'Chưa rõ kết quả kiểm. Link đã được giữ để đối soát.' :
+            evidenceInvalid ? evidenceRetryNotice :
             openingAttachment ? openingAttachmentNotice : 'Chưa đọc được link. Kiểm tra link chia sẻ công khai rồi thử lại.',
           ...(openingAttachment ? { readDetail: failure.shareReadDetail } : {}),
           ...(startedAnalysis ? { recognizerVersion: RECOGNIZER_VERSION } : {}),

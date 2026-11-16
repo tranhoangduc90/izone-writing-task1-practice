@@ -10,7 +10,7 @@ import { createApi } from '../src/http.mjs';
 import { createService } from '../src/service.mjs';
 import { createStore } from '../src/store.mjs';
 import {
-  createLesson4ShareWorker, lesson4ShareAnalyzer, lesson4Stages, LESSON4_SHARE_POLICY,
+  createLesson4ShareWorker, lesson4ShareAnalyzer, lesson4Stages, practiceStatus, queueLesson4Share, LESSON4_SHARE_POLICY,
   LESSON4_STARTER, LESSON4_TOPIC, verifyLesson4Conversation,
 } from '../src/writing-lesson4-share.mjs';
 
@@ -87,6 +87,30 @@ test('Share requires selections from both bodies and a summary after the last se
     { code: 'SHARE_EVIDENCE_INVALID' });
 });
 
+test('Same Share can retry an older evidence error and keeps unrelated reviews pending', () => {
+  const url = shareUrl(6);
+  const original = { id: 'old-attempt', requestId: 'old-click', url, status: 'needs_review',
+    errorCode: 'SHARE_EVIDENCE_INVALID', message: 'Chưa rõ kết quả kiểm.' };
+  const session = { practice: original };
+  const repeat = queueLesson4Share(session, { url, requestId: original.requestId }, 10);
+  assert.equal(repeat.id, original.id);
+  const retried = queueLesson4Share(session, { url, requestId: 'new-click' }, 20);
+  assert.equal(retried.status, 'queued');
+  assert.equal(practiceStatus(original).status, 'retry');
+  assert.match(practiceStatus(original).message, /Kiểm tra link/);
+  assert.notEqual(retried.id, original.id);
+  assert.deepEqual(session.practiceHistory, [original]);
+  assert.throws(() => queueLesson4Share(session, { url, requestId: original.requestId }, 21),
+    { code: 'SHARE_REQUEST_SUPERSEDED' });
+
+  const uncertain = { ...original, errorCode: 'SHARE_LEASE_EXPIRED' };
+  const pendingReview = { practice: uncertain };
+  const preserved = queueLesson4Share(pendingReview, { url, requestId: 'new-click' }, 20);
+  assert.equal(preserved.id, uncertain.id);
+  assert.equal(preserved.status, 'needs_review');
+  assert.equal(pendingReview.practiceHistory, undefined);
+});
+
 test('Share unlocks only its Writing session and gates the native HTTP save and check', async t => {
   const rows = [{ frame: { id: 'opening', role: 'user', text: '', fileAttachments: [{ kind: 'file' }] } }];
   t.mock.method(https, 'get', (url, options, callback) => {
@@ -110,6 +134,7 @@ test('Share unlocks only its Writing session and gates the native HTTP save and 
     roster: async () => [{ classRef: 'IC9999', students: [{ studentRef: 'a' }, { studentRef: 'b' }] }],
     renderJob: () => 'Outline grading fixture',
   });
+  let splitAnalyses = 0;
   const worker = createLesson4ShareWorker({
     store,
     readShare: async url => {
@@ -119,7 +144,14 @@ test('Share unlocks only its Writing session and gates the native HTTP save and 
       return { messages: complete.messages.slice(0, url === LESSON4_STARTER ? 2 : url === shareUrl(2) ? 10 : 12) };
     },
     analyze: async ({ messages }) => {
-      if (messages.at(-1).id === 'm17') return { milestones: splitMilestones };
+      if (messages.at(-1).id === 'm17') {
+        splitAnalyses += 1;
+        if (splitAnalyses === 1) {
+          const [analysis, ...rest] = splitMilestones;
+          return { milestones: [{ ...analysis, promptId: analysis.answerId }, ...rest] };
+        }
+        return { milestones: splitMilestones };
+      }
       return { milestones: lesson4Stages.slice(0, messages.length === 9 ? 4 : 6).map((stage, i) => stage === 'ideas'
         ? { stage, body1AnswerIds: ['m8'], body2AnswerIds: ['m8'] }
         : { stage, promptId: 'm' + (i * 2 + 1), answerId: stage === 'summary' ? null : 'm' + (i * 2 + 2) }) };
@@ -164,13 +196,44 @@ test('Share unlocks only its Writing session and gates the native HTTP save and 
   for (const [url, expected, message] of [[LESSON4_STARTER, 'rejected'], [shareUrl(2), 'rejected'],
     [shareUrl(4), 'retry', 'Chưa đọc được link. Kiểm tra link chia sẻ công khai rồi thử lại.'],
     [shareUrl(5), 'retry', 'Chưa đọc được nội dung đoạn chat của em vì nó khởi đầu bằng một tệp. Em hãy quay lại nhấn Mở bài luyện và chat ngay trong đoạn chat vừa mở. Nếu vẫn không được, hãy gửi link cho giảng viên kèm theo ảnh chụp màn hình để được hỗ trợ.'],
-    [shareUrl(3), 'accepted'], [shareUrl(6), 'accepted']]) {
+    [shareUrl(3), 'accepted']]) {
     assert.equal((await send('/practice', { url, requestId: 'try-' + url.at(-1) })).status, 202);
     assert.equal(await worker(), true);
     const { practice } = (await get('/practice')).body;
     assert.equal(practice.status, expected);
     if (message) assert.equal(practice.message, message);
   }
+  const badEvidence = { url: shareUrl(6), requestId: 'try-6' };
+  assert.equal((await send('/practice', badEvidence)).status, 202);
+  assert.equal(await worker(), true);
+  const failed = (await get('/practice')).body.practice;
+  assert.equal((await readProgress()).body.progress.accepted, false);
+  const sameClick = await send('/practice', badEvidence);
+  assert.equal(sameClick.status, 200);
+  assert.equal(sameClick.body.practice.id, failed.id);
+  assert.equal(await worker(), false);
+  assert.equal(splitAnalyses, 1);
+
+  const retryClick = { ...badEvidence, requestId: 'try-6-again' };
+  const retry = await send('/practice', retryClick);
+  assert.equal(retry.status, 202);
+  assert.notEqual(retry.body.practice.id, failed.id);
+  assert.equal(retry.body.practice.url, failed.url);
+  assert.equal(failed.status, 'retry');
+  assert.match(failed.message, /Kiểm tra link/);
+  const duplicate = await send('/practice', { ...badEvidence, requestId: 'try-6-while-queued' });
+  assert.equal(duplicate.body.practice.id, retry.body.practice.id);
+  assert.equal(await worker(), true);
+  const passed = (await get('/practice')).body.practice;
+  assert.equal(passed.id, retry.body.practice.id);
+  assert.equal(passed.status, 'accepted');
+  const afterAccept = await send('/practice', { ...badEvidence, requestId: 'try-6-after-accept' });
+  assert.deepEqual(afterAccept.body.practice, passed);
+  assert.equal(await worker(), false);
+  assert.equal(splitAnalyses, 2);
+  const previous = (await store.read(session.ref)).practiceHistory.find(item => item.id === failed.id);
+  assert.equal(previous.errorCode, 'SHARE_EVIDENCE_INVALID');
+
   assert.equal((await call('/sessions/' + other.session.ref, { token: other.token })).body.session.practice.status, 'not_started');
   assert.equal((await send('/responses', draft, 'PUT')).status, 200);
   assert.equal((await send('/checks', check)).status, 202);
@@ -204,6 +267,8 @@ test('Share unlocks only its Writing session and gates the native HTTP save and 
   const checked = events.filter(event => event.details.recognizerVersion === 'lesson4-share-evidence-v2');
   assert.equal(checked.filter(event => event.kind === 'share_accepted').length, 2);
   assert.equal(checked.find(event => event.details.stage === 'opinion')?.kind, 'share_rejected');
+  assert.equal(checked.find(event => event.details.practiceId === failed.id)?.details.error, 'SHARE_EVIDENCE_INVALID');
+  assert.equal(checked.find(event => event.details.practiceId === failed.id)?.kind, 'share_retry');
   assert.ok(!JSON.stringify(events).includes('chatgpt.com'));
   const changed = await send('/responses', { requestId: 'edit-1', baseVersion: 2, responses: { body1_idea1: 'Mua sắm để cải thiện tâm trạng' } }, 'PUT');
   assert.equal(changed.body.session.steps.body1_topic.status, 'revision');

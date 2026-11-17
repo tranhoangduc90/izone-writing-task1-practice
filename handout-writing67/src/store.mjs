@@ -89,7 +89,7 @@ export function createStore(db,{clock=Date.now,onQueueCommitted,onQueueError=()=
     async readForPoll(ref, knownRevision, maxJobMs) {
       // Include the row version because changes to feedback or a lease need not change draft version.
       const result = await db.query(`
-        SELECT revision,
+        SELECT revision, payload ? 'lesson5IdeaSource' AS requires_homework,
           CASE WHEN revision IS DISTINCT FROM $2::text THEN payload END AS payload,
           CASE WHEN revision = $2::text THEN (
             SELECT min(least(

@@ -30,7 +30,8 @@ const writingEntryKey=process.env.HANDOUT67_WRITING_ENTRY_KEY_FILE?
   fs.readFileSync(process.env.HANDOUT67_WRITING_ENTRY_KEY_FILE,'utf8').trim():null;
 if(lesson4ShareEnabled(lessons.lesson4)&&(!writingEntryKey||writingEntryKey.length<32||
   [settings.internalSecret,settings.secret].includes(writingEntryKey)))throw Error('WRITING_ENTRY_CONFIG_REQUIRED');
-const service=createService({store,roster,secret:settings.secret,renderJob,lessons,retryDelays:[0,5000,15000]});
+const service=createService({store,roster,secret:settings.secret,renderJob,lessons,
+  lesson5HomeworkImport:process.env.HANDOUT67_LESSON5_HOMEWORK==='1',retryDelays:[0,5000,15000]});
 // Không có pump gọi AI nền; n8n phải chờ endpoint xử lý mỗi attempt để giữ trần chung.
 const callAI=gatewayAdapter(settings);
 const processor=createProcessor({service,callAI,onError:code=>console.error('Handout67: '+code)});

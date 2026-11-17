@@ -99,7 +99,7 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
       else if(path===prefix+'/sessions'&&req.method==='POST'){
         const input=await jsonBody(req);
         if(input?.activity==='lesson4'&&!equal(req.headers.authorization,writingEntryKey&&'Bearer '+writingEntryKey))fail('WRITING_ENTRY_REQUIRED',403);
-        value=await service.open(input);status=201;
+        value=await service.open(input,req.headers.authorization?.replace(/^Bearer /,''));status=201;
       }
       else if(path===prefix+'/integrations/homework/lesson4/progress'&&req.method==='POST'){
         if(origin||!writingEntryKey||!equal(req.headers.authorization,'Bearer '+writingEntryKey))fail('WRITING_ENTRY_REQUIRED',403);
@@ -129,7 +129,7 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
             if(origin)res.setHeader('Access-Control-Expose-Headers','ETag');
           }
           if(result.notModified){res.writeHead(304);res.end();return;}
-          value={session:result.session};
+          value={session:result.session,...(result.lesson5IdeaTicket?{lesson5IdeaTicket:result.lesson5IdeaTicket}:{})};
         }
         else if(req.method==='GET'&&match[2]==='practice')value={practice:await service.practice(ref,token)};
         else if(req.method==='POST'&&match[2]==='practice'){value={practice:await service.savePractice(ref,token,await jsonBody(req))};status=['queued','processing'].includes(value.practice.status)?202:200;}

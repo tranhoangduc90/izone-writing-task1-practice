@@ -7,6 +7,7 @@ import {validateTeacherRegistry} from './teacher-registry.mjs';
 import { createWake } from './wake.mjs';
 import { promptRenderer } from './prompt.mjs';
 import { config,rosterAdapter } from './config.mjs';
+import {createLesson5CourseRoster,lesson5TeacherRegistry} from './lesson5-course-roster.mjs';
 import { createStore,postgresAdapter } from './store.mjs';
 import { createService } from './service.mjs';
 import { createApi } from './http.mjs';
@@ -25,7 +26,20 @@ const wake=createWake({url:settings.wakeUrl,secret:settings.wakeSecret,hasWork:a
 const store=createStore(postgresAdapter(pool),{onQueueCommitted:wake.request,onQueueError:reportWakeError});
 await pool.query('SELECT job_ref FROM handout67.grading_attempt LIMIT 1');
 const renderJob=await promptRenderer(settings.promptFile,{classes:settings.classes}),lessons=renderJob.lessons;
-const roster=rosterAdapter(settings);
+const staticRoster=rosterAdapter(settings);
+const courseRosterPath=process.env.HANDOUT67_LESSON5_COURSE_ROSTER_FILE;
+const lesson5CourseRoster=courseRosterPath?createLesson5CourseRoster(courseRosterPath,code=>console.error('Handout67: '+code)):()=>null;
+if(courseRosterPath){
+  const {classes,defaultClass}=lessons.lesson5;
+  Object.defineProperties(lessons.lesson5,{
+    classes:{enumerable:true,get:()=>lesson5CourseRoster()?.refs||classes},
+    defaultClass:{enumerable:true,get(){return this.classes.includes(defaultClass)?defaultClass:this.classes[0];}},
+  });
+}
+const roster=async(activity,scope)=>{
+  const snapshot=activity==='lesson5'?lesson5CourseRoster():null;
+  return snapshot?snapshot.classes:staticRoster(activity,scope);
+};
 const writingEntryKey=process.env.HANDOUT67_WRITING_ENTRY_KEY_FILE?
   fs.readFileSync(process.env.HANDOUT67_WRITING_ENTRY_KEY_FILE,'utf8').trim():null;
 if(lesson4ShareEnabled(lessons.lesson4)&&(!writingEntryKey||writingEntryKey.length<32||
@@ -45,12 +59,12 @@ async function checkShare(){
 }
 const shareTimer=shareWorker?setInterval(checkShare,2000):null;
 shareTimer?.unref();
-// Danh sách quyền lớp do Handout67 sở hữu; không đọc bảng tài khoản của hệ khác.
+// Grant hiện có thuộc Handout67. Chỉ Lesson 5 nhận thêm grant đã đối soát từ roster khóa 67.
 const oauth=new OAuth2Client();
 oauth.transporter.defaults={...oauth.transporter.defaults,timeout:5000};
 const registry=()=>{
   const value=JSON.parse(fs.readFileSync(settings.teacherFile,'utf8'));
-  return validateTeacherRegistry(value,settings.classes);
+  return lesson5TeacherRegistry(validateTeacherRegistry(value,settings.classes),lesson5CourseRoster());
 };
 if(settings.teacherFile)registry();
 const teacher=settings.teacherFile?createTeacher({db:pool,store,roster,registry,lessons,secret:settings.teacherSecret,verifyGoogleToken:async(token,audience)=>(await oauth.verifyIdToken({idToken:token,audience})).getPayload()}):null;

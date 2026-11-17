@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh Handout67 Lesson 5 classes from the verified K67 roster
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/izone-lesson5-k67-20261117/refresh-lesson5-course67.py
+TimeoutStartSec=40
+UMask=0077

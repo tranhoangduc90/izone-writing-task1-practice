@@ -17,6 +17,8 @@ export async function auditChange(tx,before,after,now,saveRequestId){
       ON CONFLICT(event_key) DO NOTHING`,[iso(now),key,after.ref,after.classRef,after.studentRef,job?.jobRef??null,job?.tries||null,job?.section??null,job?.ideaIndex??null,kind,JSON.stringify(details)]);
   }
   if(!before)await event(`${after.ref}:open`,'session_opened');
+  if(after.lesson5IdeaSource&&!before?.lesson5IdeaSource)
+    await event(`${after.ref}:lesson5-homework`,'lesson5_homework_ideas_applied',null,{...after.lesson5IdeaSource,targetVersion:after.version});
   const practice=after.practice;
   if(practice&&(practice.id!==before?.practice?.id||practice.status!==before.practice.status)){
     await event(`${practice.id}:${practice.status}:${practice.startedAt||practice.queuedAt}`,'share_'+practice.status,null,{

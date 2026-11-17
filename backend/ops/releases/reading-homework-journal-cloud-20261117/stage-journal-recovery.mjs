@@ -15,10 +15,11 @@ async function stage() {
   const sha = bytes => createHash('sha256').update(bytes).digest('hex');
   const files = [];
   for (const [path, prepare] of bundle) {
-    const source = (await readFile(join(release, path), 'utf8')).replaceAll('\r\n', '\n');
+    const raw = await readFile(join(release, path));
+    const source = raw.toString('utf8').replaceAll('\r\n', '\n');
     const candidate = prepare(source);
     await writeFile(join(root, basename(path)), candidate, { flag: 'wx' });
-    files.push({ path, sourceSha256: sha(source), candidateSha256: sha(candidate) });
+    files.push({ path, sourceRawSha256: sha(raw), sourceSha256: sha(source), candidateSha256: sha(candidate) });
   }
   const helper = await readFile(new URL('./reading-journal-recovery.mjs', import.meta.url));
   await writeFile(join(root, 'reading-journal-recovery.mjs'), helper, { flag: 'wx' });

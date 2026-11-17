@@ -1,0 +1,9 @@
+[Unit]
+Description=Keep the Handout67 Lesson 5 class roster current
+
+[Timer]
+OnCalendar=*-*-* *:00/20:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

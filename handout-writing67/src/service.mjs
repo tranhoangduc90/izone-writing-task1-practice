@@ -13,6 +13,7 @@ export const hash = value => createHash('sha256').update(JSON.stringify(value)).
 export function fail(code, status=400) { throw Object.assign(new Error(code), {status}); }
 const string = value => typeof value==='string' && value.trim().length>0 && value.length<=4000;
 const id = value => typeof value==='string' && /^[a-zA-Z0-9_.:-]{1,128}$/.test(value);
+const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const object = value => value!==null && typeof value==='object' && !Array.isArray(value);
 export const publicTeacherComments = s => (s.teacherComments||[]).map(c=>({ref:c.ref,section:c.section,feedback:c.feedback,authorName:c.authorName,createdAt:c.createdAt,snapshot:c.snapshot}));
 const passed = (s,key) => s.steps[key].status==='passed';
@@ -60,7 +61,7 @@ export function lesson4BodyProgress(session, body) {
   };
 }
 
-export function createService({store, roster, secret, clock=Date.now, leaseMs=300000, sessionMs=43200000, maxLeases=null, maxJobMs=1800000, retryDelays=[0,0,0], renderJob, promptVersion='lesson5-rubric-v3',lessons={lesson5:{...LEGACY_LESSON5,promptVersion}}}) {
+export function createService({store, roster, secret, clock=Date.now, leaseMs=300000, sessionMs=43200000, maxLeases=null, maxJobMs=1800000, retryDelays=[0,0,0], renderJob, lesson5HomeworkImport=false, promptVersion='lesson5-rubric-v3',lessons={lesson5:{...LEGACY_LESSON5,promptVersion}}}) {
   if (typeof secret!=='string' || secret.length<32 || leaseMs<=180000) fail('CONFIG_INVALID');
   if(maxLeases!==null&&(!Number.isSafeInteger(maxLeases)||maxLeases<1))fail('CONFIG_INVALID');
   if(!Number.isSafeInteger(maxJobMs)||maxJobMs<leaseMs*3||retryDelays.length!==3||retryDelays.some(v=>!Number.isSafeInteger(v)||v<0))fail('CONFIG_INVALID');
@@ -71,21 +72,54 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     // Lấy job cuối của từng bước/ý trước khi lọc, không hiện lỗi cũ sau lượt mới đã đạt.
     const latest=Object.fromEntries(s.jobs.map(j=>[jobStateKey(j),j]));
     const processing=Object.fromEntries(Object.entries(latest).filter(([,j])=>['queued','leased','failed'].includes(j.status)).map(([key,j])=>[key,{jobRef:j.jobRef,status:j.status,tries:j.tries,maxTries:3,createdAt:j.createdAt,deadlineAt:j.deadlineAt??j.createdAt+maxJobMs,leaseUntil:j.leaseUntil,nextAttemptAt:j.nextAttemptAt??null,error:j.error??null}]));
-    return withBodies({ref:s.ref,activity:s.activity,...(isBodyOutline(s)?{outlineOnly:true}:{}),...(isMulti(s)?{handoutMode:s.handoutMode,bodyProgress:s.bodyProgress,...(isPrepared(s)?{preparationMode:s.preparationMode,...preparationContext(s)}:{})}:{}),workflowMode:s.workflowMode||GUIDED,workflowVersion:s.workflowVersion||1,body:s.body||2,classRef:s.classRef,studentRef:s.studentRef,responses:s.responses,version:s.version,idea2Open:s.idea2Open,steps:s.steps,vocabulary:s.vocabulary,teacherComments:publicTeacherComments(s),commentThreads:publicThreads(s),commentVersion:s.commentVersion||0,submittedSections:[...new Set(s.jobs.filter(j=>j.kind==='grade').map(j=>j.section))],processing,...(isTwoQuestionOutline(s)?{practice:practiceStatus(s.practice),writingEntry:s.writingEntry}:{})});
+    return withBodies({ref:s.ref,activity:s.activity,...(isBodyOutline(s)?{outlineOnly:true}:{}),...(isMulti(s)?{handoutMode:s.handoutMode,bodyProgress:s.bodyProgress,...(isPrepared(s)?{preparationMode:s.preparationMode,...preparationContext(s)}:{})}:{}),workflowMode:s.workflowMode||GUIDED,workflowVersion:s.workflowVersion||1,body:s.body||2,classRef:s.classRef,studentRef:s.studentRef,responses:s.responses,version:s.version,idea2Open:s.idea2Open,steps:s.steps,vocabulary:s.vocabulary,teacherComments:publicTeacherComments(s),commentThreads:publicThreads(s),commentVersion:s.commentVersion||0,...(s.lesson5IdeaSource?{lesson5IdeaSource:s.lesson5IdeaSource}:{}),submittedSections:[...new Set(s.jobs.filter(j=>j.kind==='grade').map(j=>j.section))],processing,...(isTwoQuestionOutline(s)?{practice:practiceStatus(s.practice),writingEntry:s.writingEntry,...(canOfferLesson5(s)?{lesson5IdeaAvailable:true}:{})}:{})});
   };
   const expiryDue = (session, now) => session.jobs.some(job =>
     ['queued', 'leased'].includes(job.status) && (now >= (job.deadlineAt ?? job.createdAt + maxJobMs) ||
       (job.status === 'leased' && job.leaseUntil <= now)));
-  const issue = (ref,writingEntry=false) => {const content=`${writingEntry?'writing4-':''}${ref}.${clock()+sessionMs}`;return `${content}.${sign(content)}`;};
+  const signed = content => `${content}.${sign(content)}`;
+  const issue = s => signed(`${isTwoQuestionOutline(s)?'writing4-':s.lesson5IdeaSource?'writing5-':''}${s.ref}.${clock()+sessionMs}`);
+  function signatureMatches(content,sig){
+    const expected=sign(content);
+    return typeof sig==='string'&&Buffer.byteLength(sig)===Buffer.byteLength(expected)&&timingSafeEqual(Buffer.from(sig),Buffer.from(expected));
+  }
   const authorize = (ref,token) => {
     if (typeof token!=='string') fail('SESSION_UNAUTHORIZED',401);
     const [owner,expiry,sig,...extra] = token.split('.');
-    const expected = sign(`${owner}.${expiry}`);
-    if (extra.length || (owner!==ref&&owner!=='writing4-'+ref) || !/^\d+$/.test(expiry||'') || Number(expiry)<=clock() || typeof sig!=='string' || Buffer.byteLength(sig)!==Buffer.byteLength(expected) || !timingSafeEqual(Buffer.from(sig),Buffer.from(expected))) fail('SESSION_UNAUTHORIZED',401);
+    if(extra.length||![ref,'writing4-'+ref,'writing5-'+ref].includes(owner)||!/^\d+$/.test(expiry||'')||Number(expiry)<=clock()||!signatureMatches(`${owner}.${expiry}`,sig))fail('SESSION_UNAUTHORIZED',401);
+    return owner;
   };
+  function authorizeHomework(ref,token){
+    if(typeof token!=='string'||!token.startsWith('writing5-')||authorize(ref,token)!=='writing5-'+ref)
+      fail('LESSON5_HOMEWORK_AUTH_REQUIRED',403);
+  }
+  const verifiedOutline=s=>isTwoQuestionOutline(s)&&s.writingEntry&&s.practice?.status==='accepted'&&
+    s.practice.policy===lessons.lesson4?.sharePolicy;
+  const sourceIdeas=s=>Object.fromEntries(['idea1','idea2'].flatMap(field=>{
+    const text=s.responses?.[bodyKey(2,field)];
+    return typeof text==='string'&&text.trim()&&text.length<=4000?[[field,text]]:[];
+  }));
+  const canOfferLesson5=s=>verifiedOutline(s)&&lessons.lesson5&&
+    (!lessons.lesson5.classes||lessons.lesson5.classes.includes(s.classRef))&&Object.keys(sourceIdeas(s)).length>0;
+  function lesson5Offer(s,token){
+    if(!token.startsWith('writing4-')||!canOfferLesson5(s))return {};
+    return {lesson5IdeaTicket:signed(`lesson5-ideas.${s.ref}.${s.version}.${clock()+120000}`)};
+  }
+  async function readIdeaSource(input){
+    if(input.activity!=='lesson5'||typeof input.lesson5IdeaTicket!=='string'||input.lesson5IdeaTicket.length>200)fail('LESSON5_HOMEWORK_AUTH_REQUIRED',403);
+    const [purpose,ref,version,expiry,sig,...extra]=input.lesson5IdeaTicket.split('.');
+    if(extra.length||purpose!=='lesson5-ideas'||!uuid.test(ref||'')||!/^\d+$/.test(version||'')||!/^\d+$/.test(expiry||'')||Number(expiry)<=clock()||
+       !signatureMatches(`${purpose}.${ref}.${version}.${expiry}`,sig))fail('LESSON5_HOMEWORK_AUTH_REQUIRED',403);
+    const source=await store.read(ref);
+    if(!source||!verifiedOutline(source)||source.classRef!==input.classRef||source.studentRef!==input.studentRef)
+      fail('LESSON5_HOMEWORK_AUTH_REQUIRED',403);
+    if(source.version!==Number(version))fail('LESSON5_HOMEWORK_CHANGED',409);
+    return source;
+  }
   const edit = async (ref, token, change, saveRequestId, practiceAccess=false) => {
     authorize(ref,token);
     const result = await store.edit(ref, s=>{
+      if(s.lesson5IdeaSource)authorizeHomework(ref,token);
       if(isTwoQuestionOutline(s)&&!practiceAccess&&
         (!lesson4ShareEnabled(lessonFor(s.activity))||s.practice?.status!=='accepted'||s.practice.policy!==lessonFor(s.activity).sharePolicy))
         fail('PRACTICE_NOT_ACCEPTED',422);
@@ -175,7 +209,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     authorizeSession(ref,token) {authorize(ref,token);},
     lesson(activity='lesson5'){return publicLesson(lessonFor(activity));},
     async roster(activity='lesson5') {const lesson=lessonFor(activity);return (await roster(activity,lesson.rosterScope)).filter(c=>!lesson.classes||lesson.classes.includes(c.classRef));},
-    async open(input) {
+    async open(input,token) {
       if (!object(input) || !id(input.activity) || !id(input.classRef) || !id(input.studentRef)) fail('IDENTITY_INVALID');
       const rows=await api.roster(input.activity);
       if (!rows.some(c=>c.classRef===input.classRef && c.students.some(s=>s.studentRef===input.studentRef))) fail('STUDENT_OUT_OF_SCOPE',403);
@@ -184,8 +218,28 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
       if(isTwoQuestionOutline(lesson)&&(!object(writingEntry)||!/^hw-k67-writing-lesson4-\d+$/.test(writingEntry.assignmentId||'')||
         !Number.isSafeInteger(writingEntry.contentVersion)||writingEntry.contentVersion<1))fail('WRITING_ENTRY_REQUIRED',403);
       const key=JSON.stringify([input.activity,input.classRef,input.studentRef,...(writingEntry?[writingEntry.assignmentId,writingEntry.contentVersion]:[])]);
+      const source=input.lesson5IdeaTicket===undefined?null:await readIdeaSource(input);
       const s=await store.open(key,ref=>({ref,activity:input.activity,...(writingEntry?{writingEntry:{assignmentId:writingEntry.assignmentId,contentVersion:writingEntry.contentVersion}}:{}),...(isBodyOutline(lesson)?{outlineOnly:true}:{}),handoutMode:lesson.handoutMode,...(isPrepared(lesson)?{preparationMode:lesson.preparationMode,...preparationContext(lesson)}:{}),...(isMulti(lesson)?{bodyProgress:{1:{idea2Open:false},2:{idea2Open:false}}}:{}),workflowMode:lesson.workflowMode||GUIDED,workflowVersion:1,body:lesson.body,classRef:input.classRef,studentRef:input.studentRef,responses:Object.fromEntries([...Object.values(policy.fields).flat(),...(isBodyOutline(lesson)&&!isTwoQuestionOutline(lesson)?['stance']:[])].map(k=>[k,''])),version:0,idea2Open:false,steps:Object.fromEntries(policy.order.map(k=>[k,{status:'draft',history:[],error:null}])),jobs:[],vocabulary:{},saves:{}}));
-      return {session:publicSession(s),token:issue(s.ref,isTwoQuestionOutline(s))};
+      const opened=current=>({
+        session:publicSession(current),
+        token:issue(current)
+      });
+      if(source)return store.edit(s.ref,current=>{
+        // Apply once, before the first Topic Check. Never alter a submitted outline or later progress.
+        if(lesson5HomeworkImport&&!current.lesson5IdeaSource&&current.steps.topic?.status==='draft'&&
+           !current.jobs.some(job=>job.kind==='grade'&&job.section==='topic')){
+          const additions=Object.entries(sourceIdeas(source)).filter(([field])=>!current.responses[field]?.trim());
+          if(additions.length){
+            Object.assign(current.responses,Object.fromEntries(additions));
+            current.version++;
+            current.lesson5IdeaSource={fields:additions.map(([field])=>field),sourceVersion:source.version,
+              status:lesson4BodyProgress(source,2).passed?'checked':'draft',at:new Date(clock()).toISOString()};
+          }
+        }
+        return opened(current);
+      });
+      if(s.lesson5IdeaSource)authorizeHomework(s.ref,token);
+      return opened(s);
     },
     async readLesson4Progress(input) {
       if (!object(input) || !/^IC[0-9]+$/.test(input.classRef || '') || !id(input.studentRef) ||
@@ -202,6 +256,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     },
     async read(ref,token) {
       authorize(ref,token);const s=await store.read(ref);if(!s)fail('SESSION_NOT_FOUND',404);
+      if(s.lesson5IdeaSource)authorizeHomework(ref,token);
       if(expiryDue(s,clock()))return edit(ref,token,current=>{expire(current);return publicSession(current);},undefined,true);
       return publicSession(s);
     },
@@ -212,6 +267,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
         ? ifNoneMatch.slice(prefix.length, -1) : null;
       const row = await store.readForPoll(ref, knownRevision, maxJobMs);
       if (!row) fail('SESSION_NOT_FOUND', 404);
+      if(row.requires_homework||row.payload?.lesson5IdeaSource)authorizeHomework(ref,token);
       const etag = `${prefix}${row.revision}"`;
       const now = clock();
       const needsExpiry = row.payload
@@ -220,7 +276,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
       // Expiry can change the stored row during the read. The next poll can obtain its new ETag.
       if (needsExpiry) return {session:await edit(ref, token, current => {expire(current);return publicSession(current);},undefined,true)};
       if (!row.payload) return {etag, notModified:true};
-      return {etag, session:publicSession(row.payload)};
+      return {etag, session:publicSession(row.payload),...lesson5Offer(row.payload,token)};
     },
     async practice(ref,token){
       authorize(ref,token);

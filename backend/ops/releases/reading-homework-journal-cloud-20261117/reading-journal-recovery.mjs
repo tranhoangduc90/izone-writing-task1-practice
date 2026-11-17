@@ -1,18 +1,25 @@
 import { createHash } from 'node:crypto';
-import { resolve } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const digest = /^[a-f0-9]{64}$/;
 const maximumBindings = 16;
 
-export function createReadingJournalRecovery({ db, journal, canonical, storageScope, readingHomeworkBinding }) {
+export function createReadingJournalRecovery({ db, journal, canonical, storageScope, readingHomeworkBinding, cloudTicket, readMode }) {
   // Only the authenticated native scope supplies owner, class and assignment.
   // The browser contributes opaque hashes from its outbox.
-  return async function recover(scope, bindingIds) {
+  return async function recover(scope, bindingIds, lane = 'collector') {
     if (!Array.isArray(bindingIds) || !bindingIds.length || bindingIds.length > maximumBindings
       || bindingIds.some(id => typeof id !== 'string' || !digest.test(id))) {
       throw Object.assign(new Error('READING_JOURNAL_BINDINGS_INVALID'), { status: 400 });
     }
+    if (lane === 'preferred') {
+      // Collector mode uses the grant already returned by the native draft.
+      if (!cloudTicket || await readMode?.() !== 'cloud') return [];
+      lane = 'cloud';
+    }
+    if (lane === 'cloud' && !cloudTicket) return [];
     const pending = new Set(bindingIds);
     const values = [scope.ownerId, scope.courseId, scope.code, String(scope.version)];
     const { rows } = await db.query(`
@@ -42,9 +49,9 @@ export function createReadingJournalRecovery({ db, journal, canonical, storageSc
       const bound = storageScope(readingHomeworkBinding({ ...candidate, runNo: row.run_no }));
       const bindingId = createHash('sha256').update(canonical(bound)).digest('hex');
       if (!pending.has(bindingId)) continue;
-      const context = await journal.context(candidate, row.run_no);
+      const context = lane === 'cloud' ? { bindingId, ...cloudTicket.issue(bound) } : await journal.context(candidate, row.run_no);
       if (context?.bindingId !== bindingId) continue;
-      result.push(context);
+      result.push({ ...context, archiveLane: lane });
       pending.delete(bindingId);
     }
     return result;
@@ -60,8 +67,8 @@ export function stageReadingRecoveryRouter(source) {
   const handler = `  if(journal?.recoverContexts){
     router.post('/journal-context',route(async(q,r)=>{
       r.set('Cache-Control','no-store');
-      const input=parse(z.object({bindingIds:z.array(z.string().regex(/^[a-f0-9]{64}$/)).min(1).max(16)}).strict(),q.body);
-      const contexts=await journal.recoverContexts(scope(q),input.bindingIds);
+      const input=parse(z.object({bindingIds:z.array(z.string().regex(/^[a-f0-9]{64}$/)).min(1).max(16),lane:z.enum(['preferred','cloud','collector']).optional()}).strict(),q.body);
+      const contexts=await journal.recoverContexts(scope(q),input.bindingIds,input.lane);
       r.json({ok:true,contexts});
     }));
   }
@@ -75,10 +82,29 @@ export async function enableReadingJournalRecovery({ db, journal, env = process.
   try {
     const root = env.EXAM_JOURNAL_LIBRARY_ROOT || '/opt/exam-journal';
     const load = name => import(pathToFileURL(resolve(root, name)).href);
-    const [{ canonical }, { storageScope }, { readingHomeworkBinding }] = await Promise.all([
-      load('src/contract.mjs'), load('src/product-record.mjs'), load('adapters/reading-homework.mjs'),
+    const [{ canonical }, { storageScope }, { readingHomeworkBinding }, { createTicketCodec }] = await Promise.all([
+      load('src/contract.mjs'), load('src/product-record.mjs'), load('adapters/reading-homework.mjs'), load('src/ticket.mjs'),
     ]);
-    journal.recoverContexts = createReadingJournalRecovery({ db, journal, canonical, storageScope, readingHomeworkBinding });
+    const modeFile = env.READING_JOURNAL_BROWSER_MODE_FILE;
+    const keyFile = env.READING_JOURNAL_BROWSER_KEY_FILE;
+    const keyId = env.READING_JOURNAL_BROWSER_KEY_ID;
+    let cloudTicket;
+    if (keyFile && isAbsolute(keyFile) && /^[a-zA-Z0-9_-]{1,40}$/.test(keyId || '')) {
+      try {
+        const key = Buffer.from((await readFile(keyFile, 'utf8')).trim(), 'base64');
+        cloudTicket = createTicketCodec({ keys: { [keyId]: key }, currentKeyId: keyId });
+      } catch {
+        console.error(JSON.stringify({ type: 'learning_journal_health', status: 'degraded', errorCode: 'READING_CLOUD_TICKET_UNAVAILABLE' }));
+      }
+    }
+    async function readMode() {
+      if (!modeFile || !isAbsolute(modeFile)) return 'collector';
+      try { return (await readFile(modeFile, 'utf8')).trim() === 'cloud' ? 'cloud' : 'collector'; }
+      catch { return 'collector'; }
+    }
+    journal.recoverContexts = createReadingJournalRecovery({
+      db, journal, canonical, storageScope, readingHomeworkBinding, cloudTicket, readMode,
+    });
   } catch {
     console.error(JSON.stringify({ type: 'learning_journal_health', status: 'degraded', errorCode: 'READING_JOURNAL_RECOVERY_UNAVAILABLE' }));
   }

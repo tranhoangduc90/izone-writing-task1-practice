@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
-import { stageReadingRecoveryEntry, stageReadingRecoveryRouter } from './reading-journal-recovery.mjs';
+import { stageReadingRecoveryEntry, stageReadingRecoveryRouter, stageReadingWorkerJournal } from './reading-journal-recovery.mjs';
 
 async function stage() {
   const [release, destination] = process.argv.slice(2);
@@ -11,6 +11,7 @@ async function stage() {
   const bundle = [
     ['scripts/serve-reading67-web.mjs', stageReadingRecoveryEntry],
     ['src/reading-listening67/web-routes.js', stageReadingRecoveryRouter],
+    ['src/reading-listening67/web-journal-worker.js', stageReadingWorkerJournal],
   ];
   const sha = bytes => createHash('sha256').update(bytes).digest('hex');
   const files = [];

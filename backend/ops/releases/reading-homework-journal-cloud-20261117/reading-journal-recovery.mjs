@@ -121,3 +121,16 @@ export function stageReadingRecoveryEntry(source) {
   return source.replace(imports, imports + '\n' + helper)
     .replace(afterDatabase, 'await enableReadingJournalRecovery({db,journal});\n' + afterDatabase);
 }
+
+export function stageReadingWorkerJournal(source) {
+  const entry = '  const ids={jobId:job.jobId,attemptId:job.attemptId,ownerId:job.ownerId,leaseToken:job.leaseToken};';
+  const lookup = 'WHERE j.id=$1 AND a.id=$2 AND a.owner_id=$3 AND j.lease_token=$4`,[ids.jobId,ids.attemptId,ids.ownerId,ids.leaseToken]);';
+  if (source.split(entry).length !== 2 || source.split(lookup).length !== 2) {
+    throw new Error('READING_WORKER_JOURNAL_BASELINE_MISMATCH');
+  }
+  // Native worker methods still enforce the live lease when they change a job.
+  // Deferred telemetry runs later and must identify the immutable attempt even
+  // after a successful deferral has cleared the lease.
+  return source.replace(entry, entry + '\n  if(!callId(ids.leaseToken))return null;')
+    .replace(lookup, 'WHERE j.id=$1 AND a.id=$2 AND a.owner_id=$3`,[ids.jobId,ids.attemptId,ids.ownerId]);');
+}

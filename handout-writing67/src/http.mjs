@@ -14,7 +14,7 @@ async function jsonBody(req,maxBytes=32768) {
 
 // Nhận HTTP, kiểm origin/token và dữ liệu trước khi gọi nghiệp vụ; chỉ trả mã lỗi an toàn.
 // ACK Check sau transaction. Không in bài, credential hoặc token khi SQL/AI lỗi.
-export function createApi({service,teacher=null,processor=null,origins,internalSecret,trustedProxyAddresses=[],verifySharedTeacher=null,ssoBootstrapKey=null,writingEntryKey=null}) {
+export function createApi({service,teacher=null,processor=null,origins,internalSecret,trustedProxyAddresses=[],verifySharedTeacher=null,ssoBootstrapKey=null,writingEntryKey=null,lesson5OutlineKey=null}) {
   const normalize=ip=>ip?.startsWith('::ffff:')?ip.slice(7):ip;
   const trusted=new Set(trustedProxyAddresses.map(normalize));
   function networkAddress(req){
@@ -100,6 +100,15 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
         const input=await jsonBody(req);
         if(input?.activity==='lesson4'&&!equal(req.headers.authorization,writingEntryKey&&'Bearer '+writingEntryKey))fail('WRITING_ENTRY_REQUIRED',403);
         value=await service.open(input,req.headers.authorization?.replace(/^Bearer /,''));status=201;
+      }
+      else if(path===prefix+'/integrations/homework/lesson5/open'&&req.method==='POST'){
+        if(origin||!writingEntryKey||!equal(req.headers.authorization,'Bearer '+writingEntryKey))fail('WRITING_ENTRY_REQUIRED',403);
+        const {classRef,studentRef,lesson4Entry}=await jsonBody(req);
+        value=await service.open({activity:'lesson5',classRef,studentRef},undefined,{verifiedLesson5:true,lesson4Entry});status=201;
+      }
+      else if(path===prefix+'/integrations/homework/lesson5/outline'&&req.method==='POST'){
+        if(origin||!lesson5OutlineKey||!equal(req.headers.authorization,'Bearer '+lesson5OutlineKey))fail('WRITING_ENTRY_REQUIRED',403);
+        value={outline:await service.readHomeworkLesson5Outline(await jsonBody(req))};
       }
       else if(path===prefix+'/integrations/homework/lesson4/progress'&&req.method==='POST'){
         if(origin||!writingEntryKey||!equal(req.headers.authorization,'Bearer '+writingEntryKey))fail('WRITING_ENTRY_REQUIRED',403);

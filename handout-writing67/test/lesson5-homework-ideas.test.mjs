@@ -16,21 +16,21 @@ test('Verified Homework ideas join the same Lesson 5 draft without bypassing Che
   }
   const store=createStore(db);
   const classRef='IC9999';
-  const roster=async()=>[classRef,'IC9998'].map(ref=>({classRef:ref,students:['owner','other','partial','existing','both'].map(studentRef=>({studentRef,displayName:'Trùng tên'}))}));
+  const roster=async()=>[classRef,'IC9998'].map(ref=>({classRef:ref,students:['owner','other','partial','existing','both','direct'].map(studentRef=>({studentRef,displayName:'Trùng tên'}))}));
   let now=Date.now();
   const settings={store,roster,clock:()=>now,secret:'fixture-secret'.repeat(3),renderJob:()=> 'Fixture prompt',
     lessons:{lesson4:{activity:'lesson4',outlineOnly:true,handoutMode:'two-bodies-v1',workflowMode:'whole-chain-v1',
         sharePolicy:LESSON4_SHARE_POLICY,promptVersion:'lesson4-rubric-v1'},
       lesson5:{...LEGACY_LESSON5,classes:[classRef,'IC9998']}}};
   const service=createService({...settings,lesson5HomeworkImport:true});
-  const writingEntryKey='fixture-writing-entry',internalSecret='fixture-queue';
-  const server=createApi({service,origins:['https://pages.example.test'],writingEntryKey,internalSecret});
+  const writingEntryKey='fixture-writing-entry',internalSecret='fixture-queue',lesson5OutlineKey='fixture-outline-reader';
+  const server=createApi({service,origins:['https://pages.example.test'],writingEntryKey,internalSecret,lesson5OutlineKey});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   t.after(async()=>{await new Promise(resolve=>server.close(resolve));await db.close();});
-  async function call(path,{method='GET',body,token,bridge=false,etag}={}){
+  async function call(path,{method='GET',body,token,bridge=false,etag,origin}={}){
     const reply=await fetch('http://127.0.0.1:'+server.address().port+'/api/handout67/v1'+path,{
       method,headers:{...(body?{'Content-Type':'application/json'}:{}),...(token?{Authorization:'Bearer '+token}:{}),
-        ...(bridge?{'X-Handout67-Writing-Entry':writingEntryKey}:{}),...(etag?{'If-None-Match':etag}:{})},
+        ...(bridge?{'X-Handout67-Writing-Entry':writingEntryKey}:{}),...(etag?{'If-None-Match':etag}:{}),...(origin?{Origin:origin}:{})},
       body:body?JSON.stringify(body):undefined
     });
     return {status:reply.status,etag:reply.headers.get('etag'),body:reply.status===304?null:await reply.json()};
@@ -130,4 +130,37 @@ test('Verified Homework ideas join the same Lesson 5 draft without bypassing Che
   now+=121000;
   assert.equal((await open('owner',extra)).status,403);
   assert.equal((await open('owner',{},token)).status,201);
+
+  const verifiedEntry={assignmentId:'hw-k67-writing-lesson4-1234',contentVersion:1};
+  const verifiedOpen=(studentRef,lesson4Entry=verifiedEntry,auth=writingEntryKey,origin)=>call('/integrations/homework/lesson5/open',{
+    method:'POST',body:{classRef,studentRef,lesson4Entry},token:auth,origin
+  });
+  assert.equal((await verifiedOpen('owner',verifiedEntry,lesson5OutlineKey)).status,403);
+  assert.equal((await verifiedOpen('owner',verifiedEntry,writingEntryKey,'https://pages.example.test')).status,403);
+  const resumed=await verifiedOpen('owner');
+  assert.equal(resumed.status,201);
+  assert.equal(resumed.body.session.ref,session.ref);
+  assert.equal(resumed.body.session.steps.topic.status,'passed');
+  assert.equal((await open('owner')).status,403);
+
+  await seedSource('direct');
+  const wrongVersion=await verifiedOpen('direct',{...verifiedEntry,contentVersion:2});
+  assert.equal(wrongVersion.body.session.responses.idea1,'');
+  const direct=await verifiedOpen('direct');
+  assert.equal(direct.status,201);
+  assert.deepEqual([direct.body.session.responses.idea1,direct.body.session.responses.idea2],['Nguồn tài chính','Tăng rác thải khó xử lý']);
+  assert.equal(direct.body.session.lesson5IdeaSource.contentVersion,1);
+  assert.equal(direct.body.session.ref,wrongVersion.body.session.ref);
+
+  const readOutline=(studentRef,token=lesson5OutlineKey)=>call('/integrations/homework/lesson5/outline',{
+    method:'POST',body:{classRef,studentRef},token
+  });
+  assert.equal((await readOutline('owner',writingEntryKey)).status,403);
+  const outline=await readOutline('owner');
+  assert.equal(outline.status,200);
+  assert.equal(outline.body.outline.ref,session.ref);
+  assert.equal(outline.body.outline.approved,false);
+  assert.equal(outline.body.outline.body,2);
+  assert.equal(outline.body.outline.responses.idea2,'Tăng rác thải khó xử lý');
+  assert.equal(outline.body.outline.writingEntry,undefined);
 });

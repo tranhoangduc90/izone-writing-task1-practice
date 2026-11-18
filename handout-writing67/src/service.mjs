@@ -209,7 +209,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     authorizeSession(ref,token) {authorize(ref,token);},
     lesson(activity='lesson5'){return publicLesson(lessonFor(activity));},
     async roster(activity='lesson5') {const lesson=lessonFor(activity);return (await roster(activity,lesson.rosterScope)).filter(c=>!lesson.classes||lesson.classes.includes(c.classRef));},
-    async open(input,token) {
+    async open(input,token,{verifiedLesson5=false,lesson4Entry=null}={}) {
       if (!object(input) || !id(input.activity) || !id(input.classRef) || !id(input.studentRef)) fail('IDENTITY_INVALID');
       const rows=await api.roster(input.activity);
       if (!rows.some(c=>c.classRef===input.classRef && c.students.some(s=>s.studentRef===input.studentRef))) fail('STUDENT_OUT_OF_SCOPE',403);
@@ -218,7 +218,20 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
       if(isTwoQuestionOutline(lesson)&&(!object(writingEntry)||!/^hw-k67-writing-lesson4-\d+$/.test(writingEntry.assignmentId||'')||
         !Number.isSafeInteger(writingEntry.contentVersion)||writingEntry.contentVersion<1))fail('WRITING_ENTRY_REQUIRED',403);
       const key=JSON.stringify([input.activity,input.classRef,input.studentRef,...(writingEntry?[writingEntry.assignmentId,writingEntry.contentVersion]:[])]);
-      const source=input.lesson5IdeaTicket===undefined?null:await readIdeaSource(input);
+      if(verifiedLesson5&&input.activity!=='lesson5')fail('WRITING_ENTRY_REQUIRED',403);
+      let source=input.lesson5IdeaTicket===undefined?null:await readIdeaSource(input);
+      if(verifiedLesson5&&lesson4Entry!==null){
+        const {assignmentId,contentVersion}=lesson4Entry;
+        if(!/^hw-k67-writing-lesson4-[1-9]\d{0,17}$/.test(assignmentId||'')||
+          !Number.isSafeInteger(contentVersion)||contentVersion<1)fail('WRITING_ENTRY_REQUIRED',403);
+        const candidate=await store.readIdentity(JSON.stringify(['lesson4',input.classRef,input.studentRef,assignmentId,contentVersion]));
+        if(candidate){
+          if(candidate.activity!=='lesson4'||candidate.classRef!==input.classRef||candidate.studentRef!==input.studentRef||
+            candidate.writingEntry?.assignmentId!==assignmentId||candidate.writingEntry?.contentVersion!==contentVersion)
+            fail('WRITING_ENTRY_MISMATCH',409);
+          if(verifiedOutline(candidate))source=candidate;
+        }
+      }
       const s=await store.open(key,ref=>({ref,activity:input.activity,...(writingEntry?{writingEntry:{assignmentId:writingEntry.assignmentId,contentVersion:writingEntry.contentVersion}}:{}),...(isBodyOutline(lesson)?{outlineOnly:true}:{}),handoutMode:lesson.handoutMode,...(isPrepared(lesson)?{preparationMode:lesson.preparationMode,...preparationContext(lesson)}:{}),...(isMulti(lesson)?{bodyProgress:{1:{idea2Open:false},2:{idea2Open:false}}}:{}),workflowMode:lesson.workflowMode||GUIDED,workflowVersion:1,body:lesson.body,classRef:input.classRef,studentRef:input.studentRef,responses:Object.fromEntries([...Object.values(policy.fields).flat(),...(isBodyOutline(lesson)&&!isTwoQuestionOutline(lesson)?['stance']:[])].map(k=>[k,''])),version:0,idea2Open:false,steps:Object.fromEntries(policy.order.map(k=>[k,{status:'draft',history:[],error:null}])),jobs:[],vocabulary:{},saves:{}}));
       const opened=current=>({
         session:publicSession(current),
@@ -233,13 +246,31 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
             Object.assign(current.responses,Object.fromEntries(additions));
             current.version++;
             current.lesson5IdeaSource={fields:additions.map(([field])=>field),sourceVersion:source.version,
+              sourceSessionRef:source.ref,assignmentId:source.writingEntry.assignmentId,contentVersion:source.writingEntry.contentVersion,
               status:lesson4BodyProgress(source,2).passed?'checked':'draft',at:new Date(clock()).toISOString()};
           }
         }
         return opened(current);
       });
-      if(s.lesson5IdeaSource)authorizeHomework(s.ref,token);
+      if(s.lesson5IdeaSource&&!verifiedLesson5)authorizeHomework(s.ref,token);
       return opened(s);
+    },
+    async readHomeworkLesson5Outline(input){
+      if(!object(input)||!/^IC[0-9]+$/.test(input.classRef||'')||!id(input.studentRef))fail('WRITING_ENTRY_REQUIRED',403);
+      const lesson=lessonFor('lesson5');
+      const rooms=await api.roster('lesson5');
+      const room=rooms.find(c=>c.classRef===input.classRef);
+      if(!room?.students.some(s=>s.studentRef===input.studentRef))fail('STUDENT_OUT_OF_SCOPE',403);
+      const s=await store.readIdentity(JSON.stringify(['lesson5',input.classRef,input.studentRef]));
+      if(!s)fail('SESSION_NOT_FOUND',404);
+      if(s.activity!=='lesson5'||s.classRef!==input.classRef||s.studentRef!==input.studentRef||s.body!==2||
+        s.outlineOnly||s.handoutMode||(s.workflowMode||GUIDED)!==GUIDED)fail('WRITING_ENTRY_MISMATCH',409);
+      const steps=Object.fromEntries(ORDER.map(key=>[key,{status:s.steps[key]?.status,approval:s.steps[key]?.approval}]));
+      return {activity:s.activity,classRef:s.classRef,studentRef:s.studentRef,ref:s.ref,version:s.version,
+        questionHash:createHash('sha256').update(lesson.topic).digest('hex'),body:2,workflowMode:GUIDED,
+        approved:ORDER.every(key=>steps[key].status==='passed'&&FIELDS[key].every(field=>string(s.responses[field]))),
+        responses:Object.fromEntries(Object.keys(FIELDS).flatMap(key=>FIELDS[key]).map(field=>[field,s.responses[field]])),
+        steps,vocabulary:s.vocabulary};
     },
     async readLesson4Progress(input) {
       if (!object(input) || !/^IC[0-9]+$/.test(input.classRef || '') || !id(input.studentRef) ||

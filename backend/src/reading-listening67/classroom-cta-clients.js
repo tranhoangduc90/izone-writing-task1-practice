@@ -30,14 +30,59 @@ export function createK67InternalClient({ origin, token, credentialHeader = 'aut
     }
     let payload;
     try { payload = await response.json(); }
-    catch { requireClient(false, 'CTA_NATIVE_HTTP_RESPONSE_INVALID'); }
+    catch { if (response.ok) requireClient(false, 'CTA_NATIVE_HTTP_RESPONSE_INVALID'); }
     if (!response.ok || payload?.ok === false) {
       const reason = payload?.code ?? payload?.error;
       const code = /^[A-Z0-9_]{1,100}$/.test(reason || '') ? reason : 'CTA_NATIVE_HTTP_' + response.status;
-      requireClient(false, code);
+      throw Object.assign(new Error(code), { code, status: response.status });
     }
     requireClient(payload && typeof payload === 'object' && !Array.isArray(payload), 'CTA_NATIVE_HTTP_RESPONSE_INVALID');
     return payload;
+  };
+}
+
+export function createK67PortalClient({ origin, credentials, apiKey, credentialHeader = 'x-api-key', fetcher = fetch,
+  onRequest = () => {} }) {
+  if (!credentials) return createK67InternalClient({ origin, token: apiKey, credentialHeader, fetcher, onRequest });
+  const endpoint = new URL(origin);
+  requireClient(endpoint.href === 'https://metabase.izone.edu.vn/' && !apiKey && credentials
+    && typeof credentials.username === 'string' && credentials.username.trim() !== ''
+    && typeof credentials.password === 'string' && credentials.password !== '', 'CTA_PORTAL_CREDENTIALS_INVALID');
+
+  let session;
+  async function authenticate() {
+    const path = '/api/session';
+    onRequest({ path, method: 'POST' });
+    let response;
+    try {
+      response = await fetcher(new URL(path, endpoint).href, {
+        method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15_000),
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username: credentials.username, password: credentials.password }),
+      });
+    } catch {
+      throw Object.assign(new Error('CTA_PORTAL_AUTH_UNAVAILABLE'), { code: 'CTA_PORTAL_AUTH_UNAVAILABLE' });
+    }
+    requireClient(response.ok, 'CTA_PORTAL_AUTH_HTTP_' + response.status);
+    const result = await response.json().catch(() => null);
+    requireClient(typeof result?.id === 'string' && /^[A-Za-z0-9_-]{32,128}$/.test(result.id), 'CTA_PORTAL_SESSION_INVALID');
+    return createK67InternalClient({ origin, token: result.id, credentialHeader: 'x-metabase-session', fetcher, onRequest });
+  }
+
+  function getSession() {
+    session ??= authenticate().catch(error => { session = undefined; throw error; });
+    return session;
+  }
+
+  return async (path, body) => {
+    requireClient(path === '/api/dataset' && body !== undefined, 'CTA_PORTAL_PATH_INVALID');
+    const current = getSession();
+    try { return await (await current)(path, body); }
+    catch (error) {
+      if (error.status !== 401) throw error;
+      if (session === current) session = undefined;
+      return (await getSession())(path, body);
+    }
   };
 }
 

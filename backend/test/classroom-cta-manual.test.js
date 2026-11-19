@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createK67ManualDocuments } from '../src/reading-listening67/classroom-cta-manual.js';
-import { createK67InternalClient, createK67SpeakingClient } from '../src/reading-listening67/classroom-cta-clients.js';
+import { createK67InternalClient, createK67PortalClient, createK67SpeakingClient } from '../src/reading-listening67/classroom-cta-clients.js';
 
 const first = 'fixture_document_123456789012345';
 const second = 'different_document_1234567890123';
@@ -50,4 +50,31 @@ test('đường Speaking dùng header worker và field plan thật, chặn URL r
   const api = createK67SpeakingClient(request);
   assert.deepEqual(await api.plan({ documentId: first, document: {} }), { revisionId: 'r1', requests: [] });
   await assert.rejects(request('//foreign.invalid/path'), { code: 'CTA_NATIVE_PATH_INVALID' });
+});
+
+test('Portal tái sử dụng phiên và lấy lại đúng một lần khi nhận 401', async () => {
+  const origin = 'https://metabase.izone.edu.vn';
+  const credentials = { username: 'fixture@example.test', password: 'fixture-password' };
+  const payload = { database: 2 };
+  const paths = [];
+  let logins = 0, datasets = 0;
+  const portal = createK67PortalClient({ origin, credentials, onRequest: event => paths.push(event), async fetcher(href, request) {
+    assert.equal(request.redirect, 'error');
+    if (href === origin + '/api/session') {
+      assert.deepEqual(JSON.parse(request.body), credentials);
+      return Response.json({ id: 'x'.repeat(32) + String(++logins) });
+    }
+    assert.equal(href, origin + '/api/dataset');
+    assert.equal(request.headers['x-metabase-session'], 'x'.repeat(32) + String(logins));
+    assert.deepEqual(JSON.parse(request.body), payload);
+    return ++datasets === 2 ? new Response('expired', { status: 401 }) : Response.json({ ok: true });
+  } });
+  assert.deepEqual(await portal('/api/dataset', payload), { ok: true });
+  assert.deepEqual(await portal('/api/dataset', payload), { ok: true });
+  assert.deepEqual(await portal('/api/dataset', payload), { ok: true });
+  assert.equal(logins, 2);
+  assert.equal(datasets, 4);
+  assert.deepEqual(paths.map(event => event.path), ['/api/session', '/api/dataset', '/api/dataset', '/api/session', '/api/dataset', '/api/dataset']);
+  assert.throws(() => createK67PortalClient({ origin: 'https://elsewhere.invalid', credentials }), { code: 'CTA_PORTAL_CREDENTIALS_INVALID' });
+  await assert.rejects(portal('/api/card', {}), { code: 'CTA_PORTAL_PATH_INVALID' });
 });

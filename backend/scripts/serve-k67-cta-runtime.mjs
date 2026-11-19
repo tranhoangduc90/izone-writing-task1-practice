@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { OAuth2Client } from 'google-auth-library';
 import { Pool } from 'pg';
 import { createClassroomReadOnlyClient } from '../src/reading-listening67/classroom-cta-google.js';
-import { createK67InternalClient, createK67MappingReader, createK67SpeakingClient } from '../src/reading-listening67/classroom-cta-clients.js';
+import { createK67InternalClient, createK67MappingReader, createK67PortalClient, createK67SpeakingClient } from '../src/reading-listening67/classroom-cta-clients.js';
 import { createK67CtaStack } from '../src/reading-listening67/classroom-cta-stack.js';
 import { createReading67GoogleDocs } from '../src/reading-listening67/web-homework-docs.js';
 import { verifyClassroomCopy } from '../src/reading-listening67/cta-confirmation-client.js';
@@ -27,7 +27,13 @@ function client(item, credentialHeader = 'authorization') {
   return createK67InternalClient({ origin: item.origin, token: secret(item.keyFile), credentialHeader,
     onRequest: ({ path, method }) => log({ stage: 'native_api', path, method }) });
 }
-const metabase = client(config.portal, config.portal.credentialHeader ?? 'x-api-key');
+const metabase = createK67PortalClient({
+  origin: config.portal.origin,
+  apiKey: config.portal.keyFile ? secret(config.portal.keyFile) : undefined,
+  credentials: config.portal.sessionCredentialsFile ? JSON.parse(secret(config.portal.sessionCredentialsFile)) : undefined,
+  credentialHeader: config.portal.credentialHeader,
+  onRequest: ({ path, method }) => log({ stage: 'native_api', product: 'portal', path, method }),
+});
 const portalSql = `
 SELECT JSON_OBJECT(
   'schemaVersion', 1, 'source', 'portal_erp_live',

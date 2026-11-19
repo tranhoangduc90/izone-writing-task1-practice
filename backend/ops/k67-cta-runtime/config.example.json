@@ -1,0 +1,52 @@
+{
+  "enabled": false,
+  "autoEnroll": false,
+  "listenHost": "0.0.0.0",
+  "listenPort": 8789,
+  "docsAccount": "ielts.izone@gmail.com",
+  "ctaDatabaseFile": "/run/k67-cta/cta-database-url",
+  "mappingDatabaseFile": "/run/k67-cta/mapping-readonly-url",
+  "classroomOAuthFile": "/run/k67-cta/classroom-readonly.json",
+  "docsOAuthFile": "/run/k67-cta/docs-oauth.json",
+  "operatorTokenFile": "/run/k67-cta/operator-token",
+  "manualPage": {
+    "enabled": false,
+    "origin": "https://tranhoangduc90.github.io",
+    "ssoUrl": "http://izone-teacher-session:8962/internal/identity/k67-cta",
+    "ssoKeyFile": "/run/k67-cta/teacher-sso-consumer-key",
+    "operatorSubjectsFile": "/run/k67-cta/operator-subjects.json"
+  },
+  "portal": {
+    "origin": "https://metabase.izone.edu.vn",
+    "databaseId": 2,
+    "keyFile": "/run/k67-cta/portal-key",
+    "credentialHeader": "x-api-key"
+  },
+  "speaking": {
+    "origin": "https://ducizone.ddns.net/mapping-api",
+    "keyFile": "/run/k67-cta/speaking-worker-key"
+  },
+  "readingHomework": {
+    "origin": "http://izone-reading67-materials-ic2304:8960/reading67-materials",
+    "keyFile": "/run/k67-cta/reading-homework-key"
+  },
+  "listeningHomework": {
+    "origin": "http://listening-homework67-api:8963/listening-homework67",
+    "keyFile": "/run/k67-cta/listening-homework-key"
+  },
+  "readingPractice": {
+    "origin": "http://izone-reading-practice67:8808",
+    "keyFile": "/run/k67-cta/reading-practice-key"
+  },
+  "listeningPractice": {
+    "origin": "http://izone-listening-practice67:8818",
+    "keyFile": "/run/k67-cta/listening-practice-key"
+  },
+  "extraSpeakingClasses": {},
+  "writing": {
+    "enabled": false,
+    "origin": "http://writing-homework-service",
+    "keyFile": "/run/k67-cta/writing-intake-key",
+    "registryReadonlyFile": "/run/k67-cta/writing-registrations-readonly-url"
+  }
+}

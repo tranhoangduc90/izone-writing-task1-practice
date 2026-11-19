@@ -14,6 +14,8 @@ Writing dùng đường nguồn riêng theo migration `2026-11-19-k67-cta-writin
 
 Khi Writing chỉ nghe ở loopback VPS1, cấu hình `writing.socketPath` là `/run/k67-cta/writing-intake/intake.sock`. Bind-mount riêng thư mục socket cho runtime CTA theo quyền nhóm của container. Listener riêng trên host chỉ chuyển đúng một path POST đến Writing loopback và giữ Host của API. Runtime gửi khóa intake bằng header hiện hành. Public gateway tiếp tục đóng path nội bộ.
 
+Với role đọc riêng, đặt `writing.useReadonlyView=true` để dùng `cta_shared_k67.assignments`. View chỉ chứa mã bài, phiên bản, lớp ERP và cặp Classroom. Có thể đặt `writing.classCodes` để chỉ gửi từ các lớp đang thử trong khi lượt poll Writing native tiếp tục chạy. Khi bỏ danh sách, lớp được lấy từ nguồn chung và registry hiện hành.
+
 Registry Writing bỏ đúng bản ghi Lesson 5 đang chờ ghép Coursework theo cách registrar native biểu diễn bằng `courseWorkId: null`. Khi Coursework được gắn, lượt quét tiếp theo đọc bản ghi thông thường. Các bản ghi sai định danh khác vẫn báo lỗi `CTA_WRITING_REGISTRY_INVALID`.
 
 ## Lịch và đường chạy tay

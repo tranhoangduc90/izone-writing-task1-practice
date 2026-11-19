@@ -93,7 +93,8 @@ const { runtime, manualDocuments, ready } = createK67CtaStack({
   pool, getPortal, getMappings, classroomGet, classroomFallbackGet, docs, verifyCopy, speakingApi, log,
   onWorkAvailable: workSignal.notify,
   writingConfiguration: writingPool ? {
-    readRegistry: createK67WritingRegistry({ pool: writingPool }),
+    readRegistry: createK67WritingRegistry({ pool: writingPool, useReadonlyView: config.writing.useReadonlyView === true,
+      classCodes: config.writing.classCodes }),
     submit: writingSubmit,
   } : undefined,
   readingHomework: event => readingHomework('/api/reading-skills67/admin/register-cta', event),

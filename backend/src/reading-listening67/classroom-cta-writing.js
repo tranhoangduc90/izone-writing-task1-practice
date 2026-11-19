@@ -8,13 +8,19 @@ const codePattern = /^[a-zA-Z0-9_-]{4,100}$/;
 const lesson5BodyCode = 'hw-writing-67-than-bai-mua-sam-khong-can-thiet';
 const cleanCode = (error, fallback) => /^[A-Z0-9_]{1,100}$/.test(error?.code || '') ? error.code : fallback;
 
-export function createK67WritingRegistry({ pool }) {
+export function createK67WritingRegistry({ pool, useReadonlyView = false, classCodes }) {
+  requireWriting(classCodes === undefined || (Array.isArray(classCodes) && classCodes.length > 0
+    && classCodes.every(code => typeof code === 'string' && /^IC[0-9]+$/.test(code))
+    && new Set(classCodes).size === classCodes.length), 'CTA_WRITING_CLASS_ALLOWLIST_INVALID');
+  const allowed = classCodes && new Set(classCodes);
+  const registry = useReadonlyView ? 'cta_shared_k67.assignments' : 'assignments';
   return async scope => {
     requireWriting(numeric.test(scope.courseId || '') && numeric.test(scope.erpClassId || ''), 'CTA_WRITING_SCOPE_INVALID');
+    if (allowed && !allowed.has(scope.classCode)) return [];
     const { rows } = await pool.query(`
       SELECT id::text,definition->'classroom'->>'courseWorkId' AS "courseWorkId",
         definition->'classroom'->>'ctaCode' AS "assignmentCode",definition->>'contentVersion' AS version
-      FROM assignments WHERE definition->'classroom'->>'courseId'=$1 AND definition->>'authorityClassId'=$2
+      FROM ${registry} WHERE definition->'classroom'->>'courseId'=$1 AND definition->>'authorityClassId'=$2
         AND NOT COALESCE(definition->'classroom'->>'ctaCode'=$3 AND definition->'classroom'->'courseWorkId'='null'::jsonb,false)
       ORDER BY id LIMIT 11`, [scope.courseId, scope.erpClassId, lesson5BodyCode]);
     requireWriting(rows.length <= 10, 'CTA_WRITING_REGISTRY_OVER_LIMIT');

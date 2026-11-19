@@ -11,7 +11,7 @@
   "manualPage": {
     "enabled": false,
     "origin": "https://tranhoangduc90.github.io",
-    "ssoUrl": "http://teacher-sso:8962/internal/identity/k67-cta",
+    "ssoUrl": "http://izone-teacher-session:8962/internal/identity/k67-cta",
     "ssoKeyFile": "/run/k67-cta/teacher-sso-consumer-key",
     "operatorSubjectsFile": "/run/k67-cta/operator-subjects.json"
   },

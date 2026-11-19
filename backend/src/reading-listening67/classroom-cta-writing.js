@@ -5,6 +5,7 @@ function requireWriting(condition, code) {
 }
 const numeric = /^[1-9][0-9]{0,19}$/;
 const codePattern = /^[a-zA-Z0-9_-]{4,100}$/;
+const lesson5BodyCode = 'hw-writing-67-than-bai-mua-sam-khong-can-thiet';
 const cleanCode = (error, fallback) => /^[A-Z0-9_]{1,100}$/.test(error?.code || '') ? error.code : fallback;
 
 export function createK67WritingRegistry({ pool }) {
@@ -14,7 +15,8 @@ export function createK67WritingRegistry({ pool }) {
       SELECT id::text,definition->'classroom'->>'courseWorkId' AS "courseWorkId",
         definition->'classroom'->>'ctaCode' AS "assignmentCode",definition->>'contentVersion' AS version
       FROM assignments WHERE definition->'classroom'->>'courseId'=$1 AND definition->>'authorityClassId'=$2
-      ORDER BY id LIMIT 11`, [scope.courseId, scope.erpClassId]);
+        AND NOT COALESCE(definition->'classroom'->>'ctaCode'=$3 AND definition->'classroom'->'courseWorkId'='null'::jsonb,false)
+      ORDER BY id LIMIT 11`, [scope.courseId, scope.erpClassId, lesson5BodyCode]);
     requireWriting(rows.length <= 10, 'CTA_WRITING_REGISTRY_OVER_LIMIT');
     const keys = new Set();
     for (const row of rows) {

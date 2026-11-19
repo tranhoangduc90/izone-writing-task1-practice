@@ -406,7 +406,11 @@ test('Writing dùng nguồn chung đúng registry, giữ trạng thái chờ và
   const assignment = { authorityClassId: '99', contentVersion: 2,
     classroom: { courseId, courseWorkId, ctaCode: '67-writing-lesson5' } };
   await h.db.query('INSERT INTO assignments VALUES ($1,$2)', ['lesson5', JSON.stringify(assignment)]);
+  const unboundLesson5 = { ...assignment, experience: 'lesson5-consumerism-body-v1',
+    classroom: { ...assignment.classroom, courseWorkId: null, ctaCode: 'hw-writing-67-than-bai-mua-sam-khong-can-thiet' } };
+  await h.db.query('INSERT INTO assignments VALUES ($1,$2)', ['not-yet-bound', JSON.stringify(unboundLesson5)]);
   const readRegistry = createK67WritingRegistry({ pool: h.db });
+  assert.deepEqual((await readRegistry({ courseId, erpClassId: '99' })).map(row => row.id), ['lesson5']);
   await h.produce(scope);
   const [event] = h.inbox;
   const sent = [];
@@ -427,4 +431,11 @@ test('Writing dùng nguồn chung đúng registry, giữ trạng thái chờ và
   assert.equal((await writing.workOnce()).status, 'idle');
   assert.deepEqual(sent[0], sent[1]);
   assert.deepEqual(Object.keys(sent[0]).sort(), ['class_name', 'classroom_course_id', 'coursework_id', 'doc_id', 'student_id', 'submission_id']);
+  unboundLesson5.classroom.courseWorkId = '201';
+  await h.db.query('UPDATE assignments SET definition=$2 WHERE id=$1', ['not-yet-bound', JSON.stringify(unboundLesson5)]);
+  assert.deepEqual((await readRegistry({ courseId, erpClassId: '99' })).map(row => row.id), ['lesson5', 'not-yet-bound']);
+  unboundLesson5.classroom.courseWorkId = null;
+  unboundLesson5.classroom.ctaCode = 'hw-writing-56-67-other';
+  await h.db.query('UPDATE assignments SET definition=$2 WHERE id=$1', ['not-yet-bound', JSON.stringify(unboundLesson5)]);
+  await assert.rejects(() => readRegistry({ courseId, erpClassId: '99' }), { code: 'CTA_WRITING_REGISTRY_INVALID' });
 });

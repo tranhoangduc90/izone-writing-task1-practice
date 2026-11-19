@@ -8,7 +8,7 @@ function requireRuntime(condition, code) {
 const codeOf = (error, fallback) => /^[A-Z0-9_]{1,100}$/.test(error?.code || '') ? error.code : fallback;
 
 export function createK67CtaRuntime({ nativeStore, listScope, resolveSpeakingCourse, readSpeakingScopes, produce,
-  reconcileSpeaking, processJob, log = () => {}, clock = Date.now }) {
+  reconcileSpeaking, processJob, onWorkAvailable = () => {}, log = () => {}, clock = Date.now }) {
   async function run({ request = {}, runId, trigger }) {
     const main = await listScope({ classCode: request.classCode });
     const scopes = parseK67SpeakingScopes(await readSpeakingScopes())
@@ -58,6 +58,9 @@ export function createK67CtaRuntime({ nativeStore, listScope, resolveSpeakingCou
           scanId: scan.runId, discovered: scan.discovered, published: scan.published, counts: scan.counts });
       } catch (error) {
         results.push({ classCode: course.classCode, status: 'failure', errorCode: codeOf(error, 'CTA_CLASSROOM_SCAN_FAILED') });
+      } finally {
+        // The periodic Speaking reconciliation can hold the same document lock.
+        onWorkAvailable();
       }
     }
     const status = missing.length || results.some(r => !['done', 'legacy_owner'].includes(r.status)) ? 'partial' : 'done';
@@ -83,6 +86,12 @@ export function createK67CtaRuntime({ nativeStore, listScope, resolveSpeakingCou
         await nativeStore.settle(job, receipt);
         return { status: receipt.state };
       } catch (error) {
+        if (error?.code === 'CTA_DOCUMENT_BUSY') {
+          await nativeStore.deferBusyDocument(job);
+          log({ stage: 'worker_deferred', runId: job.runId, executionId: job.executionId,
+            errorCode: 'CTA_DOCUMENT_BUSY' });
+          return { status: 'busy' };
+        }
         // A transport/Google result may be unknown. The same job can resume at its lease expiry.
         log({ stage: 'worker_recovery', runId: job.runId, executionId: job.executionId,
           status: 'unknown', errorCode: codeOf(error, 'CTA_WORKER_OUTCOME_UNKNOWN') });

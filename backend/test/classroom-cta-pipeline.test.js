@@ -341,10 +341,17 @@ test('hàng bền giữ nguyên token khi restart, chặn ACK cũ và chỉ ch�
   assert.equal(first.dispatchToken, event.dispatchToken);
   assert.equal(await native.ownsJob(first), true);
   assert.equal(await native.claim(), null);
+  await native.deferBusyDocument(first);
+  assert.equal(await native.ownsJob(first), false);
+  const contended = await native.claim();
+  assert.equal(contended.dispatchToken, first.dispatchToken);
+  assert.notEqual(contended.leaseToken, first.leaseToken);
+  await assert.rejects(native.deferBusyDocument(first), { code: 'CTA_NATIVE_RECEIPT_UNSAVED' });
+  assert.equal(await native.ownsJob(contended), true);
   await h.db.query("UPDATE reading_listening67.cta_native_job SET lease_until=now()-interval '1 minute'");
   const next = await native.claim();
   assert.equal(next.executionId, first.executionId);
-  assert.notEqual(next.leaseToken, first.leaseToken);
+  assert.notEqual(next.leaseToken, contended.leaseToken);
   await assert.rejects(native.settle(first, { state: 'ready' }), { code: 'CTA_NATIVE_RECEIPT_UNSAVED' });
   const result = await h.process(next);
   assert.equal(result.state, 'ready');

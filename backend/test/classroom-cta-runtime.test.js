@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createK67CtaRuntime } from '../src/reading-listening67/classroom-cta-runtime.js';
-import { createK67CtaHttp } from '../src/reading-listening67/classroom-cta-http.js';
+import { createK67CtaHttp, createK67CtaWorkSignal, startK67CtaLoops } from '../src/reading-listening67/classroom-cta-http.js';
 
 const classroom = { classCode: 'IC2353', courseId: '100', classroomName: 'CTA 67', shared: true };
 const registry = { class_code: classroom.classCode, course_id: classroom.courseId, course_work_id: '200',
@@ -9,6 +9,7 @@ const registry = { class_code: classroom.classCode, course_id: classroom.courseI
 
 test('lịch chỉ chạy lớp đã chuyển quyền và giữ kết quả một phần khi một lớp mất nguồn', async () => {
   const calls = [];
+  const trace = [];
   const date = Date.parse('2026-11-19T06:17:00Z');
   const runtime = createK67CtaRuntime({
     clock: () => date,
@@ -31,8 +32,10 @@ test('lịch chỉ chạy lớp đã chuyển quyền và giữ kết quả mộ
     async reconcileSpeaking(scope, _snapshot, epoch) {
       assert.equal(scope.classCode, classroom.classCode);
       assert.equal(epoch, 4);
+      trace.push('speaking');
       return { status: 'done' };
     },
+    onWorkAvailable() { trace.push('worker'); },
     async processJob() { throw Error('unknown outcome'); },
   });
   const result = await runtime.tick();
@@ -40,6 +43,7 @@ test('lịch chỉ chạy lớp đã chuyển quyền và giữ kết quả mộ
   assert.deepEqual(result.results.map(item => item.status), ['done', 'legacy_owner']);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].parentRunId, 'runtime-1');
+  assert.deepEqual(trace, ['speaking', 'worker']);
   assert.equal((await runtime.workOnce()).status, 'unknown');
 });
 
@@ -120,4 +124,31 @@ test('trang CTA dùng phiên vận hành cho cả hai nút và giữ các route 
     'manual_page_auth', 'manual_page_auth', 'manual_page_auth', 'manual_page', 'manual_page',
   ]);
   assert.equal(JSON.stringify(events).includes(docId), false);
+});
+
+test('worker nhận tín hiệu khi job đến trong hoặc sau một lần claim trống', { timeout: 2000 }, async t => {
+  const workSignal = createK67CtaWorkSignal();
+  const emptyClaim = Promise.withResolvers();
+  const secondClaim = Promise.withResolvers();
+  const thirdClaim = Promise.withResolvers();
+  let claims = 0;
+  const stop = startK67CtaLoops({ workSignal, runtime: {
+    async tick() {},
+    async workOnce() {
+      claims++;
+      if (claims === 1) return emptyClaim.promise;
+      if (claims === 2) secondClaim.resolve();
+      if (claims === 3) thirdClaim.resolve();
+      return { status: 'idle' };
+    },
+  } });
+  t.after(stop);
+  workSignal.notify();
+  emptyClaim.resolve({ status: 'idle' });
+  await secondClaim.promise;
+  await new Promise(resolve => setImmediate(resolve));
+  workSignal.notify();
+  await thirdClaim.promise;
+  await stop();
+  assert.equal(claims, 3);
 });

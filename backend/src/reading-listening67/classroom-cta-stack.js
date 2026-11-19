@@ -63,7 +63,7 @@ export function verifyK67FinalProof(docs) {
 
 export function createK67CtaStack({ pool, getPortal, getMappings, classroomGet, classroomFallbackGet, resolveSpeakingCourse,
   docs, verifyCopy, speakingApi, readingHomework, listeningHomework, readingPractice, listeningPractice,
-  writingConfiguration, log = () => {} }) {
+  writingConfiguration, onWorkAvailable = () => {}, log = () => {} }) {
   const store = createReadingListening67Store({ pool });
   const nativeStore = createK67NativeStore({ pool });
   const writing = writingConfiguration
@@ -126,7 +126,8 @@ export function createK67CtaStack({ pool, getPortal, getMappings, classroomGet, 
     return { sources: [...reused, ...saved] };
   } };
   const produce = createClassroomCtaProducer({ store: producerStore, discover,
-    publish: nativeStore.publish, ownsScope: nativeStore.ownsScope, withScanLock: createK67NativeScanLock({ pool }), log,
+    publish: nativeStore.publish, ownsScope: nativeStore.ownsScope, withScanLock: createK67NativeScanLock({ pool }),
+    log,
     recordOtherSources: writing ? async (scope, sources, runId) => {
       try {
         const { queued } = await writing.discover(scope, sources);
@@ -154,11 +155,12 @@ export function createK67CtaStack({ pool, getPortal, getMappings, classroomGet, 
     },
   });
   const runtime = createK67CtaRuntime({ nativeStore, listScope, resolveSpeakingCourse, readSpeakingScopes: speakingApi.scopes,
+    onWorkAvailable,
     produce, reconcileSpeaking: speaking.reconcile, processJob: async job => {
       if (await nativeStore.ownsScope({ ...job.source.classroom, epoch: job.epoch }) !== true) return { state: 'held' };
       return process(job);
     }, log });
-  const manualDocuments = createK67ManualDocuments({ nativeStore, listScope, produce, log,
+  const manual = createK67ManualDocuments({ nativeStore, listScope, produce, log,
     async readCodes(docId, record) {
       const document = await docs.read(docId);
       if (document?.documentId !== docId || !document.revisionId) throw Error('CTA_MANUAL_DOC_READBACK_REQUIRED');
@@ -168,6 +170,10 @@ export function createK67CtaStack({ pool, getPortal, getMappings, classroomGet, 
       return [...new Set(codes.filter(Boolean))];
     },
   });
+  async function manualDocuments(action, docs) {
+    try { return await manual(action, docs); }
+    finally { if (action === 'submit') onWorkAvailable(); }
+  }
   const coordinatedRuntime = writing ? { ...runtime, async workOnce() {
     const result = await runtime.workOnce();
     const writingResult = await writing.workOnce();

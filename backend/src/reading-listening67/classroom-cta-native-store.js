@@ -131,6 +131,15 @@ export function createK67NativeStore({ pool }) {
       required(rows.length === 1 && rows[0].state === result.state, 'CTA_NATIVE_RECEIPT_UNSAVED');
       return { state: rows[0].state };
     },
+    async deferBusyDocument(job) {
+      // The document lock failed before the processor claimed or changed the source.
+      const { rowCount } = await pool.query(`
+        UPDATE reading_listening67.cta_native_job
+        SET state='queued',lease_token=NULL,lease_until=NULL,error_code='CTA_DOCUMENT_BUSY'
+        WHERE dispatch_token=$1 AND state='running' AND lease_token=$2 AND lease_until>now()`,
+      [job.dispatchToken, job.leaseToken]);
+      required(rowCount === 1, 'CTA_NATIVE_RECEIPT_UNSAVED');
+    },
     async ownsJob(job) {
       const { rows } = await pool.query('SELECT 1 FROM reading_listening67.cta_native_job'
         + " WHERE dispatch_token=$1 AND state='running' AND lease_token=$2 AND lease_until>now()",

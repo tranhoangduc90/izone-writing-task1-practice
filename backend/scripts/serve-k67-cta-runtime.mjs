@@ -6,7 +6,7 @@ import { createK67InternalClient, createK67MappingReader, createK67SpeakingClien
 import { createK67CtaStack } from '../src/reading-listening67/classroom-cta-stack.js';
 import { createReading67GoogleDocs } from '../src/reading-listening67/web-homework-docs.js';
 import { verifyClassroomCopy } from '../src/reading-listening67/cta-confirmation-client.js';
-import { createK67CtaHttp, startK67CtaLoops } from '../src/reading-listening67/classroom-cta-http.js';
+import { createK67CtaHttp, createK67CtaWorkSignal, startK67CtaLoops } from '../src/reading-listening67/classroom-cta-http.js';
 import { createK67WritingRegistry } from '../src/reading-listening67/classroom-cta-writing.js';
 import { createSharedTeacherVerifier } from '../src/teacher-sso/consumer.js';
 
@@ -75,9 +75,11 @@ const writingPool = config.writing?.enabled === true ? new Pool({
 }) : null;
 writingPool?.on('error', () => log({ stage: 'postgres', errorCode: 'CTA_WRITING_REGISTRY_CONNECTION_LOST' }));
 const writingClient = writingPool ? client(config.writing, 'x-homework-cta-key') : null;
+const workSignal = createK67CtaWorkSignal();
 
 const { runtime, manualDocuments, ready } = createK67CtaStack({
   pool, getPortal, getMappings, classroomGet, classroomFallbackGet, docs, verifyCopy, speakingApi, log,
+  onWorkAvailable: workSignal.notify,
   writingConfiguration: writingPool ? {
     readRegistry: createK67WritingRegistry({ pool: writingPool }),
     submit: event => writingClient('/api/internal/classroom/register-cta', event),
@@ -125,7 +127,7 @@ if (config.enabled && config.manualPage?.enabled === true) {
 const server = createK67CtaHttp({ runtime: activeRuntime, manualDocuments: config.enabled ? manualDocuments : undefined,
   manualPage, token: secret(config.operatorTokenFile), ready, log });
 server.listen(config.listenPort, config.listenHost, () => log({ stage: 'runtime', mode: config.enabled ? 'active' : 'standby' }));
-const stop = config.enabled ? startK67CtaLoops({ runtime, log }) : async () => {};
+const stop = config.enabled ? startK67CtaLoops({ runtime, workSignal, log }) : async () => {};
 let closing = false;
 async function shutdown() {
   if (closing) return;

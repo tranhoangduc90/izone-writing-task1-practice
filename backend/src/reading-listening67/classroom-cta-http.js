@@ -97,10 +97,22 @@ export function createK67CtaHttp({ runtime, manualDocuments, manualPage, token, 
   return server;
 }
 
-export function startK67CtaLoops({ runtime, log = () => {}, clock = Date.now }) {
+export function createK67CtaWorkSignal() {
+  let pending = new AbortController();
+  return {
+    current: () => pending.signal,
+    notify() {
+      const previous = pending;
+      pending = new AbortController();
+      previous.abort();
+    },
+  };
+}
+
+export function startK67CtaLoops({ runtime, workSignal = createK67CtaWorkSignal(), log = () => {}, clock = Date.now }) {
   const controller = new AbortController();
   const { signal } = controller;
-  const sleep = ms => delay(ms, undefined, { signal }).catch(error => {
+  const sleep = (ms, until = signal) => delay(ms, undefined, { signal: until }).catch(error => {
     if (error.name !== 'AbortError') throw error;
   });
   async function ticker() {
@@ -112,11 +124,14 @@ export function startK67CtaLoops({ runtime, log = () => {}, clock = Date.now }) 
   }
   async function writer() {
     while (!signal.aborted) {
+      // Capture before the claim so work committed during an empty claim wakes this waiter too.
+      const untilNewWork = AbortSignal.any([signal, workSignal.current()]);
       let worked;
       try { worked = (await runtime.workOnce()).status; }
       catch (error) { log({ stage: 'worker', errorCode: codeOf(error) }); }
-      if (worked === 'idle' || worked === undefined) await sleep(10_000);
-      else if (worked === 'unknown') await sleep(1_000);
+      if (worked === 'idle') await sleep(10_000, untilNewWork);
+      else if (worked === undefined) await sleep(10_000);
+      else if (worked === 'unknown' || worked === 'busy') await sleep(1_000);
     }
   }
   const tasks = [ticker(), writer()];

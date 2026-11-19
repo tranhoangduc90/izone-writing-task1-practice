@@ -89,7 +89,14 @@ async function harness(t, { failListening = false, loseConfirmation = false } = 
   } else {
     const { PGlite } = await import('@electric-sql/pglite');
     db = new PGlite();
-    const client = { query: (...args) => db.query(...args), release() {} };
+    const client = {
+      async query(...args) {
+        const result = await db.query(...args);
+        // Mirror the pg Pool contract for statements that return no rows.
+        return { ...result, rowCount: result.affectedRows ?? result.rows.length };
+      },
+      release() {},
+    };
     pool = { ...client, connect: async () => client };
     applyMigration = sql => db.exec(sql);
     t.after(() => db.close());

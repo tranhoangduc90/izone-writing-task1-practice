@@ -8,6 +8,7 @@ const codes = new Set([
   '67-speaking-ta_vat_mieu_ta_chuc_nang_what_if',
 ]);
 const numericId = value => typeof value === 'string' && /^[1-9][0-9]{0,19}$/.test(value);
+const classroomActorId = value => typeof value === 'string' && value.length >= 1 && value.length <= 200;
 const documentId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{5,120}$/.test(value);
 const anchor = 'NHẤN VÀO ĐÂY ĐỂ LUYỆN TẬP SPEAKING';
 
@@ -41,7 +42,7 @@ function copySnapshot(scope, snapshot) {
     && Array.isArray(snapshot.submissions) && snapshot.submissions.length <= 100, 'SPEAKING_SNAPSHOT_INCOMPLETE');
   const ids = new Set(), docs = new Set();
   for (const row of snapshot.submissions) {
-    requireSpeaking(numericId(row.userId) && typeof row.id === 'string' && row.id.length > 0
+    requireSpeaking(classroomActorId(row.userId) && typeof row.id === 'string' && row.id.length > 0
       && !ids.has(row.id) && (row.documentId === null || documentId(row.documentId) && !docs.has(row.documentId)),
     'SPEAKING_SNAPSHOT_COPY_INVALID');
     ids.add(row.id);

@@ -136,6 +136,7 @@ test('ca Lesson 2 phát qua lease, chốt đủ biên nhận và chạy lại kh
 test('Lesson 2 qua HTTP và stack CTA, kiểm từng link và chủ sở hữu rồi phát lại', async t => {
   const { db, pool } = await harness(t);
   const classCode = 'IC2353';
+  const googleUserId = '123456789012345678901';
   await db.query(`INSERT INTO reading_listening67.cta_native_owner(course_id,class_code,owner,epoch)
     VALUES ($1,$2,'backend',3)`, [courseId, classCode]);
   const speakingCode = '67-speaking-paraphrase', listeningCode = '67-listening-scandinavian-studies';
@@ -157,7 +158,7 @@ test('Lesson 2 qua HTTP và stack CTA, kiểm từng link và chủ sở hữu r
     writes.push(index);
     document.revisionId = 'r' + writes.length;
   }
-  const submission = { courseId, courseWorkId, id: '400', userId: '300', assignmentSubmission: {
+  const submission = { courseId, courseWorkId, id: '400', userId: googleUserId, assignmentSubmission: {
     attachments: [{ driveFile: { id: documentId, alternateLink: `https://docs.google.com/document/d/${documentId}/edit` } }],
   } };
   const coursework = { id: courseWorkId, courseId, title: 'Homework Lesson 2', state: 'PUBLISHED', updateTime: sourceVersion };
@@ -184,7 +185,7 @@ test('Lesson 2 qua HTTP và stack CTA, kiểm từng link và chủ sở hữu r
     },
     async resolveSpeakingCourse() { assert.fail('approved Portal scope must be used'); },
     async verifyCopy(event) {
-      assert.deepEqual(event, { doc_id: documentId, student_id: '300', submission_id: '400',
+      assert.deepEqual(event, { doc_id: documentId, student_id: googleUserId, submission_id: '400',
         classroom_course_id: courseId, coursework_id: courseWorkId });
       checks.push(event);
     },
@@ -201,7 +202,7 @@ test('Lesson 2 qua HTTP và stack CTA, kiểm từng link và chủ sở hữu r
         assignment_code: speakingCode, class_code: classCode, delivery_mode: 'docs_cta', opened_at: sourceVersion }] }; },
       async sync(snapshot) {
         assert.deepEqual(snapshot, { courseId, courseWorkId, snapshotComplete: true,
-          submissions: [{ id: '400', userId: '300', documentId }] });
+          submissions: [{ id: '400', userId: googleUserId, documentId }] });
         roster.set(0, snapshot.submissions[0].userId);
         return { pending: writes.includes(0) ? [] : [{ documentId, classroomSubmissionId: '400', assignmentCode: speakingCode, classCode }] };
       },
@@ -223,7 +224,7 @@ test('Lesson 2 qua HTTP và stack CTA, kiểm từng link và chủ sở hữu r
     async listeningHomework(event, code, before, context) {
       await context.assertOwnership();
       assert.equal(event.class_name, classCode);
-      assert.equal(event.student_id, '300');
+      assert.equal(event.student_id, googleUserId);
       assert.equal(code, listeningCode);
       assert.equal(before.revisionId, document.revisionId);
       roster.set(1, event.student_id);
@@ -255,7 +256,7 @@ test('Lesson 2 qua HTTP và stack CTA, kiểm từng link và chủ sở hữu r
   assert.deepEqual(paragraphs.slice(0, 2).map(p => p.paragraph.elements[0].textRun.textStyle.link.url), links);
   for (const product of [0, 1]) {
     const canEnter = userId => roster.get(product) === userId;
-    assert.equal(canEnter('300'), true);
+    assert.equal(canEnter(googleUserId), true);
     assert.equal(canEnter('301'), false);
   }
   assert.deepEqual((await call('/manual-docs/submit', docRequest)).results,

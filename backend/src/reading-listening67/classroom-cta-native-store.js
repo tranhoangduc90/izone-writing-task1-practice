@@ -35,6 +35,18 @@ export function createK67NativeStore({ pool }) {
 
   return {
     ownership,
+    async enrollScope({ courseId, classCode, erpClassId, observedAt }) {
+      const { rows } = await pool.query(
+        'SELECT status,epoch FROM reading_listening67.enroll_cta_native_scope($1,$2,$3,$4)',
+        [courseId, classCode, erpClassId, observedAt],
+      );
+      const [result] = rows;
+      const accepted = ['enrolled', 'existing'].includes(result?.status);
+      required(rows.length === 1 && (accepted ? Number.isInteger(result.epoch) && result.epoch > 0
+        : ['invalid_evidence', 'disabled', 'n8n', 'draining', 'identity_conflict', 'legacy_present'].includes(result?.status)
+          && result.epoch === null), 'CTA_ENROLLMENT_RECEIPT_INVALID');
+      return result;
+    },
     async ownsScope(scope) {
       return scope.epoch !== undefined && (await ownership(scope)) === scope.epoch;
     },

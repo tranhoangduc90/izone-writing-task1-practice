@@ -8,7 +8,7 @@ function requireRuntime(condition, code) {
 const codeOf = (error, fallback) => /^[A-Z0-9_]{1,100}$/.test(error?.code || '') ? error.code : fallback;
 
 export function createK67CtaRuntime({ nativeStore, listScope, resolveSpeakingCourse, readSpeakingScopes, produce,
-  reconcileSpeaking, processJob, onWorkAvailable = () => {}, log = () => {}, clock = Date.now }) {
+  reconcileSpeaking, processJob, autoEnroll = false, onWorkAvailable = () => {}, log = () => {}, clock = Date.now }) {
   async function run({ request = {}, runId, trigger }) {
     const main = await listScope({ classCode: request.classCode });
     const scopes = parseK67SpeakingScopes(await readSpeakingScopes())
@@ -35,13 +35,27 @@ export function createK67CtaRuntime({ nativeStore, listScope, resolveSpeakingCou
     }
     const results = [];
     for (const course of byCourse.values()) {
-      const epoch = await nativeStore.ownership(course);
-      if (epoch === null) {
-        results.push({ classCode: course.classCode, status: 'legacy_owner' });
-        continue;
-      }
-      const input = { ...course, epoch, parentRunId: runId, ...(request.courseWorkId ? { courseWorkId: request.courseWorkId } : {}) };
+      let wakeWorker = false;
       try {
+        let epoch = await nativeStore.ownership(course);
+        if (epoch === null && autoEnroll && trigger === 'schedule' && course.shared === true) {
+          const enrollment = await nativeStore.enrollScope({ ...course, observedAt: main.observedAt });
+          epoch = enrollment.epoch;
+          log({ stage: 'ownership_enrollment', runId, classCode: course.classCode, courseId: course.courseId,
+            status: enrollment.status, epoch });
+          if (epoch === null) {
+            results.push({ classCode: course.classCode,
+              status: ['n8n', 'draining'].includes(enrollment.status) ? 'legacy_owner' : 'ownership_pending',
+              reason: enrollment.status });
+            continue;
+          }
+        }
+        if (epoch === null) {
+          results.push({ classCode: course.classCode, status: 'legacy_owner' });
+          continue;
+        }
+        const input = { ...course, epoch, parentRunId: runId, ...(request.courseWorkId ? { courseWorkId: request.courseWorkId } : {}) };
+        wakeWorker = true;
         const scan = await produce(input);
         if (scan.status !== 'done') {
           results.push({ classCode: course.classCode, status: scan.status });
@@ -60,7 +74,7 @@ export function createK67CtaRuntime({ nativeStore, listScope, resolveSpeakingCou
         results.push({ classCode: course.classCode, status: 'failure', errorCode: codeOf(error, 'CTA_CLASSROOM_SCAN_FAILED') });
       } finally {
         // The periodic Speaking reconciliation can hold the same document lock.
-        onWorkAvailable();
+        if (wakeWorker) onWorkAvailable();
       }
     }
     const status = missing.length || results.some(r => !['done', 'legacy_owner'].includes(r.status)) ? 'partial' : 'done';

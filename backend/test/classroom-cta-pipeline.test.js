@@ -17,6 +17,59 @@ const courseWorkId = '200';
 const documentId = 'fixture_document_123456789012345';
 const sourceVersion = '2026-11-19T06:00:00Z';
 const scope = { courseId, courseWorkId, classCode: 'QA67', classroomName: 'CTA QA', shared: true, epoch: 3, speaking: [] };
+const enrollmentSql = () => readFile(new URL('../../docs/migrations/2026-11-20-k67-cta-scope-enrollment.sql', import.meta.url), 'utf8');
+
+test('quyền nhận lớp không sửa owner cũ và công tắc khóa trước khi quay về n8n',
+  { skip: !process.env.K67_CTA_REPLAY_DB }, async t => {
+    const { db, applyMigration, native } = await harness(t);
+    await db.query(`CREATE ROLE reading_listening67_api NOLOGIN;
+      CREATE ROLE cta_enrollment_other NOLOGIN;
+      GRANT USAGE ON SCHEMA reading_listening67 TO reading_listening67_api, cta_enrollment_other;
+      GRANT SELECT ON reading_listening67.cta_native_owner TO reading_listening67_api;
+      INSERT INTO reading_listening67.cta_native_owner(course_id,class_code,owner,epoch)
+        VALUES ('900','IC8000','backend',8)`);
+    await applyMigration(await enrollmentSql());
+    const evidence = { courseId: '100', classCode: 'IC2353', erpClassId: '10', observedAt: new Date().toISOString() };
+    const asApplication = async (role, action) => {
+      const client = await db.connect();
+      try {
+        await client.query('BEGIN');
+        switch (role) {
+          case 'other': await client.query('SET LOCAL ROLE cta_enrollment_other'); break;
+          case 'application': await client.query('SET LOCAL ROLE reading_listening67_api'); break;
+          default: assert.fail('Unexpected fixture role');
+        }
+        const result = await action(client);
+        await client.query('COMMIT');
+        return result;
+      } finally {
+        await client.query('ROLLBACK');
+        client.release();
+      }
+    };
+    const adopt = input => asApplication('application', client => createK67NativeStore({ pool: client }).enrollScope(input));
+    assert.equal((await adopt(evidence)).status, 'disabled');
+    await db.query('UPDATE reading_listening67.cta_native_enrollment_policy SET enabled=true');
+    assert.equal((await adopt({ ...evidence, observedAt: '2026-01-01T00:00:00Z' })).status, 'invalid_evidence');
+    await assert.rejects(asApplication('other', client => createK67NativeStore({ pool: client }).enrollScope(evidence)), { code: '42501' });
+    await assert.rejects(asApplication('application', client =>
+      client.query("UPDATE reading_listening67.cta_native_owner SET epoch=10 WHERE course_id='900'")), { code: '42501' });
+    const receipts = await Promise.all([adopt(evidence), adopt(evidence)]);
+    assert.deepEqual(receipts.map(row => row.status).sort(), ['enrolled', 'existing']);
+    assert.ok(receipts.every(row => row.epoch === 1));
+    assert.equal((await adopt({ ...evidence, courseId: '101' })).status, 'identity_conflict');
+    assert.equal((await adopt({ ...evidence, courseId: '102', classCode: 'IC2000' })).status, 'identity_conflict');
+    assert.equal((await adopt({ ...evidence, courseId: '900' })).status, 'identity_conflict');
+    await db.query("UPDATE reading_listening67.cta_native_owner SET owner='draining',epoch=2 WHERE course_id='100'");
+    assert.equal((await adopt(evidence)).status, 'draining');
+    assert.equal((await adopt({ ...evidence, courseId: '102', classCode: 'IC2000', erpClassId: '21' })).status, 'legacy_present');
+    await db.query("UPDATE reading_listening67.cta_native_owner SET owner='n8n',epoch=3 WHERE course_id='100'");
+    assert.equal((await adopt(evidence)).status, 'n8n');
+    await db.query('UPDATE reading_listening67.cta_native_enrollment_policy SET enabled=false');
+    assert.equal((await adopt({ ...evidence, courseId: '102', classCode: 'IC2000', erpClassId: '21' })).status, 'disabled');
+    assert.deepEqual((await db.query('SELECT course_id,owner,epoch FROM reading_listening67.cta_native_owner ORDER BY course_id')).rows,
+      [{ course_id: '100', owner: 'n8n', epoch: 3 }, { course_id: '900', owner: 'backend', epoch: 8 }]);
+  });
 
 async function harness(t, { failListening = false, loseConfirmation = false } = {}) {
   const database = process.env.K67_CTA_REPLAY_DB;
@@ -110,7 +163,7 @@ async function harness(t, { failListening = false, loseConfirmation = false } = 
       return [];
     },
   });
-  return { db, pool, store, native: createK67NativeStore({ pool }), produce,
+  return { db, pool, store, applyMigration, native: createK67NativeStore({ pool }), produce,
     process: consume, inbox, writes, events, changeOwner: () => ++currentEpoch };
 }
 
@@ -133,14 +186,20 @@ test('ca Lesson 2 phát qua lease, chốt đủ biên nhận và chạy lại kh
   assert.equal(h.events.some(entry => JSON.stringify(entry).includes(documentId)), false);
 });
 
-test('Lesson 2 qua HTTP và stack CTA, kiểm quyền rồi phát lại khi n8n còn giữ khóa quét cũ', async t => {
-  const { db, pool, store } = await harness(t);
+for (const autoEnroll of [false, true]) test(autoEnroll
+  ? 'lớp mới tự vào lịch và nhận hai CTA Lesson 2, một chủ ghi, chạy lại giữ nguyên Docs'
+  : 'Lesson 2 qua HTTP và stack CTA, kiểm quyền rồi phát lại khi n8n còn giữ khóa quét cũ', async t => {
+  const { db, pool, store, applyMigration } = await harness(t);
   const heldLegacyScan = await store.scanStart({ executionId: 'fixture-legacy-scan' });
   assert.equal(heldLegacyScan.acquired, true);
   const classCode = 'IC2353';
   const googleUserId = '123456789012345678901';
   await db.query(`INSERT INTO reading_listening67.cta_native_owner(course_id,class_code,owner,epoch)
-    VALUES ($1,$2,'backend',3)`, [courseId, classCode]);
+    VALUES ($1,$2,'backend',3)`, autoEnroll ? ['900', 'IC8000'] : [courseId, classCode]);
+  if (autoEnroll) {
+    await applyMigration((await enrollmentSql()).replace(/^GRANT .*;$/gm, ''));
+    await db.query('UPDATE reading_listening67.cta_native_enrollment_policy SET enabled=true');
+  }
   const speakingCode = '67-speaking-paraphrase', listeningCode = '67-listening-scandinavian-studies';
   const tabId = 'lesson-2';
   const anchors = ['NHẤN VÀO ĐÂY ĐỂ LUYỆN TẬP SPEAKING', 'NHẤN VÀO ĐÂY ĐỂ LUYỆN TẬP LISTENING'];
@@ -165,7 +224,7 @@ test('Lesson 2 qua HTTP và stack CTA, kiểm quyền rồi phát lại khi n8n 
   } };
   const coursework = { id: courseWorkId, courseId, title: 'Homework Lesson 2', state: 'PUBLISHED', updateTime: sourceVersion };
   const absent = async event => ({ documentId: event.doc_id, status: 'not_applicable' });
-  const stack = createK67CtaStack({ pool,
+  const stack = createK67CtaStack({ pool, autoEnroll,
     log: event => events.push(event),
     async getPortal() {
       const snapshot = { schemaVersion: 1, source: 'portal_erp_live', observedAt: new Date().toISOString(), count: 1,
@@ -251,8 +310,15 @@ test('Lesson 2 qua HTTP và stack CTA, kiểm quyền rồi phát lại khi n8n 
   assert.equal((await call('/ready')).http, 200);
   const request = { classCode, courseWorkId };
   assert.equal((await call('/manual', request, false)).http, 401);
-  const first = await call('/manual', request);
-  assert.equal(first.http, 200, JSON.stringify(first));
+  if (autoEnroll) assert.equal((await call('/manual', request)).http, 409);
+  const first = autoEnroll ? await stack.runtime.tick() : await call('/manual', request);
+  assert.equal(first.status, 'done', JSON.stringify(first));
+  if (!autoEnroll) assert.equal(first.http, 200, JSON.stringify(first));
+  else {
+    const { rows } = await db.query(`SELECT owner,epoch,enrolled_erp_class_id FROM reading_listening67.cta_native_owner WHERE course_id=$1`, [courseId]);
+    assert.deepEqual(rows, [{ owner: 'backend', epoch: 1, enrolled_erp_class_id: '10' }]);
+    assert.ok(events.some(row => row.stage === 'ownership_enrollment' && row.status === 'enrolled' && row.runId === first.runId));
+  }
   assert.equal(first.results[0].published, 1);
   const docRequest = { docs: [{ docId: documentId }] };
   assert.equal((await call('/manual-docs/status', docRequest)).results[0].status, 'queued');

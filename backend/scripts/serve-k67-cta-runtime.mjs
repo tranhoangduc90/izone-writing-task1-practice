@@ -17,6 +17,7 @@ const log = event => console.log(JSON.stringify({ time: new Date().toISOString()
 const id = /^[1-9][0-9]{0,19}$/;
 if (!['127.0.0.1', '0.0.0.0'].includes(config.listenHost) || !Number.isInteger(config.listenPort)
   || config.listenPort < 1024 || config.listenPort > 65535 || !Number.isInteger(config.portal.databaseId)
+  || (config.autoEnroll !== undefined && typeof config.autoEnroll !== 'boolean')
   || config.docsAccount !== 'ielts.izone@gmail.com' || typeof config.enabled !== 'boolean') throw Error('CTA_RUNTIME_CONFIGURATION_INVALID');
 
 const pool = new Pool({ connectionString: secret(config.ctaDatabaseFile), max: 4, connectionTimeoutMillis: 4000 });
@@ -91,6 +92,7 @@ const workSignal = createK67CtaWorkSignal();
 
 const { runtime, manualDocuments, ready } = createK67CtaStack({
   pool, getPortal, getMappings, classroomGet, classroomFallbackGet, docs, verifyCopy, speakingApi, log,
+  autoEnroll: config.autoEnroll === true,
   onWorkAvailable: workSignal.notify,
   writingConfiguration: writingPool ? {
     readRegistry: createK67WritingRegistry({ pool: writingPool, useReadonlyView: config.writing.useReadonlyView === true,

@@ -63,7 +63,7 @@ export function verifyK67FinalProof(docs) {
 
 export function createK67CtaStack({ pool, getPortal, getMappings, classroomGet, classroomFallbackGet, resolveSpeakingCourse,
   docs, verifyCopy, speakingApi, readingHomework, listeningHomework, readingPractice, listeningPractice,
-  writingConfiguration, onWorkAvailable = () => {}, log = () => {} }) {
+  writingConfiguration, autoEnroll = false, onWorkAvailable = () => {}, log = () => {} }) {
   const store = createReadingListening67Store({ pool });
   const nativeStore = createK67NativeStore({ pool });
   const writing = writingConfiguration
@@ -155,7 +155,7 @@ export function createK67CtaStack({ pool, getPortal, getMappings, classroomGet, 
     },
   });
   const runtime = createK67CtaRuntime({ nativeStore, listScope, resolveSpeakingCourse, readSpeakingScopes: speakingApi.scopes,
-    onWorkAvailable,
+    autoEnroll, onWorkAvailable,
     produce, reconcileSpeaking: speaking.reconcile, processJob: async job => {
       if (await nativeStore.ownsScope({ ...job.source.classroom, epoch: job.epoch }) !== true) return { state: 'held' };
       return process(job);
@@ -183,6 +183,10 @@ export function createK67CtaStack({ pool, getPortal, getMappings, classroomGet, 
     await pool.query('SELECT 1 FROM reading_listening67.cta_native_owner LIMIT 0');
     await pool.query('SELECT 1 FROM reading_listening67.cta_native_job LIMIT 0');
     await pool.query('SELECT 1 FROM reading_listening67.cta_native_slot LIMIT 0');
+    if (autoEnroll) {
+      const { rows } = await pool.query("SELECT has_function_privilege('reading_listening67.enroll_cta_native_scope(text,text,text,timestamptz)', 'EXECUTE') AS allowed");
+      if (rows[0]?.allowed !== true) throw Error('CTA_ENROLLMENT_PERMISSION_REQUIRED');
+    }
     if (writing) await pool.query('SELECT 1 FROM reading_listening67.cta_native_writing_source LIMIT 0');
     return store.ready();
   } };

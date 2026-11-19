@@ -135,8 +135,9 @@ export function createClassroomCtaProcessor({ store, adapters, verifyProof, owns
       for (const product of products) {
         const started = performance.now();
         await context.assertOwnership();
-        const previous = canReuseProof(product) && acquired.previousProof?.find(p => p.product === product
-          && p.documentId === item.documentId && terminal.has(p.status));
+        const previous = canReuseProof(product)
+          ? acquired.previousProof?.find(p => p.product === product && p.documentId === item.documentId && terminal.has(p.status))
+          : undefined;
         try {
           const result = previous ?? await adapters[product](context);
           if (product === 'legacy' && result?.documentId === item.documentId && result.status === 'review'

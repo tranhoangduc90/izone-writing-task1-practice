@@ -90,7 +90,8 @@ export function createReadingListening67Store({ pool }) {
             await c.query(`UPDATE reading_listening67.source_document SET source_version=$3,cta_pipeline_version=2,
               cta_attempts=CASE WHEN source_version<>$3 OR cta_pipeline_version<2 THEN 1 ELSE cta_attempts+1 END,
               cta_state='pending',cta_error_code=NULL,cta_dispatch_token=$2,cta_enqueued_at=NULL,
-              cta_execution_id=NULL,cta_lease_until=now()+interval '45 minutes',cta_retry_at=NULL,cta_proof=NULL
+              cta_execution_id=NULL,cta_lease_until=now()+interval '45 minutes',cta_retry_at=NULL,
+              cta_proof=CASE WHEN source_version=$3 AND cta_pipeline_version=2 THEN cta_proof ELSE NULL END
               WHERE source_id=$1`,[saved.source_id,dispatchToken,revision]);
           }
         }
@@ -129,7 +130,7 @@ export function createReadingListening67Store({ pool }) {
         return {saved:true,documentId,changed:1,state:finalState};
       });
     },
-    async sourceCtaState({documentId,courseId,courseworkId,submissionId,dispatchToken,executionId}) {
+    async sourceCtaState({documentId,courseId,courseworkId,submissionId,dispatchToken,executionId},options={}) {
       if(!dispatchToken){
         const rows=(await pool.query('SELECT cta_state,cta_pipeline_version FROM reading_listening67.source_document WHERE document_id=$1',[documentId])).rows;
         return {documentId,shouldProcess:!rows.length||rows.some(x=>x.cta_pipeline_version<2&&['pending','error'].includes(x.cta_state))};
@@ -137,10 +138,22 @@ export function createReadingListening67Store({ pool }) {
       return transaction(async c=>{
         const row=(await c.query(`SELECT * FROM reading_listening67.source_document WHERE document_id=$1 AND course_id=$2
           AND coursework_id=$3 AND submission_id=$4 FOR UPDATE`,[documentId,courseId,courseworkId,submissionId])).rows[0];
+        if(row&&options.source){
+          const source=options.source;
+          const referenced=source.classroom;
+          if(source.documentId!==documentId||referenced.courseId!==courseId||referenced.courseworkId!==courseworkId
+            ||referenced.submissionId!==submissionId||referenced.studentId!==row.student_id
+            ||referenced.classCode!==row.class_code||referenced.sourceVersion!==row.source_version)fail('SOURCE_DISPATCH_IDENTITY_MISMATCH');
+          const alternatives=await c.query(
+            'SELECT 1 FROM reading_listening67.source_document WHERE document_id=$1 AND source_id<>$2 LIMIT 1',
+            [documentId,row.source_id]);
+          if(alternatives.rows.length)fail('SOURCE_DOCUMENT_IDENTITY_AMBIGUOUS');
+        }
         const eligible=row&&row.cta_dispatch_token===dispatchToken&&row.cta_state==='pending'&&row.cta_lease_until&&new Date(row.cta_lease_until).getTime()>Date.now()
           &&(!row.cta_execution_id||row.cta_execution_id===executionId);
         if(eligible)await c.query('UPDATE reading_listening67.source_document SET cta_execution_id=$2 WHERE source_id=$1',[row.source_id,executionId]);
-        return {documentId,dispatchToken,shouldProcess:Boolean(eligible)};
+        return {documentId,dispatchToken,shouldProcess:Boolean(eligible),
+          ...(eligible&&options.resumeProof&&Array.isArray(row.cta_proof)?{previousProof:row.cta_proof}:{})};
       });
     },
     async sourceCtaExecutionFailed({executionId}) {

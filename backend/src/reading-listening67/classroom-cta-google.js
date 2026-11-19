@@ -41,7 +41,7 @@ async function credentials(file, expectedAccount) {
 export function createClassroomReadOnlyClient({ file, account, onRequest = () => {} }) {
   let grant;
   return async (path, params) => {
-    if (!/^courses\/[0-9]+\/courseWork(?:\/[0-9]+(?:\/studentSubmissions)?)?$/.test(path)) {
+    if (!/^courses\/[0-9]+(?:\/courseWork(?:\/[0-9]+(?:\/studentSubmissions)?)?)?$/.test(path)) {
       throw Object.assign(Error('CTA_CLASSROOM_PATH_INVALID'), { code: 'CTA_CLASSROOM_PATH_INVALID' });
     }
     for (let attempt = 0; attempt < 3; attempt++) {

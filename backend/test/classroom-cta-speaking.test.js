@@ -75,3 +75,25 @@ test('không chọn bừa registry trùng hoặc timestamp thiếu múi giờ', 
   assert.throws(() => parseK67SpeakingScopes({ ok: true, assignments: [{ ...registry, opened_at: '2026-11-19T06:00:00' }] }),
     { code: 'SPEAKING_ASSIGNMENT_SCOPE_INVALID' });
 });
+
+test('registry và luồng Speaking giữ nguyên hai mã ôn tập clone đã phát', async () => {
+  for (const code of ['67-speaking-on_tap_lam_ro_diem_giua-clone', '67-speaking-freestyle_on_tap-clone']) {
+    const apiRow = { ...registry, assignment_code: code };
+    const [scanned] = parseK67SpeakingScopes({ ok: true, assignments: [apiRow] });
+    const document = { documentId: id, revisionId: 'r1', body: { content: [{ paragraph: { elements: [{ textRun: { content: code } }] } }] } };
+    const url = new URL(proofUrl);
+    url.searchParams.set('assignmentCode', code);
+    const service = createK67SpeakingCta({
+      getSnapshot: async value => { assert.equal(value.assignmentCode, code); return { ...snapshot, assignmentCode: code }; },
+      docs: { async write() { assert.fail('Link đã có, không ghi lại'); } },
+      api: {
+        async scopes() { return { ok: true, assignments: [apiRow] }; },
+        async sync() { return { pending: [] }; },
+        async plan() { return { documentId: id, revisionId: 'r1', url: url.href, requests: [] }; },
+        async verify() { return { documentId: id, verified: true, status: 'linked' }; },
+      },
+    });
+    assert.equal(scanned.assignmentCode, code);
+    assert.equal((await service.event(event, code, document, { async assertOwnership() {} })).entryUrl, url.href);
+  }
+});

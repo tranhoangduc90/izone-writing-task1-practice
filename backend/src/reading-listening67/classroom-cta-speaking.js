@@ -6,6 +6,7 @@ const codes = new Set([
   '67-speaking-ke_chuyen_boi_canh_truoc_trong_sau', '67-speaking-ke_chuyen_dien_bien_chi_tiet',
   '67-speaking-ke_chuyen_ket_cuc_y_nghia', '67-speaking-ta_vat_gioi_thieu_mieu_ta', '67-speaking-ta_nguoi',
   '67-speaking-ta_vat_mieu_ta_chuc_nang_what_if',
+  '67-speaking-on_tap_lam_ro_diem_giua-clone', '67-speaking-freestyle_on_tap-clone',
 ]);
 const numericId = value => typeof value === 'string' && /^[1-9][0-9]{0,19}$/.test(value);
 const classroomActorId = value => typeof value === 'string' && value.length >= 1 && value.length <= 200;

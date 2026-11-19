@@ -34,6 +34,18 @@ test('nhận mã theo vị trí và giữ đúng ngoại lệ Reading cũ', () =
     { code: 'LISTENING_HW_CODE_AMBIGUOUS' });
 });
 
+test('mã Speaking clone giữ nguyên hậu tố và chỉ ghép các phần chữ trong cùng đoạn', () => {
+  const clone = '67-speaking-on_tap_lam_ro_diem_giua-clone';
+  const paragraph = (...parts) => ({ paragraph: { elements: parts.map(content => ({ textRun: { content } })) } });
+  const body = (...content) => ({ body: { content } });
+  assert.equal(findK67SpeakingCode(body(paragraph(clone.slice(0, -6), '-clone'))), clone);
+  assert.equal(findK67SpeakingCode(body(paragraph(lesson2Speaking), paragraph('x'))), lesson2Speaking);
+  assert.equal(findK67SpeakingCode(body(paragraph('x'), paragraph(clone))), clone);
+  assert.equal(findK67SpeakingCode(body(paragraph('x-' + clone))), null);
+  assert.throws(() => findK67SpeakingCode(doc(clone, '67-speaking-on_tap_lam_ro_diem_giua')),
+    { code: 'SPEAKING_SOURCE_CODE_AMBIGUOUS' });
+});
+
 test('adapter chỉ xác nhận biên nhận đúng mã, đích và quyền sở hữu', async () => {
   const context = { source: { documentId, classroom: { courseId: '100', courseworkId: '200',
     submissionId: '300', studentId: '400', classCode: 'QA67', homeworkTitle: 'Lesson 2' } },

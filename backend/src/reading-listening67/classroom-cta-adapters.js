@@ -63,15 +63,21 @@ export function findK67ListeningHomeworkCode(document) {
 
 export function findK67SpeakingCode(document) {
   const chunks = [];
-  function walk(value) {
+  let previousParagraph;
+  function walk(value, paragraph = null) {
     if (!value || typeof value !== 'object') return;
-    if (value.textRun) chunks.push(value.textRun.content || '');
+    const currentParagraph = value.paragraph || paragraph;
+    if (value.textRun) {
+      if (chunks.length && currentParagraph !== previousParagraph) chunks.push('\n');
+      chunks.push(value.textRun.content || '');
+      previousParagraph = currentParagraph;
+    }
     for (const [key, child] of Object.entries(value)) {
-      if (key !== 'textRun') walk(child);
+      if (key !== 'textRun') walk(child, currentParagraph);
     }
   }
   walk(document.tabs || document.body);
-  const codes = new Set([...chunks.join('').matchAll(/67-speaking-[a-z_]+/g)].map(match => match[0]));
+  const codes = new Set(chunks.join('').match(/(?<![a-z0-9_-])67-speaking-[a-z0-9_-]+/gi) || []);
   requireAdapter(codes.size <= 1, 'SPEAKING_SOURCE_CODE_AMBIGUOUS');
   return codes.values().next().value ?? null;
 }

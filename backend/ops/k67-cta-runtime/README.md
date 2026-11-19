@@ -13,6 +13,7 @@ Writing dùng đường nguồn riêng theo migration `2026-11-19-k67-cta-writin
 - `GET /ready` dùng Bearer nội bộ. Trả 200 khi các phụ thuộc khởi động và bảng cần thiết đọc được.
 - `POST /manual` dùng Bearer nội bộ. JSON gồm `classCode` và tùy chọn `courseWorkId`. Chỉ lớp do backend sở hữu mới có thể phát việc. Lượt trả kết quả quét và số việc đã đưa vào hàng, kết quả ghi đến sau qua worker.
 - `POST /manual-docs/submit` và `POST /manual-docs/status` dùng cùng Bearer nội bộ. JSON nhận tối đa 20 `docId` duy nhất. Kết quả theo từng Doc, gồm tìm nguồn, nguồn mơ hồ, chưa xử lý, đã lên hàng và đã xác minh. Tích hợp nhánh web qua gateway có phiên vận hành. Giữ token trong gateway, ngoài mã Pages. Trang tương thích cũ còn gọi cả hai webhook n8n, cần chuyển cả gửi và kiểm trạng thái.
+- `POST /operator/cta/submit` và `POST /operator/cta/status` dùng cùng hợp đồng Docs qua phiên giảng viên IZONE. Khi chuyển trang, cấp khóa consumer SSO `k67-cta` và đặt file JSON danh sách Google subject được vận hành. Chỉ công bố hai path này sau gateway HTTPS. Trang gọi từ origin được duyệt với `credentials: include` và `X-Izone-Csrf: 1`. Giữ `manualPage.enabled=false` cho đến khi xác minh phiên thật và quyền cả hai nút. Log chỉ ghi hành động, số Docs và mã kết quả xác thực.
 
 ## Chuyển và quay lui
 

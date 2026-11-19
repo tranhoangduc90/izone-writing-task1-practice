@@ -8,6 +8,13 @@
   "classroomOAuthFile": "/run/k67-cta/classroom-readonly.json",
   "docsOAuthFile": "/run/k67-cta/docs-oauth.json",
   "operatorTokenFile": "/run/k67-cta/operator-token",
+  "manualPage": {
+    "enabled": false,
+    "origin": "https://tranhoangduc90.github.io",
+    "ssoUrl": "http://teacher-sso:8962/internal/identity/k67-cta",
+    "ssoKeyFile": "/run/k67-cta/teacher-sso-consumer-key",
+    "operatorSubjectsFile": "/run/k67-cta/operator-subjects.json"
+  },
   "portal": {
     "origin": "https://metabase.izone.edu.vn",
     "databaseId": 2,

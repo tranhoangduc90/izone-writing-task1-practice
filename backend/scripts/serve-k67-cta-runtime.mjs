@@ -8,6 +8,7 @@ import { createReading67GoogleDocs } from '../src/reading-listening67/web-homewo
 import { verifyClassroomCopy } from '../src/reading-listening67/cta-confirmation-client.js';
 import { createK67CtaHttp, startK67CtaLoops } from '../src/reading-listening67/classroom-cta-http.js';
 import { createK67WritingRegistry } from '../src/reading-listening67/classroom-cta-writing.js';
+import { createSharedTeacherVerifier } from '../src/teacher-sso/consumer.js';
 
 if (!process.env.K67_CTA_RUNTIME_CONFIG) throw Error('CTA_RUNTIME_CONFIG_MISSING');
 const config = JSON.parse(readFileSync(process.env.K67_CTA_RUNTIME_CONFIG, 'utf8'));
@@ -102,8 +103,27 @@ await ready();
 const activeRuntime = config.enabled ? runtime : {
   async manual() { throw Object.assign(new Error('CTA_RUNTIME_STANDBY'), { code: 'CTA_RUNTIME_STANDBY' }); },
 };
+let manualPage;
+if (config.enabled && config.manualPage?.enabled === true) {
+  const page = config.manualPage;
+  const origin = new URL(page.origin);
+  const ssoUrl = new URL(page.ssoUrl);
+  const subjects = JSON.parse(secret(page.operatorSubjectsFile));
+  if (origin.protocol !== 'https:' || origin.origin !== page.origin || !['http:', 'https:'].includes(ssoUrl.protocol)
+    || ssoUrl.pathname !== '/internal/identity/k67-cta' || ssoUrl.username || ssoUrl.password || ssoUrl.search || ssoUrl.hash
+    || !Array.isArray(subjects) || !subjects.length || subjects.some(subject => !/^[0-9]{10,32}$/.test(subject) || typeof subject !== 'string')) {
+    throw Error('CTA_OPERATOR_CONFIGURATION_INVALID');
+  }
+  const operators = new Set(subjects);
+  const verify = createSharedTeacherVerifier({ url: ssoUrl.href, key: secret(page.ssoKeyFile),
+    fetcher: (url, options) => fetch(url, { ...options, redirect: 'error' }) });
+  manualPage = { origin: origin.origin, async authorize(request) {
+    const identity = await verify(request);
+    if (!operators.has(identity.sub)) throw Object.assign(Error('CTA_OPERATOR_FORBIDDEN'), { status: 403 });
+  } };
+}
 const server = createK67CtaHttp({ runtime: activeRuntime, manualDocuments: config.enabled ? manualDocuments : undefined,
-  token: secret(config.operatorTokenFile), ready, log });
+  manualPage, token: secret(config.operatorTokenFile), ready, log });
 server.listen(config.listenPort, config.listenHost, () => log({ stage: 'runtime', mode: config.enabled ? 'active' : 'standby' }));
 const stop = config.enabled ? startK67CtaLoops({ runtime, log }) : async () => {};
 let closing = false;

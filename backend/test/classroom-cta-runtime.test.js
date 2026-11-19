@@ -68,3 +68,56 @@ test('route vận hành chỉ nhận token nội bộ, cùng contract danh sách
   assert.equal(result.status, 200);
   assert.deepEqual(await result.json(), { ok: true, results: [{ docId: doc, status: 'registered' }] });
 });
+
+test('trang CTA dùng phiên vận hành cho cả hai nút và giữ các route nội bộ riêng', async t => {
+  const token = 'fixture-operator-'.repeat(3);
+  const origin = 'https://fixture.github.io';
+  const docId = 'fixture_document_123456789012345';
+  const actions = [];
+  const events = [];
+  const server = createK67CtaHttp({
+    token, log(event) { events.push(event); },
+    manualPage: { origin, async authorize(req) {
+      const state = req.headers.cookie;
+      if (state !== 'operator') throw Object.assign(new Error('test auth'), {
+        status: state === 'teacher' ? 403 : state === 'broker_unavailable' ? 503 : 401,
+      });
+    } },
+    async manualDocuments(action, docs) {
+      actions.push(action);
+      assert.deepEqual(docs, [{ docId }]);
+      return { ok: true, results: [{ docId, status: action === 'submit' ? 'queued' : 'registered' }] };
+    },
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const base = 'http://127.0.0.1:' + server.address().port;
+  const headers = { Origin: origin, 'X-Izone-Csrf': '1' };
+  const body = JSON.stringify({ docs: [{ docId }] });
+  const send = (path, params) => fetch(base + path, { method: 'POST', body, ...params });
+  const submit = '/operator/cta/submit';
+  const status = '/operator/cta/status';
+  const preflight = await fetch(base + submit, { method: 'OPTIONS', headers: { Origin: origin } });
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get('access-control-allow-credentials'), 'true');
+  const unsafeOrigin = await send(submit, { headers: { ...headers, Origin: 'https://other.test', Cookie: 'operator' } });
+  assert.equal(unsafeOrigin.status, 403);
+  assert.equal(unsafeOrigin.headers.get('access-control-allow-origin'), null);
+  assert.equal((await send(submit, { headers: { Origin: origin, Cookie: 'operator' } })).status, 403);
+  assert.equal((await send(submit, { headers: { ...headers, Authorization: 'Bearer ' + token } })).status, 401);
+  assert.equal((await send(submit, { headers: { ...headers, Cookie: 'teacher' } })).status, 403);
+  assert.equal((await send(status, { headers: { ...headers, Cookie: 'broker_unavailable' } })).status, 503);
+  assert.equal((await send('/manual-docs/submit', { headers: { ...headers, Cookie: 'operator' } })).status, 401);
+  assert.deepEqual(actions, []);
+  for (const [path, expected] of [[submit, 'queued'], [status, 'registered']]) {
+    const reply = await send(path, { headers: { ...headers, Cookie: 'operator' } });
+    assert.equal(reply.status, 200);
+    assert.equal(reply.headers.get('access-control-allow-origin'), origin);
+    assert.deepEqual(await reply.json(), { ok: true, results: [{ docId, status: expected }] });
+  }
+  assert.deepEqual(actions, ['submit', 'status']);
+  assert.deepEqual(events.map(event => event.stage), [
+    'manual_page_auth', 'manual_page_auth', 'manual_page_auth', 'manual_page', 'manual_page',
+  ]);
+  assert.equal(JSON.stringify(events).includes(docId), false);
+});

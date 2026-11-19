@@ -5,7 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 const slotMs = 15 * 60_000;
 const codeOf = error => /^[A-Z0-9_]{1,100}$/.test(error?.code || '') ? error.code : 'CTA_RUNTIME_FAILED';
 
-export function createK67CtaHttp({ runtime, manualDocuments, token, ready, log = () => {} }) {
+export function createK67CtaHttp({ runtime, manualDocuments, manualPage, token, ready, log = () => {} }) {
   if (typeof token !== 'string' || token.length < 32) throw Error('CTA_RUNTIME_TOKEN_INVALID');
   const expected = Buffer.from('Bearer ' + token);
   const server = createServer(async (req, res) => {
@@ -13,9 +13,33 @@ export function createK67CtaHttp({ runtime, manualDocuments, token, ready, log =
       res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
       res.end(JSON.stringify(payload));
     };
-    const supplied = Buffer.from(String(req.headers.authorization || ''));
-    if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
-      return send(401, { ok: false, error: 'CTA_RUNTIME_UNAUTHORIZED' });
+    const pageAction = manualPage && manualDocuments && /^\/operator\/cta\/(submit|status)$/.exec(req.url)?.[1];
+    if (pageAction) {
+      res.setHeader('Vary', 'Origin');
+      if (req.headers.origin !== manualPage.origin) return send(403, { ok: false, error: 'CTA_OPERATOR_ORIGIN_DENIED' });
+      res.setHeader('Access-Control-Allow-Origin', manualPage.origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204, { 'Access-Control-Allow-Methods': 'POST',
+          'Access-Control-Allow-Headers': 'Content-Type, X-Izone-Csrf', 'Cache-Control': 'no-store' });
+        return res.end();
+      }
+      if (req.method !== 'POST' || req.headers['x-izone-csrf'] !== '1') {
+        return send(403, { ok: false, error: 'CTA_OPERATOR_REQUEST_DENIED' });
+      }
+      try {
+        await manualPage.authorize(req);
+      } catch (error) {
+        const status = [401, 403].includes(error?.status) ? error.status : 503;
+        const code = status === 401 ? 'CTA_OPERATOR_LOGIN_REQUIRED' : status === 403 ? 'CTA_OPERATOR_FORBIDDEN' : 'CTA_OPERATOR_AUTH_UNAVAILABLE';
+        log({ stage: 'manual_page_auth', action: pageAction, errorCode: code });
+        return send(status, { ok: false, error: code });
+      }
+    } else {
+      const supplied = Buffer.from(String(req.headers.authorization || ''));
+      if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
+        return send(401, { ok: false, error: 'CTA_RUNTIME_UNAUTHORIZED' });
+      }
     }
     if (req.method === 'GET' && req.url === '/ready') {
       try {
@@ -23,7 +47,7 @@ export function createK67CtaHttp({ runtime, manualDocuments, token, ready, log =
       } catch (error) { log({ stage: 'ready', errorCode: codeOf(error) }); }
       return send(503, { ok: false, ready: false });
     }
-    const documentAction = manualDocuments && /^\/manual-docs\/(submit|status)$/.exec(req.url)?.[1];
+    const documentAction = pageAction || (manualDocuments && /^\/manual-docs\/(submit|status)$/.exec(req.url)?.[1]);
     if (req.method !== 'POST' || (req.url !== '/manual' && !documentAction)) {
       return send(404, { ok: false, error: 'CTA_RUNTIME_ROUTE_NOT_FOUND' });
     }
@@ -49,7 +73,11 @@ export function createK67CtaHttp({ runtime, manualDocuments, token, ready, log =
       return send(400, { ok: false, error: 'CTA_RUNTIME_BODY_INVALID' });
     }
     try {
-      if (documentAction) return send(200, await manualDocuments(documentAction, input.docs));
+      if (documentAction) {
+        const result = await manualDocuments(documentAction, input.docs);
+        if (pageAction) log({ stage: 'manual_page', action: pageAction, count: result.results.length });
+        return send(200, result);
+      }
       const result = await runtime.manual(input);
       const statuses = result.results.map(row => row.status);
       if (statuses.length && statuses.every(status => status === 'legacy_owner')) {

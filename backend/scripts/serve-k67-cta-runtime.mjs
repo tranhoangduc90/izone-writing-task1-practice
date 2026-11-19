@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { OAuth2Client } from 'google-auth-library';
 import { Pool } from 'pg';
 import { createClassroomReadOnlyClient } from '../src/reading-listening67/classroom-cta-google.js';
-import { createK67InternalClient, createK67MappingReader, createK67PortalClient, createK67SpeakingClient } from '../src/reading-listening67/classroom-cta-clients.js';
+import { createK67InternalClient, createK67MappingReader, createK67PortalClient, createK67SpeakingClient, createK67WritingSocketClient } from '../src/reading-listening67/classroom-cta-clients.js';
 import { createK67CtaStack } from '../src/reading-listening67/classroom-cta-stack.js';
 import { createReading67GoogleDocs } from '../src/reading-listening67/web-homework-docs.js';
 import { verifyClassroomCopy } from '../src/reading-listening67/cta-confirmation-client.js';
@@ -80,7 +80,13 @@ const writingPool = config.writing?.enabled === true ? new Pool({
   connectionString: secret(config.writing.registryReadonlyFile), max: 1, connectionTimeoutMillis: 4000,
 }) : null;
 writingPool?.on('error', () => log({ stage: 'postgres', errorCode: 'CTA_WRITING_REGISTRY_CONNECTION_LOST' }));
-const writingClient = writingPool ? client(config.writing, 'x-homework-cta-key') : null;
+function createWritingSubmit() {
+  if (config.writing.socketPath) return createK67WritingSocketClient({ socketPath: config.writing.socketPath,
+    token: secret(config.writing.keyFile), onRequest: ({ path, method }) => log({ stage: 'native_api', product: 'writing_homework', path, method }) });
+  const send = client(config.writing, 'x-homework-cta-key');
+  return event => send('/api/internal/classroom/register-cta', event);
+}
+const writingSubmit = writingPool && createWritingSubmit();
 const workSignal = createK67CtaWorkSignal();
 
 const { runtime, manualDocuments, ready } = createK67CtaStack({
@@ -88,7 +94,7 @@ const { runtime, manualDocuments, ready } = createK67CtaStack({
   onWorkAvailable: workSignal.notify,
   writingConfiguration: writingPool ? {
     readRegistry: createK67WritingRegistry({ pool: writingPool }),
-    submit: event => writingClient('/api/internal/classroom/register-cta', event),
+    submit: writingSubmit,
   } : undefined,
   readingHomework: event => readingHomework('/api/reading-skills67/admin/register-cta', event),
   listeningHomework: (event, assignmentCode) => listeningHomework('/api/listening-homework67/admin/register-cta', event, { assignmentCode }),

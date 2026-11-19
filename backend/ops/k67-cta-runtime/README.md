@@ -12,6 +12,8 @@ Sau mỗi lớp, scheduler đánh thức worker cùng tiến trình ngay khi đ�
 
 Writing dùng đường nguồn riêng theo migration `2026-11-19-k67-cta-writing-source.sql`. Để `writing.enabled=false` đến lúc đã xác minh registry live, nguồn đúng lớp/bài và intake thật. Khi mở, kết nối registry chỉ có quyền đọc và URL đích lấy từ dịch vụ Writing đang chạy. Đối chiếu receipt riêng. Giữ lượt đối soát native Writing đến khi ca Docs đến muộn được xác minh qua nguồn chung.
 
+Khi Writing chỉ nghe ở loopback VPS1, cấu hình `writing.socketPath` là `/run/k67-cta/writing-intake/intake.sock`. Bind-mount riêng thư mục socket cho runtime CTA theo quyền nhóm của container. Listener riêng trên host chỉ chuyển đúng một path POST đến Writing loopback và giữ Host của API. Runtime gửi khóa intake bằng header hiện hành. Public gateway tiếp tục đóng path nội bộ.
+
 Registry Writing bỏ đúng bản ghi Lesson 5 đang chờ ghép Coursework theo cách registrar native biểu diễn bằng `courseWorkId: null`. Khi Coursework được gắn, lượt quét tiếp theo đọc bản ghi thông thường. Các bản ghi sai định danh khác vẫn báo lỗi `CTA_WRITING_REGISTRY_INVALID`.
 
 ## Lịch và đường chạy tay

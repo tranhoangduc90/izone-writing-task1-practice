@@ -1,4 +1,9 @@
+import { request } from 'node:http';
+
 const officialSpeakingPath = '/api/speaking-homework';
+const writingSocket = '/run/k67-cta/writing-intake/intake.sock';
+const writingMount = '/homework-writing67-api';
+const writingIntake = '/api/internal/classroom/register-cta';
 
 function requireClient(condition, code) {
   if (!condition) throw Object.assign(new Error(code), { code });
@@ -84,6 +89,36 @@ export function createK67PortalClient({ origin, credentials, apiKey, credentialH
       return (await getSession())(path, body);
     }
   };
+}
+
+export function createK67WritingSocketClient({ socketPath, token, onRequest }) {
+  requireClient(socketPath === writingSocket, 'CTA_WRITING_SOCKET_CONFIGURATION_INVALID');
+  const origin = 'http://writing-cta.internal' + writingMount;
+  const fetcher = (url, { method, headers, body, signal }) => {
+    requireClient(url === origin + writingIntake && method === 'POST' && typeof body === 'string', 'CTA_WRITING_SOCKET_ROUTE_INVALID');
+    return new Promise((resolve, reject) => {
+      const connection = request({ socketPath, path: writingMount + writingIntake, method, signal, agent: false,
+        headers: { ...headers, host: 'ducizone.ddns.net', 'content-length': Buffer.byteLength(body) },
+      }, async response => {
+        try {
+          const chunks = [];
+          let bytes = 0;
+          for await (const chunk of response) {
+            bytes += chunk.length;
+            if (bytes > 64 * 1024) throw Error('CTA_WRITING_SOCKET_RESPONSE_TOO_LARGE');
+            chunks.push(chunk);
+          }
+          const status = response.statusCode;
+          const payload = [204, 205, 304].includes(status) ? null : Buffer.concat(chunks);
+          resolve(new Response(payload, { status, headers: { 'content-type': response.headers['content-type'] ?? '' } }));
+        } catch (error) { reject(error); }
+      });
+      connection.on('error', reject);
+      connection.end(body);
+    });
+  };
+  const post = createK67InternalClient({ origin, token, credentialHeader: 'x-homework-cta-key', fetcher, onRequest });
+  return event => post(writingIntake, event);
 }
 
 export function createK67SpeakingClient(request) {

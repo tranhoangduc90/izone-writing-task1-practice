@@ -96,7 +96,8 @@ export function createK67ProductAdapters({ readDocument, readingHomework, listen
   const absent = event => ({ documentId: event.doc_id, status: 'not_applicable' });
   async function marked(context, product, findCode, register, ackCode) {
     const event = buildK67CtaEvent(context);
-    const document = await readDocument(event.doc_id);
+    const canReuse = product === 'speaking' && context.nativeReceipts?.get('reading_practice')?.status === 'not_applicable';
+    const document = canReuse && context.initialDocument ? context.initialDocument : await readDocument(event.doc_id);
     requireAdapter(document?.documentId === event.doc_id && document.revisionId, 'CTA_DOC_IDENTITY_MISMATCH');
     const code = findCode(document, event.classroom_course_id);
     if (!code) return absent(event);

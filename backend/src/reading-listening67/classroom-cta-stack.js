@@ -95,7 +95,8 @@ export function createK67CtaStack({ pool, getPortal, getMappings, classroomGet, 
     } });
   const speaking = createK67SpeakingCta({
     api: speakingApi, docs, lockDocument, ownsScope: nativeStore.ownsScope, log,
-    async getSnapshot(scope) {
+    async getSnapshot(scope, { speakingSnapshot } = {}) {
+      if (speakingSnapshot?.assignmentCode === scope.assignmentCode) return speakingSnapshot;
       const result = await discover({ ...scope, shared: false, speaking: [scope] });
       return result.speaking[0];
     },
@@ -139,13 +140,22 @@ export function createK67CtaStack({ pool, getPortal, getMappings, classroomGet, 
     ownsScope: nativeStore.ownsScope, ownsJob: nativeStore.ownsJob, lockDocument,
     // A recovered job rechecks each native link before acknowledging. Registrars avoid repeat writes.
     canReuseProof: () => false, log,
+    async prepare({ source, runId, executionId }) {
+      const { documentId, classroom: c } = source;
+      const initialDocument = await docs.read(documentId);
+      if (initialDocument?.documentId !== documentId || !initialDocument.revisionId) {
+        throw Object.assign(new Error('CTA_DOC_IDENTITY_MISMATCH'), { code: 'CTA_DOC_IDENTITY_MISMATCH' });
+      }
+      const speakingCode = findK67SpeakingCode(initialDocument);
+      const speakingSnapshot = await verifyCopy({ doc_id: documentId, student_id: c.studentId, submission_id: c.submissionId,
+        classroom_course_id: c.courseId, coursework_id: c.courseworkId, class_name: c.classCode }, { speakingCode });
+      log({ stage: 'copy_proof', runId, executionId, outcome: speakingSnapshot ? 'shared_speaking' : 'single_copy' });
+      return { initialDocument, speakingSnapshot };
+    },
   });
   const runtime = createK67CtaRuntime({ nativeStore, listScope, resolveSpeakingCourse, readSpeakingScopes: speakingApi.scopes,
     produce, reconcileSpeaking: speaking.reconcile, processJob: async job => {
-      const c = job.source.classroom;
-      if (await nativeStore.ownsScope({ ...c, epoch: job.epoch }) !== true) return { state: 'held' };
-      await verifyCopy({ doc_id: job.source.documentId, student_id: c.studentId, submission_id: c.submissionId,
-        classroom_course_id: c.courseId, coursework_id: c.courseworkId });
+      if (await nativeStore.ownsScope({ ...job.source.classroom, epoch: job.epoch }) !== true) return { state: 'held' };
       return process(job);
     }, log });
   const manualDocuments = createK67ManualDocuments({ nativeStore, listScope, produce, log,

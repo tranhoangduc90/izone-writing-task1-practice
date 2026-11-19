@@ -184,10 +184,13 @@ test('Lesson 2 qua HTTP và stack CTA, kiểm từng link và chủ sở hữu r
       return { studentSubmissions: [submission] };
     },
     async resolveSpeakingCourse() { assert.fail('approved Portal scope must be used'); },
-    async verifyCopy(event) {
+    async verifyCopy(event, options) {
       assert.deepEqual(event, { doc_id: documentId, student_id: googleUserId, submission_id: '400',
-        classroom_course_id: courseId, coursework_id: courseWorkId });
+        classroom_course_id: courseId, coursework_id: courseWorkId, class_name: classCode });
+      assert.deepEqual(options, { speakingCode });
       checks.push(event);
+      return { courseId, courseWorkId, assignmentCode: speakingCode, classroomState: 'PUBLISHED', status: 'snapshot',
+        submissions: [{ id: '400', userId: googleUserId, documentId }] };
     },
     docs: {
       async read(id) { assert.equal(id, documentId); return structuredClone(document); },
@@ -268,7 +271,7 @@ test('Lesson 2 qua HTTP và stack CTA, kiểm từng link và chủ sở hữu r
   assert.equal((await stack.runtime.workOnce()).status, 'idle');
   assert.equal(document.revisionId, baselineRevision);
   assert.deepEqual(writes, [0, 1]);
-  assert.equal(reads.filter(path => path.endsWith('/studentSubmissions')).length, 3);
+  assert.equal(reads.filter(path => path.endsWith('/studentSubmissions')).length, 2);
   await db.query(`UPDATE reading_listening67.cta_native_owner SET owner='n8n',epoch=4 WHERE course_id=$1`, [courseId]);
   assert.equal((await call('/manual', request)).http, 409);
 });

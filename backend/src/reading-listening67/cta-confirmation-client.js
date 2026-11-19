@@ -1,4 +1,5 @@
 import {readFileSync} from 'node:fs';
+import {createClassroomCtaDiscovery} from './classroom-cta-discovery.js';
 
 const pageOrigin='https://tranhoangduc90.github.io';
 const confirmationPath='/izone-ai-team-pages/classroom-confirmation/';
@@ -6,7 +7,7 @@ const confirmationPath='/izone-ai-team-pages/classroom-confirmation/';
 // Đọc đúng assignment và submission theo ID đã lấy từ Classroom. Không dùng
 // tên Docs, tài khoản trình duyệt, hoặc kết quả mapping để đoán người nộp.
 export function verifyClassroomCopy(auth,{fetcher=fetch}={}) {
-  return async event=>{
+  return async (event,{speakingCode}={})=>{
     const {classroom_course_id:course,coursework_id:work,submission_id:submission,
       student_id:google,doc_id:document}=event;
     const access=await auth.getAccessToken();
@@ -16,10 +17,36 @@ export function verifyClassroomCopy(auth,{fetcher=fetch}={}) {
     async function get(url) {
       const response=await fetcher(url,{redirect:'error',signal:AbortSignal.timeout(5000),
         headers:{authorization:'Bearer '+token}});
-      if(!response.ok) throw new Error('CLASSROOM_SOURCE_UNAVAILABLE');
+      if(!response.ok) throw Object.assign(new Error('CLASSROOM_SOURCE_UNAVAILABLE'), {code:'CLASSROOM_SOURCE_UNAVAILABLE'});
       return response.json();
     }
-    const [assignment,copy]=await Promise.all([get(path),get(path+'/studentSubmissions/'+encodeURIComponent(submission))]);
+    const submissionsPath=path+'/studentSubmissions';
+    const rosterQuery=new URLSearchParams({pageSize:'100',
+      fields:'nextPageToken,studentSubmissions(id,courseId,courseWorkId,userId,assignmentSubmission(attachments(driveFile(id))))'});
+    const [assignment,submissionData]=await Promise.all([get(path),speakingCode
+      ?get(submissionsPath+'?'+rosterQuery).catch(()=>null)
+      :get(submissionsPath+'/'+encodeURIComponent(submission))]);
+    let copy=submissionData;
+    let speakingSnapshot;
+    if(speakingCode){
+      // A complete teacher roster proves both the exact copy and the roster used by the Speaking registrar.
+      // If the list is unavailable or incomplete, verify the exact copy and let the existing Speaking reader handle it.
+      const page=submissionData;
+      if(Array.isArray(page?.studentSubmissions)&&!page.nextPageToken&&page.studentSubmissions.length<=100){
+        const candidates=page.studentSubmissions.filter(row=>row?.id===submission);
+        if(candidates.length===1){
+          const scope={courseId:course,courseWorkId:work,classCode:event.class_name,assignmentCode:speakingCode,deliveryMode:'docs_cta'};
+          const assignmentPath='courses/'+course+'/courseWork/'+work;
+          const discover=createClassroomCtaDiscovery({get:async route=>route===assignmentPath?assignment:page});
+          const result=await discover({...scope,shared:false,speaking:[scope]});
+          if(result.speaking[0]?.status==='snapshot'){
+            speakingSnapshot=result.speaking[0];
+            copy=candidates[0];
+          }
+        }
+      }
+      if(!speakingSnapshot) copy=await get(submissionsPath+'/'+encodeURIComponent(submission));
+    }
     const templates=(assignment.materials||[]).filter(item=>item.driveFile?.shareMode==='STUDENT_COPY')
       .map(item=>item.driveFile.driveFile?.id).filter(Boolean);
     const attachments=(copy.assignmentSubmission?.attachments||[]).filter(item=>item.driveFile?.id===document);
@@ -27,7 +54,8 @@ export function verifyClassroomCopy(auth,{fetcher=fetch}={}) {
       !templates.length||templates.includes(document)||
       (assignment.assigneeMode==='INDIVIDUAL_STUDENTS'&&!assignment.individualStudentsOptions?.studentIds?.includes(google))||
       copy.id!==submission||copy.courseId!==course||copy.courseWorkId!==work||copy.userId!==google||
-      attachments.length!==1) throw new Error('CLASSROOM_COPY_NOT_VERIFIED');
+      attachments.length!==1) throw Object.assign(new Error('CLASSROOM_COPY_NOT_VERIFIED'), {code:'CLASSROOM_COPY_NOT_VERIFIED'});
+    return speakingSnapshot;
   };
 }
 

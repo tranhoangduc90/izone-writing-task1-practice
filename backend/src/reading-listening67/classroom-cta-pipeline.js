@@ -105,7 +105,7 @@ export function createClassroomCtaProducer({ store, discover, publish, ownsScope
 
 // Transport ACK is left to the caller, after the returned state has been recorded.
 export function createClassroomCtaProcessor({ store, adapters, verifyProof, ownsScope, lockDocument,
-  ownsJob = async () => true, canReuseProof = () => true, log = () => {} }) {
+  ownsJob = async () => true, canReuseProof = () => true, prepare, log = () => {} }) {
   requireCta(products.every(product => typeof adapters?.[product] === 'function')
     && typeof verifyProof === 'function' && typeof ownsScope === 'function' && typeof lockDocument === 'function',
   'CTA_PROCESSOR_CONFIGURATION_INVALID');
@@ -132,7 +132,17 @@ export function createClassroomCtaProcessor({ store, adapters, verifyProof, owns
       const proof = [];
       let failure;
       let needsReview;
-      for (const product of products) {
+      try {
+        const prepared = await prepare?.(context);
+        if (prepared) {
+          context.initialDocument = prepared.initialDocument;
+          context.speakingSnapshot = prepared.speakingSnapshot;
+        }
+      } catch (error) {
+        failure = errorCode(error, 'CTA_COPY_PROOF_FAILED');
+        log({ stage: 'copy_proof', runId, executionId, sourceTag, outcome: 'error', errorCode: failure });
+      }
+      for (const product of failure ? [] : products) {
         const started = performance.now();
         await context.assertOwnership();
         const previous = canReuseProof(product)

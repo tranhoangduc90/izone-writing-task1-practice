@@ -10,6 +10,14 @@ Sau mỗi lớp, scheduler đánh thức worker cùng tiến trình ngay khi đ�
 
 Áp dụng migration `2026-11-19-k67-cta-native-runtime.sql` trên đúng database CTA Reading/Listening đã có schema. Migration thêm ba bảng và không phân quyền backend sở hữu lớp nào. Runtime đọc quyền sở hữu, vận hành hàng và slot. Nhà vận hành giữ riêng quyền chuyển chủ từng lớp. Với `enabled=false`, `GET /ready` kiểm OAuth đúng tài khoản và quyền đến các bảng. Lượt chỉ đọc dữ liệu Classroom dùng script shadow riêng với role và Google OAuth chỉ đọc.
 
+### Nhận lớp K67 mới
+
+Migration `2026-11-20-k67-cta-scope-enrollment.sql` cài công tắc database ở trạng thái đóng. Cấu hình runtime `autoEnroll=true` cho phép **lượt theo lịch** gọi hàm nhận lớp sau khi Portal xác nhận lớp K67 đang học, Mapping có duy nhất cặp được duyệt và Classroom trả `ACTIVE`. Chỉ bật công tắc bằng tài khoản vận hành sau khi xác minh các workflow CTA cũ đã ngừng, hàng cũ trống và các chủ hiện hành đều là backend. Lượt chạy tay dùng quyền đã cấp cho lớp.
+
+Hàm chỉ có thể thêm cặp mới với epoch 1. Khi course, mã lớp hoặc ERP đã được dùng cho cặp khác, hoặc một scope đang được quay về n8n, hàm trả trạng thái để theo dõi. Runtime ghi log `ownership_enrollment` kèm `runId`, cặp lớp/Classroom, quyết định và epoch. Tra cặp đã nhận trong `cta_native_owner` bằng `enrolled_at` và `enrolled_erp_class_id`. Role ứng dụng được gọi hàm nhưng các cập nhật trực tiếp vào owner và công tắc vẫn thuộc quyền vận hành.
+
+Trước khi trả một phần hoặc toàn cohort về n8n, tắt `cta_native_enrollment_policy.enabled`, commit rồi chốt danh sách owner và lease theo trạng thái mới. Quay về image cũ có thể giữ nguyên migration và các hàng đã cấp. Thực hiện đổi epoch theo từng scope cần trả.
+
 Writing dùng đường nguồn riêng theo migration `2026-11-19-k67-cta-writing-source.sql`. Để `writing.enabled=false` đến lúc đã xác minh registry live, nguồn đúng lớp/bài và intake thật. Khi mở, kết nối registry chỉ có quyền đọc và URL đích lấy từ dịch vụ Writing đang chạy. Đối chiếu receipt riêng. Giữ lượt đối soát native Writing đến khi ca Docs đến muộn được xác minh qua nguồn chung.
 
 Khi Writing chỉ nghe ở loopback VPS1, cấu hình `writing.socketPath` là `/run/k67-cta/writing-intake/intake.sock`. Bind-mount riêng thư mục socket cho runtime CTA theo quyền nhóm của container. Listener riêng trên host chỉ chuyển đúng một path POST đến Writing loopback và giữ Host của API. Runtime gửi khóa intake bằng header hiện hành. Public gateway tiếp tục đóng path nội bộ.

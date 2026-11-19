@@ -1,7 +1,7 @@
 import { createClassroomCtaDiscovery } from './classroom-cta-discovery.js';
 import { createK67ClassroomScope } from './classroom-cta-scope.js';
 import { createReadingListening67Store } from './store.js';
-import { createClassroomCtaDocumentLock, createClassroomCtaProcessor, createClassroomCtaProducer } from './classroom-cta-pipeline.js';
+import { createClassroomCtaDocumentLock, createClassroomCtaProcessor, createClassroomCtaProducer, createK67NativeScanLock } from './classroom-cta-pipeline.js';
 import { createK67NativeStore } from './classroom-cta-native-store.js';
 import { createK67ProductAdapters, findK67ListeningHomeworkCode, findK67ReadingHomeworkCode, findK67SpeakingCode } from './classroom-cta-adapters.js';
 import { createK67SpeakingCta } from './classroom-cta-speaking.js';
@@ -126,7 +126,7 @@ export function createK67CtaStack({ pool, getPortal, getMappings, classroomGet, 
     return { sources: [...reused, ...saved] };
   } };
   const produce = createClassroomCtaProducer({ store: producerStore, discover,
-    publish: nativeStore.publish, ownsScope: nativeStore.ownsScope, log,
+    publish: nativeStore.publish, ownsScope: nativeStore.ownsScope, withScanLock: createK67NativeScanLock({ pool }), log,
     recordOtherSources: writing ? async (scope, sources, runId) => {
       try {
         const { queued } = await writing.discover(scope, sources);

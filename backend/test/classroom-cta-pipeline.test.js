@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { createClassroomCtaDiscovery } from '../src/reading-listening67/classroom-cta-discovery.js';
 import {
-  createClassroomCtaDocumentLock, createClassroomCtaProcessor, createClassroomCtaProducer,
+  createClassroomCtaDocumentLock, createClassroomCtaProcessor, createClassroomCtaProducer, createK67NativeScanLock,
 } from '../src/reading-listening67/classroom-cta-pipeline.js';
 import { createReadingListening67Store } from '../src/reading-listening67/store.js';
 import { createK67NativeStore, releaseUnstartedK67CtaJobs } from '../src/reading-listening67/classroom-cta-native-store.js';
@@ -133,8 +133,10 @@ test('ca Lesson 2 phát qua lease, chốt đủ biên nhận và chạy lại kh
   assert.equal(h.events.some(entry => JSON.stringify(entry).includes(documentId)), false);
 });
 
-test('Lesson 2 qua HTTP và stack CTA, kiểm từng link và chủ sở hữu rồi phát lại', async t => {
-  const { db, pool } = await harness(t);
+test('Lesson 2 qua HTTP và stack CTA, kiểm quyền rồi phát lại khi n8n còn giữ khóa quét cũ', async t => {
+  const { db, pool, store } = await harness(t);
+  const heldLegacyScan = await store.scanStart({ executionId: 'fixture-legacy-scan' });
+  assert.equal(heldLegacyScan.acquired, true);
   const classCode = 'IC2353';
   const googleUserId = '123456789012345678901';
   await db.query(`INSERT INTO reading_listening67.cta_native_owner(course_id,class_code,owner,epoch)
@@ -272,9 +274,34 @@ test('Lesson 2 qua HTTP và stack CTA, kiểm từng link và chủ sở hữu r
   assert.equal(document.revisionId, baselineRevision);
   assert.deepEqual(writes, [0, 1]);
   assert.equal(reads.filter(path => path.endsWith('/studentSubmissions')).length, 2);
+  assert.equal((await store.scanStart({ executionId: 'another-legacy-scan' })).acquired, false);
+  assert.equal((await store.scanFinish(heldLegacyScan)).status, 'done');
   await db.query(`UPDATE reading_listening67.cta_native_owner SET owner='n8n',epoch=4 WHERE course_id=$1`, [courseId]);
   assert.equal((await call('/manual', request)).http, 409);
 });
+
+test('native scans serialize on a separate PostgreSQL session lock and release after failure',
+  { skip: !process.env.K67_CTA_REPLAY_DB }, async t => {
+    const { pool } = await harness(t);
+    const first = createK67NativeScanLock({ pool });
+    const second = createK67NativeScanLock({ pool });
+    const entered = Promise.withResolvers();
+    const finish = Promise.withResolvers();
+    const running = first(async () => {
+      entered.resolve();
+      await finish.promise;
+      throw Error('ABANDONED_SCAN');
+    });
+    const failed = assert.rejects(running, /ABANDONED_SCAN/);
+    await entered.promise;
+    try {
+      assert.equal(await second(() => assert.fail('Concurrent native scan ran')), undefined);
+    } finally {
+      finish.resolve();
+      await failed;
+    }
+    assert.equal(await second(async () => 'next scan'), 'next scan');
+  });
 
 test('ca hết quyền sở hữu bị chặn, retry cùng phiên bản chỉ thực hiện phần còn thiếu', async t => {
   const h = await harness(t, { failListening: true });

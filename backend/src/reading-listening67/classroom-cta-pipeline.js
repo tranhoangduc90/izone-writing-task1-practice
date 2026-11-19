@@ -34,19 +34,15 @@ function indexSources(sources, scope) {
 }
 
 // Keep scheduler ownership, transport delivery and a durable worker receipt distinct.
-export function createClassroomCtaProducer({ store, discover, publish, ownsScope, recordOtherSources, log = () => {} }) {
+export function createClassroomCtaProducer({ store, discover, publish, ownsScope, recordOtherSources, withScanLock, log = () => {} }) {
   const assertOwnership = async scope => requireCta(await ownsScope(scope) === true, 'CTA_SCOPE_NOT_OWNED');
-  return async scope => {
-    await assertOwnership(scope);
-    const runId = 'cta-run-' + randomUUID();
-    const lease = await store.scanStart({ executionId: runId });
-    if (!lease.acquired) return { status: 'busy', discovered: 0, published: 0 };
-    const run = { executionId: runId, leaseToken: lease.leaseToken };
+  async function scanScope(scope, runId, legacyRun) {
     let failureCode;
     let discovered = 0;
     let published = 0;
     const started = performance.now();
     try {
+      await assertOwnership(scope);
       const scan = await discover(scope);
       requireCta(scan.courseId === scope.courseId, 'CTA_SCAN_SCOPE_MISMATCH');
       const candidates = scope.documentId ? scan.sources.filter(source => source.documentId === scope.documentId) : scan.sources;
@@ -89,17 +85,33 @@ export function createClassroomCtaProducer({ store, discover, publish, ownsScope
       throw error;
     } finally {
       try {
-        await store.scanCourseResult({ ...run, courseId: scope.courseId,
-          status: failureCode ? 'failed' : 'done', ...(failureCode ? { errorCode: failureCode } : {}) });
-      } finally {
-        try {
-          await store.scanFinish(run);
-        } finally {
-          log({ stage: 'scan', runId, classCode: scope.classCode, discovered, published,
-            durationMs: Math.round(performance.now() - started), errorCode: failureCode });
+        if (legacyRun) {
+          try {
+            await store.scanCourseResult({ ...legacyRun, courseId: scope.courseId,
+              status: failureCode ? 'failed' : 'done', ...(failureCode ? { errorCode: failureCode } : {}) });
+          } finally {
+            await store.scanFinish(legacyRun);
+          }
         }
+      } finally {
+        log({ stage: 'scan', runId, parentRunId: scope.parentRunId, classCode: scope.classCode, discovered, published,
+          durationMs: Math.round(performance.now() - started), errorCode: failureCode });
       }
     }
+  }
+
+  return async scope => {
+    await assertOwnership(scope);
+    const runId = 'cta-run-' + randomUUID();
+    if (withScanLock) {
+      const result = await withScanLock(() => scanScope(scope, runId));
+      if (result) return result;
+      log({ stage: 'scan_busy', runId, parentRunId: scope.parentRunId, classCode: scope.classCode });
+      return { status: 'busy', discovered: 0, published: 0 };
+    }
+    const lease = await store.scanStart({ executionId: runId });
+    if (!lease.acquired) return { status: 'busy', discovered: 0, published: 0 };
+    return scanScope(scope, runId, { executionId: runId, leaseToken: lease.leaseToken });
   };
 }
 
@@ -196,22 +208,21 @@ export function createClassroomCtaProcessor({ store, adapters, verifyProof, owns
 }
 
 // A session-level advisory lock can span network calls without an open transaction.
-export function createClassroomCtaDocumentLock({ pool }) {
-  return async (documentId, execute) => {
+function createClassroomSessionLock(pool, tryAgain, releaseCode) {
+  return async (key, execute) => {
     const client = await pool.connect();
-    const key = 'rl67:cta-writer:' + documentId;
     let locked = false;
     let releaseError;
     try {
       const { rows } = await client.query('SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS locked', [key]);
       locked = rows[0]?.locked === true;
-      requireCta(locked, 'CTA_DOCUMENT_BUSY');
+      if (!locked) return tryAgain();
       return await execute();
     } finally {
       if (locked) {
         try {
           const { rows } = await client.query('SELECT pg_advisory_unlock(hashtextextended($1, 0)) AS released', [key]);
-          requireCta(rows[0]?.released === true, 'CTA_DOCUMENT_LOCK_NOT_RELEASED');
+          requireCta(rows[0]?.released === true, releaseCode);
         } catch (error) {
           releaseError = error;
         }
@@ -220,4 +231,15 @@ export function createClassroomCtaDocumentLock({ pool }) {
       if (releaseError) throw releaseError;
     }
   };
+}
+
+export function createClassroomCtaDocumentLock({ pool }) {
+  const lock = createClassroomSessionLock(pool, () => requireCta(false, 'CTA_DOCUMENT_BUSY'), 'CTA_DOCUMENT_LOCK_NOT_RELEASED');
+  return (documentId, execute) => lock('rl67:cta-writer:' + documentId, execute);
+}
+
+export function createK67NativeScanLock({ pool }) {
+  const lock = createClassroomSessionLock(pool, () => undefined, 'CTA_NATIVE_SCAN_LOCK_NOT_RELEASED');
+  // The legacy n8n lease has a different lifetime and may remain busy after a restart.
+  return execute => lock('rl67:cta-native-scan', execute);
 }

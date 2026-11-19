@@ -2,6 +2,8 @@
 
 Service chạy Node 24 với một pool PostgreSQL nghiệp vụ tối đa bốn kết nối, một pool Mapping chỉ đọc tối đa hai kết nối, một nhịp quét và một worker xử lý. Kết nối vào mạng nội bộ ứng dụng. Để cổng 8789 trong mạng đó. Dùng file cấu hình ngoài image qua `K67_CTA_RUNTIME_CONFIG`, gắn các file khóa riêng dưới `/run/k67-cta` để chỉ UID chạy service đọc được. File mẫu ghi đường dẫn và tên máy đích.
 
+Backend quét dưới khóa advisory của phiên PostgreSQL riêng với lease quét n8n. Lịch và lệnh chạy tay của backend tranh cùng một khóa. PostgreSQL nhả khóa khi kết nối mất. Trong giai đoạn hai bên cùng hoạt động, chỉ scope đã trao quyền theo epoch mới được backend phát việc. Dùng `cta_native_slot` và log `scan`/`scan_busy`, nối `parentRunId` với `runId` để tìm đúng lớp, lần phát và biên nhận worker.
+
 Áp dụng migration `2026-11-19-k67-cta-native-runtime.sql` trên đúng database CTA Reading/Listening đã có schema. Migration thêm ba bảng và không phân quyền backend sở hữu lớp nào. Runtime đọc quyền sở hữu, vận hành hàng và slot. Nhà vận hành giữ riêng quyền chuyển chủ từng lớp. Với `enabled=false`, `GET /ready` kiểm OAuth đúng tài khoản và quyền đến các bảng. Lượt chỉ đọc dữ liệu Classroom dùng script shadow riêng với role và Google OAuth chỉ đọc.
 
 Writing dùng đường nguồn riêng theo migration `2026-11-19-k67-cta-writing-source.sql`. Để `writing.enabled=false` đến lúc đã xác minh registry live, nguồn đúng lớp/bài và intake thật. Khi mở, kết nối registry chỉ có quyền đọc và URL đích lấy từ dịch vụ Writing đang chạy. Đối chiếu receipt riêng. Giữ lượt đối soát native Writing đến khi ca Docs đến muộn được xác minh qua nguồn chung.

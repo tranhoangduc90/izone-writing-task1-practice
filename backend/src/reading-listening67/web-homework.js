@@ -13,7 +13,7 @@ const clause='owner_id=$1 AND course_id=$2 AND assignment_code=$3 AND content_ve
 const fail=(code,status=409)=>{throw new WebGradingError(code,status);};
 const scopeFor=b=>({ownerId:b.owner_id,courseId:b.course_id,code:b.assignment_code,version:b.content_version});
 
-export function createReading67Homework({db,metadata,pageBase,owner,docs,managedCodes=[],clock=Date.now,planWrite=planReading67HomeworkWrite,resultSummary=reading67ResultSummary,progressText=reading67ProgressText,completionText,ownerEntry}){
+export function createReading67Homework({db,metadata,pageBase,owner,docs,managedCodes=[],clock=Date.now,planWrite=planReading67HomeworkWrite,resultSummary=reading67ResultSummary,progressText=reading67ProgressText,completionText,ownerEntry,selectSharedStatusWriter}){
  docs=guardReading67HomeworkDocs(docs,managedCodes);
  const page=new URL(pageBase);if(page.protocol!=='https:')throw Error('HTTPS_PAGE_BASE_REQUIRED');
  page.searchParams.set('server','1');page.searchParams.set('assignmentCode',metadata.code);
@@ -110,29 +110,37 @@ export function createReading67Homework({db,metadata,pageBase,owner,docs,managed
   if(!job)return false;
   try{
    const b=(await db.query('SELECT * FROM reading_listening67.web_homework_binding WHERE id=$1',[job.binding_id])).rows[0],s=scopeFor(b);
-   const target=await owner.resolve(s,b.target);
+   const shared=job.kind==='status'&&selectSharedStatusWriter?.(s);
+   if(job.shared_docs_attempt&&!shared)fail('DOC_NEEDS_RECONCILIATION',503);
+   const target=await owner.resolve(s,b.target,shared?{deferDocumentCheck:true}:undefined);
    await ownerEntry?.refresh?.();
    if(target.classId!==s.courseId||target.studentRef!==s.ownerId||target.code!==s.code||target.version!==s.version)fail('DOC_IDENTITY_MISMATCH');
    if(b.target&&['courseId','courseWorkId','submissionId','documentId','tabId'].some(k=>b.target[k]!==target[k]))fail('DOC_TARGET_CHANGED');
    await db.query('UPDATE reading_listening67.web_homework_binding SET target=$2::jsonb WHERE id=$1',[b.id,JSON.stringify(target)]);
    const effective={...b,document_id:target.documentId,tab_id:target.tabId,code:s.code};
    const effectiveJob=job.kind==='cta'?{...job,payload:{...job.payload,url:entryFor(s,target)}}:job;
-   let plan=planWrite(await docs.read(target.documentId),effective,effectiveJob);
-   if(!plan.verified){
-    requireReading67DocsRevision(plan);
-    await docs.write(target.documentId,plan);
-    plan=planWrite(await docs.read(target.documentId),{...effective,last_doc_text:job.kind==='status'?job.payload.text:b.last_doc_text},effectiveJob);
-   }
-   if(!plan.verified)fail('DOC_READBACK_FAILED');
-   await db.transaction(async tx=>{
-    const row=(await tx.query("UPDATE reading_listening67.web_homework_job SET status='verified',verified_at=now(),error_code=NULL,lease_until=NULL WHERE id=$1 AND lease_id=$2 AND status='processing' AND lease_until>now() RETURNING id",[job.id,job.leaseId])).rows[0];
+   const acknowledge=sharedAttempt=>db.transaction(async tx=>{
+    const clear=sharedAttempt?',shared_docs_attempt=NULL':'';
+    const row=(await tx.query("UPDATE reading_listening67.web_homework_job SET status='verified',verified_at=now(),error_code=NULL,lease_until=NULL"+clear+" WHERE id=$1 AND lease_id=$2 AND status='processing' AND lease_until>now() RETURNING id",[job.id,job.leaseId])).rows[0];
     if(!row)fail('DOC_LEASE_LOST');
     if(job.kind==='status')await tx.query('UPDATE reading_listening67.web_homework_binding SET last_doc_sequence=$2,last_doc_text=$3,last_doc_link=$4 WHERE id=$1 AND last_doc_sequence<$2',[b.id,job.sequence,job.payload.text,job.payload.link]);
    });
+   if(shared){
+    await shared({job:effectiveJob,target,binding:effective,planWrite,acknowledge});
+   }else{
+    let plan=planWrite(await docs.read(target.documentId),effective,effectiveJob);
+    if(!plan.verified){
+     requireReading67DocsRevision(plan);
+     await docs.write(target.documentId,plan);
+     plan=planWrite(await docs.read(target.documentId),{...effective,last_doc_text:job.kind==='status'?job.payload.text:b.last_doc_text},effectiveJob);
+    }
+    if(!plan.verified)fail('DOC_READBACK_FAILED');
+    await acknowledge(false);
+   }
   }catch(error){
    const code=error.name==='TimeoutError'?'DOC_TIMEOUT':typeof error.code==='string'?error.code:'DOC_RETRY';
    const missing=code==='HOMEWORK_NOT_FOUND';
-   const recoverable=/^(?:DOC_WRITE_UNAVAILABLE|DOC_TIMEOUT|OWNER_SOURCE_UNAVAILABLE|COURSE67_SCOPE_UNAVAILABLE|(?:DOC|HOMEWORK)_HTTP_(?:429|5\d\d)|HOMEWORK_LOOKUP_TIMEOUT)$/.test(code);
+   const recoverable=/^(?:DOC_(?:WRITE_UNAVAILABLE|TIMEOUT|NO_WRITABLE_ACCOUNT|TRANSPORT_UNAVAILABLE|NEEDS_RECONCILIATION|GOOGLE_AUTH_UNAVAILABLE|DOCUMENT_BUSY)|OWNER_SOURCE_UNAVAILABLE|COURSE67_SCOPE_UNAVAILABLE|(?:DOC|HOMEWORK)_HTTP_(?:429|5\d\d)|HOMEWORK_LOOKUP_TIMEOUT)$/.test(code);
    const hard=/^(?:DOC_(?:IDENTITY|TAB|CODE|STATUS|CTA|MANUAL|LINK|RANGE|TARGET)|OWNER_MISMATCH|DOCUMENT_OWNER_MISMATCH|HOMEWORK_LESSON_MISMATCH|DOC_HTTP_40[134]|HOMEWORK_HTTP_40[134])/.test(code);
    const blocked=hard||(!missing&&!recoverable&&job.attempts>=8);
    const delay=missing?300:recoverable?([60,300,900][job.attempts-1]||3600):Math.min(300,2**job.attempts);

@@ -11,12 +11,13 @@ import {WebGradingError} from './web-grader.js';
 import {createReading67GoogleDocs,locateReading67Homework,planReading67HomeworkWrite} from './web-homework-docs.js';
 import {createReading67HomeworkOwner} from './web-homework-owner.js';
 import {createReading67Homework} from './web-homework.js';
+import {createHomeworkSharedStatusWriter} from './web-homework-shared-writer.js';
 import {createReading67CtaRegistrar} from './web-homework-cta.js';
 import {createReading67OwnerEntry} from './web-owner-entry.js';
 import {publisherFromEnv,verifyClassroomCopy} from './cta-confirmation-client.js';
 const run=promisify(execFile);
 const fail=code=>{throw new WebGradingError(code,403);};
-export async function createReading67HomeworkRuntime({config,db,content,identity,ownerSource,contract,resultSummary,progressText,completionText,managedCodes=[]}){
+export async function createReading67HomeworkRuntime({config,db,content,identity,ownerSource,contract,resultSummary,progressText,completionText,managedCodes=[],sharedDocs}){
  const locate=(d,b)=>locateReading67Homework(d,b,contract),planWrite=(d,b,j)=>planReading67HomeworkWrite(d,b,j,contract);
  const metadata={code:content.code,version:content.version,homeworkLesson:config.homeworkLesson,...(content.practice?{practiceRequired:true}:{})};
  let auth;
@@ -51,8 +52,10 @@ export async function createReading67HomeworkRuntime({config,db,content,identity
  }else if(config.owner.kind==='http')owner=createReading67HomeworkOwner({url:config.owner.url,key:(await fs.readFile(config.owner.keyFile,'utf8')).trim(),auth,docs,metadata,ownerSource,locate});
  else throw Error('DOC_OWNER_CONFIG_REQUIRED');
  const ownerEntry=createReading67OwnerEntry({db,identity,ownerSource,metadata,policy:config.ownerEntry});
- const homework=createReading67Homework({db,metadata,pageBase:config.pageBase,owner,docs,planWrite,resultSummary,progressText,completionText,managedCodes,ownerEntry});
  const product=content.code.startsWith('67-listening-')?'listening-homework':'reading-homework';
+ const sharedWriter=sharedDocs&&createHomeworkSharedStatusWriter({db,product,managedCodes,...sharedDocs});
+ const homework=createReading67Homework({db,metadata,pageBase:config.pageBase,owner,docs,planWrite,resultSummary,progressText,completionText,managedCodes,ownerEntry,
+  selectSharedStatusWriter:sharedWriter?s=>sharedDocs.applies(s.courseId)?sharedWriter:null:undefined});
  const publishPending=config.owner.kind==='http'&&ownerEntry?publisherFromEnv(process.env,{product,docs,planWrite}):null;
  const adminKey=(await fs.readFile(config.adminKeyFile,'utf8')).trim();if(adminKey.length<32)throw Error('CTA_ADMIN_KEY_REQUIRED');
  let stopped=false,running=null,timer;

@@ -8,6 +8,7 @@ import {PGlite} from '@electric-sql/pglite';
 import {createReading67WebStore} from '../src/reading-listening67/web-store.js';
 import {createReading67Homework} from '../src/reading-listening67/web-homework.js';
 import {createReading67HomeworkOwner} from '../src/reading-listening67/web-homework-owner.js';
+import {createHomeworkSharedStatusWriter} from '../src/reading-listening67/web-homework-shared-writer.js';
 import {createReading67CtaRegistrar} from '../src/reading-listening67/web-homework-cta.js';
 import {memoryDocs} from '../test-support/reading67-memory-docs.js';
 import {HOMEWORK_PREFIX} from '../src/reading-listening67/web-homework-docs.js';
@@ -17,7 +18,7 @@ const scope={ownerId:A,courseId:'1124',code,version},targets=[...'ABCDEFGH'].map
 const body={answers:Object.fromEntries(targets.map(id=>[id,'Bài tự viết'])),notes:'Ghi chú riêng',flags:[],annotations:[]};
 const grader={pins:{sha256:'a'.repeat(64)},profile:{expected_target_ids:targets},inspectWeb:answers=>({parsed:{targets:Object.entries(answers).map(([target_id,source_text])=>({target_id,source_text}))},completeness:{filled_cells:Object.keys(answers).length,eligible_for_grading:Object.keys(answers).length>=16}})};
 const result=job=>({pins:grader.pins,context:{operationId:job.jobId,sourceDigest:job.inputHash},grading:{target_results:targets.map(target_id=>({target_id,verdict:'correct'}))},feedback:{}});
-async function fixture(t,{managedCodes=[],ownerEntry,practiceRequired=false,realOwner=false}={}){
+async function fixture(t,{managedCodes=[],ownerEntry,practiceRequired=false,realOwner=false,shared=false}={}){
  const db=new PGlite();t.after(()=>db.close());for(const name of ['web','identity','homework'])await db.exec(await fs.readFile(new URL('../../docs/migrations/2026-10-22-reading67-'+name+'.sql',import.meta.url),'utf8'));
  const docs=memoryDocs(code),control={missing:false,wrong:false,failQueue:false};
  const target=s=>({classId:s.courseId,studentRef:s.ownerId,code:s.code,version:s.version,courseId:'classroom',courseWorkId:'work78',submissionId:'sub-'+s.ownerId,documentId:'doc-'+s.ownerId,tabId:'child'});
@@ -29,13 +30,69 @@ async function fixture(t,{managedCodes=[],ownerEntry,practiceRequired=false,real
   fetcher:async url=>{const path=new URL(url).pathname;return Response.json(path.includes('/studentSubmissions/')?submission:work);}
  }):{verify:async t=>t,resolve:async s=>{if(control.missing)throw Object.assign(Error('Chưa giao'),{code:'HOMEWORK_NOT_FOUND'});const value=target(s);return control.wrong?{...value,studentRef:B}:value;}};
  if(practiceRequired)await db.exec(await fs.readFile(new URL('../../docs/migrations/2026-10-29-reading67-share-practice.sql',import.meta.url),'utf8'));
- const homework=createReading67Homework({db,docs,owner,managedCodes,ownerEntry,metadata:{code,version,homeworkLesson:78,practiceRequired},pageBase:'https://page.test/reading-skills67/'});
+ let selectSharedStatusWriter;
+ if(shared){
+  await db.exec(await fs.readFile(new URL('../../docs/migrations/2026-11-20-homework-shared-docs-attempt.sql',import.meta.url),'utf8'));
+  const writer=createHomeworkSharedStatusWriter({db,product:'reading-homework',managedCodes,withDocumentLock:async(_id,fn)=>fn(),
+   accounts:{
+    primary:{role:'primary',async ensureIdentity(){},async canEdit(){return false;},async read(id){const doc=await docs.read(id);delete doc.revisionId;return doc;}},
+    fallback:{role:'fallback',async ensureIdentity(){},read:id=>docs.read(id),async write(id,plan){
+     try{await docs.write(id,plan);}catch(error){error.uncertain=true;throw error;}
+    }},
+   }});
+  control.shared=true;
+  selectSharedStatusWriter=()=>control.shared?writer:null;
+ }
+ const homework=createReading67Homework({db,docs,owner,managedCodes,ownerEntry,metadata:{code,version,homeworkLesson:78,practiceRequired},pageBase:'https://page.test/reading-skills67/',selectSharedStatusWriter});
  const store=createReading67WebStore({db,grader,homework});
  const jobs=async()=> (await db.query('SELECT * FROM reading_listening67.web_homework_job ORDER BY sequence')).rows;
  const due=()=>db.query('UPDATE reading_listening67.web_homework_job SET available_at=now()');
  const drain=async()=>{for(let i=0;i<30;i++)if(!await homework.once())return;throw Error('Queue did not drain');};
  return {db,docs,control,homework,store,target,jobs,due,drain,owner,work,submission};
 }
+
+test('shared Homework status holds an uncertain fallback attempt across restart and rollback',async t=>{
+ const f=await fixture(t,{realOwner:true,shared:true});
+ const dest=f.target(scope);
+ await f.homework.register(scope,dest);
+ await f.drain();
+ const before=f.docs.get(dest.documentId);
+ const originalCta=structuredClone(before.cta);
+ await f.store.save(scope,{baseRevision:0,mutationId:randomUUID(),body});
+ const submitted=await f.store.submit(scope,{revision:1,requestId:randomUUID()});
+ const grade=await f.store.claim();
+ await f.store.finish(grade,result(grade));
+ const read=f.docs.read,write=f.docs.write;
+ let failReadback=false;
+ f.docs.write=async(...args)=>{try{return await write(...args);}catch(error){failReadback=true;throw error;}};
+ f.docs.read=async id=>{if(failReadback){failReadback=false;throw Error('QA readback unavailable');}return read(id);};
+ f.docs.loseNextAck();
+ await f.homework.once();
+ const [started]= (await f.jobs()).filter(x=>x.kind==='status');
+ assert.equal(started.status,'pending');
+ assert.equal(started.error_code,'DOC_NEEDS_RECONCILIATION');
+ assert.equal(started.shared_docs_attempt.accountRole,'fallback');
+ const calls=f.docs.calls.write;
+ const revision=before.revision;
+ f.control.shared=false;
+ await f.due();
+ await f.homework.once();
+ assert.equal(f.docs.calls.write,calls);
+ assert.equal((await f.jobs()).find(x=>x.id===started.id).error_code,'DOC_NEEDS_RECONCILIATION');
+ f.control.shared=true;
+ await f.due();
+ await f.homework.once();
+ assert.equal(f.docs.calls.write,calls);
+ assert.equal(before.revision,revision);
+ assert.equal((await f.jobs()).find(x=>x.id===started.id).shared_docs_attempt,null);
+ await f.drain();
+ const jobs=(await f.jobs()).filter(x=>x.kind==='status');
+ assert.deepEqual(jobs.map(x=>[x.status,x.error_code,Boolean(x.shared_docs_attempt)]),
+  [['verified',null,false],['verified',null,false],['verified',null,false]]);
+ assert.deepEqual(before.cta,originalCta);
+ assert.match(before.chars.map(x=>x.text).join(''),/^Chữ tay giữ nguyên/);
+ assert.equal(new URL(jobs.at(-1).payload.link).searchParams.get('attemptId'),submitted.attemptId);
+});
 
 test('CTA dưới tên Lesson khác đi qua registrar, worker và ghi tiến độ đúng bài/lượt',async t=>{
  const ownerEntry={url(base,s,target){if(!target)return base;const url=new URL(base);url.searchParams.set('documentId',target.documentId);return url.href;}};

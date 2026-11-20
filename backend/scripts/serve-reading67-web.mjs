@@ -18,6 +18,7 @@ import {createReading67WebStore,createReading67WebWorker} from '../src/reading-l
 import {createReading67WebRouter} from '../src/reading-listening67/web-routes.js';
 import {createReading67Postgres} from '../src/reading-listening67/web-postgres.js';
 import {createReading67HomeworkRuntime} from '../src/reading-listening67/web-homework-runtime.js';
+import {loadHomeworkSharedDocs} from '../src/reading-listening67/web-homework-shared-config.js';
 import {createReading67CtaDispatcher} from '../src/reading-listening67/web-homework-cta.js';
 import {createReading67OwnerSource} from '../src/reading-listening67/web-owner-source.js';
 import {createCourse67Scope} from '../src/reading-listening67/web-course67-scope.js';
@@ -58,6 +59,7 @@ if(https&&config.database?.kind!=='postgres')throw Error('HTTPS_TEST_REQUIRES_OW
 if(config.database?.kind!=='postgres')for(const name of ['web','identity',...(config.homework?.enabled?['homework']:[])])await db.exec(await fs.readFile(new URL(`../../docs/migrations/2026-10-22-reading67-${name}.sql`,import.meta.url),'utf8'));
 if(config.database?.kind!=='postgres'&&config.gradingValidation?.enabled)await db.exec(await fs.readFile(new URL('../../docs/migrations/2026-10-26-reading67-validation.sql',import.meta.url),'utf8'));
 if(config.database?.kind==='postgres'){const role=(await db.query('SELECT current_database() AS db,current_user AS role,rolsuper FROM pg_roles WHERE rolname=current_user')).rows[0];if(role.db!==(classroom?'reading67_materials_ic2304':'reading67_preview_stage3')||role.role!==(classroom?'reading67_materials_app':'reading67_preview_app')||role.rolsuper)throw Error('TEST_DATABASE_ROLE_REQUIRED');await db.query('SELECT 1 FROM reading_listening67.web_student_session LIMIT 1');}
+const sharedDocs=await loadHomeworkSharedDocs(classroom&&process.env.READING_HOMEWORK_SHARED_DOCS_CONFIG,db);
 const content=JSON.parse(await fs.readFile(config.contentPath,'utf8'));
 const managedCodes=[content.code,...await Promise.all((config.additionalLessons||[]).map(async lesson=>JSON.parse(await fs.readFile(lesson.contentPath,'utf8')).code))];
 const grader=await loadReading67WebGrader({snapshotPath:config.graderPath,expectedSha256:config.graderSha256,validation:config.gradingValidation?.enabled===true});
@@ -65,7 +67,7 @@ const allowedClassIds=config.allowedClassIds||initial.classes.map(c=>c.erp_cours
 if(allowedClassIds.some(id=>!initial.classes.some(c=>c.erp_course_class_id===String(id))))throw Error('LESSON_CLASSES_INVALID');
 const ownerSource=config.homework?.owner?.kind==='http'?createReading67OwnerSource({context,allowedClassIds,url:config.homework.owner.url,key:(await fs.readFile(config.homework.owner.keyFile,'utf8')).trim()}):null;
 const identity=createReading67WebIdentity({db,context,allowedClassIds,verifyGoogle,ownerSource,cookiePath:publicPath+'/api/reading-skills67',includeEmptyClasses:!!config.homework?.ownerEntry});
-const homeworkRuntime=config.homework?.enabled?await createReading67HomeworkRuntime({config:config.homework,db,content,identity,ownerSource,managedCodes}):null;
+const homeworkRuntime=config.homework?.enabled?await createReading67HomeworkRuntime({config:config.homework,db,content,identity,ownerSource,managedCodes,sharedDocs}):null;
 const store=createReading67WebStore({db,grader,homework:homeworkRuntime?.homework,jobScope:{code:content.code,version:content.version}});await store.recoverExpired();
 // Demo phát lại output AI thật đã lưu; qua cùng validator, không giả một kết quả mới.
 if(demo&&config.seed){
@@ -78,7 +80,7 @@ if(demo&&config.seed){
   const result=await grader.finish(grader.prepareWeb(job.answers,job.jobId),{replayResponse:response});await store.finish(job,result);
  }
 }
-const additionalLessons=await createAdditionalReading67Lessons({configs:config.additionalLessons||[],db,context,initial,verifyGoogle,cookiePath:publicPath+'/api/reading-skills67',googleClientId,demo,managedCodes});
+const additionalLessons=await createAdditionalReading67Lessons({configs:config.additionalLessons||[],db,context,initial,verifyGoogle,cookiePath:publicPath+'/api/reading-skills67',googleClientId,demo,managedCodes,sharedDocs});
 const ctaRegistrars=additionalLessons.map(l=>l.cta).filter(Boolean);
 if(ctaRegistrars.some(c=>c.adminKey!==homeworkRuntime?.adminKey))throw Error('CTA_ADMIN_SCOPE_MISMATCH');
 const registerCta=homeworkRuntime&&ctaRegistrars.length?createReading67CtaDispatcher({docs:homeworkRuntime.docs,registrars:[{code:content.code,registerCta:homeworkRuntime.registerCta},...ctaRegistrars]}):homeworkRuntime?.registerCta;
@@ -105,4 +107,4 @@ app.get('/health',async(_q,r)=>{try{await db.query('SELECT 1');r.json({ok:true,d
 app.get('/favicon.ico',(_q,r)=>r.sendStatus(204));app.get('/',(_q,r)=>r.redirect(publicPath+'/reading-skills67/?server=1'));
 const mounted=express();mounted.use(publicPath||'/',app);
 const server=mounted.listen(port,https?'0.0.0.0':'127.0.0.1',()=>{if(config.workersEnabled!==false){worker.start();homeworkRuntime?.start();for(const lesson of additionalLessons)lesson.start();}console.log(JSON.stringify({ready:true,port,demo,homework:homeworkRuntime?.mode||'disabled'}));});
-let closing=false;async function close(){if(closing)return;closing=true;server.close();await worker.close();await homeworkRuntime?.close();for(const lesson of additionalLessons)await lesson.close();await db.close();process.exit(0);}process.on('SIGINT',close);process.on('SIGTERM',close);
+let closing=false;async function close(){if(closing)return;closing=true;server.close();await worker.close();await homeworkRuntime?.close();for(const lesson of additionalLessons)await lesson.close();await sharedDocs?.close();await db.close();process.exit(0);}process.on('SIGINT',close);process.on('SIGTERM',close);

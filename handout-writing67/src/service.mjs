@@ -307,6 +307,8 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
       if(!object(input)||!/^IC[0-9]+$/.test(input.classRef||'')||!id(input.studentRef)||
         !homeworkAssignment(input.assignmentId,'lesson6')||!Number.isSafeInteger(input.contentVersion)||input.contentVersion<1)
         fail('WRITING_ENTRY_REQUIRED',403);
+      const room=(await api.roster('lesson6')).find(row=>row.classRef===input.classRef);
+      if(!room?.students.some(student=>student.studentRef===input.studentRef))fail('IDENTITY_NOT_ALLOWED',403);
       const session=await store.readIdentity(JSON.stringify(['lesson6',input.classRef,input.studentRef,input.assignmentId,input.contentVersion]));
       if(!session)return null;
       if(!isLesson6Outline(session)||session.classRef!==input.classRef||session.studentRef!==input.studentRef||

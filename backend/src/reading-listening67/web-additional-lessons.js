@@ -10,12 +10,12 @@ import {createReading67OwnerSource} from './web-owner-source.js';
 import {createReading67HomeworkRuntime} from './web-homework-runtime.js';
 import {createReading67WebStore,createReading67WebWorker} from './web-store.js';
 import {createReading67WebRouter} from './web-routes.js';
-export async function createAdditionalReading67Lessons({configs=[],db,context,initial,verifyGoogle,cookiePath,googleClientId,demo=false,managedCodes=[]}){
+export async function createAdditionalReading67Lessons({configs=[],db,context,initial,verifyGoogle,cookiePath,googleClientId,demo=false,managedCodes=[],sharedDocs}){
  if(!Array.isArray(configs)||configs.length>20||new Set(configs.map(c=>c.route)).size!==configs.length)throw Error('ADDITIONAL_LESSONS_INVALID');
  const runtimes=[];
  for(const config of configs){
   if(!/^\/[a-z0-9-]+$/.test(config.route)||typeof config.studentsOpen!=='boolean'||demo&&config.homework?.enabled)throw Error('ADDITIONAL_LESSON_CONFIG_INVALID');
-  if(config.kind==='matching_headings'){runtimes.push(await createReading67HeadingsLesson({config,db,context,initial,verifyGoogle,cookiePath,googleClientId,demo,managedCodes}));continue;}
+  if(config.kind==='matching_headings'){runtimes.push(await createReading67HeadingsLesson({config,db,context,initial,verifyGoogle,cookiePath,googleClientId,demo,managedCodes,sharedDocs}));continue;}
   const content=JSON.parse(await readFile(config.contentPath,'utf8'));
   const loader=content.type==='matching_people'?loadReading67PeopleGrader:loadGreenRoofsGrader;
   const grader=content.type==='sentence_completion'?await loadReading67SentenceGrader({snapshotPath:config.graderPath,expectedSha256:config.graderSha256}):['green-roofs','matching_people'].includes(content.type)?await loader({snapshotPath:config.graderPath,expectedSha256:config.graderSha256,auditPath:config.auditPath,auditSha256:config.auditSha256}):await loadReading67TfngGrader({snapshotPath:config.graderPath,expectedSha256:config.graderSha256});
@@ -24,7 +24,7 @@ export async function createAdditionalReading67Lessons({configs=[],db,context,in
   if(!Array.isArray(allowedClassIds)||!allowedClassIds.length||allowedClassIds.some(id=>!initial.classes.some(c=>c.erp_course_class_id===String(id))))throw Error('LESSON_CLASSES_INVALID');
   const ownerSource=config.homework?.owner?.kind==='http'?createReading67OwnerSource({context,classScope:config.autoOpenCourse67===false?null:context.classScope,allowedClassIds,url:config.homework.owner.url,key:(await readFile(config.homework.owner.keyFile,'utf8')).trim()}):null;
   const identity=createReading67WebIdentity({db,context,classScope:config.autoOpenCourse67===false?null:context.classScope,allowedClassIds,verifyGoogle,ownerSource,cookiePath,includeEmptyClasses:true});
-  const homeworkRuntime=config.homework?.enabled?await createReading67HomeworkRuntime({config:config.homework,db,content,identity,ownerSource,managedCodes}):null;
+  const homeworkRuntime=config.homework?.enabled?await createReading67HomeworkRuntime({config:config.homework,db,content,identity,ownerSource,managedCodes,sharedDocs}):null;
   const store=createReading67WebStore({db,grader,homework:homeworkRuntime?.homework,jobScope:{code:content.code,version:content.version}});
   await store.recoverExpired();
   const worker=createReading67WebWorker({store,grader,onError:error=>console.error(JSON.stringify({event:'reading_homework_grading_error',lesson:content.lesson,code:error.code||'FAILED'}))});

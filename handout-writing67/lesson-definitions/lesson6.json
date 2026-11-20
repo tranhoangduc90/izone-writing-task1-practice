@@ -1,0 +1,45 @@
+{
+  "activity": "lesson6",
+  "number": 6,
+  "title": "Chuẩn bị ý tưởng · Truy cập và trao đổi thông tin",
+  "shortTitle": "Truy cập và trao đổi thông tin",
+  "topic": "Modern technology now allows rapid and uncontrolled access to and exchange of information. Far from being beneficial, this is a danger to our societies. To what extent do you agree or disagree?",
+  "aInstruction": "Chọn thông điệp và 1–2 idea cho mỗi thân bài.",
+  "ideaHint": "Lấy ý từ bài luyện và ưu tiên những ý bạn thấy dễ viết nhất.",
+  "description": "Hoàn thành Writing Lesson 6, chọn quan điểm và chốt ý cho hai thân bài.",
+  "outlineOnly": true,
+  "sharePolicy": "writing67-lesson6-chat-v1",
+  "rosterScope": "lesson",
+  "workflowMode": "whole-chain-v1",
+  "workflowVersion": 1,
+  "handoutMode": "two-bodies-v1",
+  "objective": "BAX",
+  "helpTitle": "Chọn idea như thế nào?",
+  "helpItems": [
+    "Đọc ngược từ câu hỏi cuối lên. Tìm cụm đứng ngay trước từ “this” để xác định đề đang đánh giá việc gì.",
+    "Hỏi thông tin gì dễ lấy hoặc dễ lan truyền, ai chịu tác động và tác động ra sao. Nhắc tên Internet, TV hoặc nền tảng học trực tuyến để nói rõ nguồn thông tin.",
+    "Hai thân cần nhất quán với quan điểm và bao quát việc truy cập, trao đổi, tốc độ và tình trạng thiếu kiểm soát."
+  ],
+  "bodies": [
+    {
+      "body": 1,
+      "objective": "BAX",
+      "title": "Thân bài 1",
+      "focus": "Chốt thông điệp và 1–2 idea bạn sẽ dùng.",
+      "ideaHint": "Nêu ngắn gọn ý bạn sẽ triển khai.",
+      "topicInstruction": "Đoạn này muốn người đọc hiểu điều gì về tác động của việc tiếp cận hoặc trao đổi thông tin?",
+      "chainInstruction": "Check thông điệp và các idea của thân bài này.",
+      "comparisonInstruction": "Đối chiếu với quan điểm của cả bài."
+    },
+    {
+      "body": 2,
+      "objective": "BAX",
+      "title": "Thân bài 2",
+      "focus": "Chốt thông điệp và 1–2 idea bạn sẽ dùng.",
+      "ideaHint": "Nêu ngắn gọn ý bạn sẽ triển khai.",
+      "topicInstruction": "Đoạn này muốn người đọc hiểu điều gì về tác động của việc tiếp cận hoặc trao đổi thông tin?",
+      "chainInstruction": "Check thông điệp và các idea của thân bài này.",
+      "comparisonInstruction": "Đối chiếu với quan điểm của cả bài."
+    }
+  ]
+}

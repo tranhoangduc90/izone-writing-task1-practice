@@ -1,3 +1,5 @@
+import {isLesson6Outline,lesson6OutlineRelation,LESSON6_STANCES} from './writing-lesson6.mjs';
+
 // Hai thân bài dùng cùng chính sách chấm; khóa có tiền tố giữ đúng nguồn–đích khi lưu/AI trả muộn.
 export const GUIDED='guided-bax-v1', WHOLE='whole-chain-v1', MULTI='two-bodies-v1';
 export const PREPARATION='ideas-first-v1';
@@ -12,10 +14,12 @@ export const OUTLINE_DIRECTIONS={agree:'Nghiêng về đồng ý',disagree:'Nghi
 export const isBodyOutline=s=>s.outlineOnly===true;
 export const isTwoQuestionOutline=s=>isBodyOutline(s)&&s.activity==='lesson4';
 export const validOutlineDirection=value=>typeof value==='string'&&Object.hasOwn(OUTLINE_DIRECTIONS,value);
+export const validOutlineStance=(s,value)=>isLesson6Outline(s)?typeof value==='string'&&Object.hasOwn(LESSON6_STANCES,value):validOutlineDirection(value);
 export function outlineRelation(s){
  const steps=[s.steps?.body1_topic,s.steps?.body2_topic];
  if(isTwoQuestionOutline(s))return steps.every(step=>step?.status==='passed')?'passed':'waiting';
  const stance=s.responses?.stance;
+ if(isLesson6Outline(s))return lesson6OutlineRelation(stance,steps);
  if(!validOutlineDirection(stance)||steps.some(step=>step?.status!=='passed'||!validOutlineDirection(step.direction)))return 'waiting';
  const [first,second]=steps.map(step=>step.direction);
  if(first===second)return first===stance?'passed':'stance';
@@ -27,7 +31,8 @@ export const solutionsFor=s=>s.solutionOptions||SOLUTIONS;
 export const preparationContext=s=>isOpinion(s)||isDiscussion(s)?{preparationKind:preparationKindOf(s),solutionOptions:[...s.solutionOptions]}:{};
 export const isOpinion=s=>isPrepared(s)&&preparationKindOf(s)===OPINION;
 export const isDiscussion=s=>isPrepared(s)&&preparationKindOf(s)===DISCUSSION;
-export function requiredFields(s,section){return workflowFor(s).fields[section].filter(k=>k!=='positionLimit'||s.responses?.agreementLevel===AGREEMENT_LEVELS[2]);}
+export function requiredFields(s,section){return workflowFor(s).fields[section].filter(k=>
+ (k!=='positionLimit'||s.responses?.agreementLevel===AGREEMENT_LEVELS[2])&&(!isLesson6Outline(s)||!k.endsWith('_idea2')));}
 export function preparationError(s){
  if(!solutionsFor(s).includes(s.responses?.chosenSolution))return 'SOLUTION_INVALID';
  if(!isOpinion(s))return null;

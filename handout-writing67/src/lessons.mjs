@@ -8,10 +8,17 @@ export const LEGACY_LESSON5={
 };
 const fields=['preparationMode','preparationKind','solutionOptions','rosterScope','handoutMode','bodies','helpTitle','helpItems','description','workflowMode','workflowVersion','whyOptions','objective','activity','number','title','shortTitle','body','topic','aInstruction','ideaHint','promptVersion','classes','defaultClass'];
 import {LESSON4_SHARE_POLICY,LESSON4_TITLE,LESSON4_TOPIC} from './writing-lesson4-share.mjs';
+import {LESSON6_SHARE_POLICY,LESSON6_TITLE,LESSON6_TOPIC} from './writing-lesson6.mjs';
+
+const shareLessons = new Map([
+ ['lesson4', {policy:LESSON4_SHARE_POLICY,title:LESSON4_TITLE,topic:LESSON4_TOPIC}],
+ ['lesson6', {policy:LESSON6_SHARE_POLICY,title:LESSON6_TITLE,topic:LESSON6_TOPIC}],
+]);
 
 export function publicLesson(lesson){return Object.fromEntries([...fields,'outlineOnly','sharePolicy'].filter(k=>lesson[k]!==undefined).map(k=>[k,lesson[k]]));}
 export function validateLesson(value,key){
- if((key==='lesson4'||value?.sharePolicy!==undefined)&&(key!=='lesson4'||value?.sharePolicy!==LESSON4_SHARE_POLICY||value.outlineOnly!==true||value.title!==LESSON4_TITLE||value.topic!==LESSON4_TOPIC))throw new Error('LESSON_CONFIG_INVALID');
+ const share = shareLessons.get(key);
+ if((share||value?.sharePolicy!==undefined)&&(!share||value?.sharePolicy!==share.policy||value.outlineOnly!==true||value.title!==share.title||value.topic!==share.topic))throw new Error('LESSON_CONFIG_INVALID');
  if(value?.outlineOnly!==undefined&&(value.outlineOnly!==true||value.handoutMode!=='two-bodies-v1'||value.preparationMode!==undefined))throw new Error('LESSON_CONFIG_INVALID');
  if(value?.rosterScope!==undefined&&value.rosterScope!=='lesson')throw new Error('LESSON_CONFIG_INVALID');
  if(value?.preparationKind!==undefined&&(!['opinion-v1','discussion-v1'].includes(value.preparationKind)||value.preparationMode!=='ideas-first-v1'||value.handoutMode!=='two-bodies-v1'||!Array.isArray(value.solutionOptions)||value.solutionOptions.length!==2||value.solutionOptions.some(x=>typeof x!=='string'||!x.trim()||x.length>120)||new Set(value.solutionOptions).size!==2))throw new Error('LESSON_CONFIG_INVALID');

@@ -62,13 +62,13 @@ export function createStore(db,{clock=Date.now,onQueueCommitted,onQueueError=()=
       const result = await db.query('SELECT payload FROM handout67.session WHERE ref=$1', [ref]);
       return result.rows[0]?.payload;
     },
-    async claimLesson4Share(now) {
+    async claimLesson4Share(now, activity = 'lesson4') {
       return db.transaction(async tx => {
         const result = await tx.query(`SELECT payload FROM handout67.session
-          WHERE payload->>'activity'='lesson4' AND (
+          WHERE payload->>'activity'=$2 AND (
             payload#>>'{practice,status}'='queued' OR
             (payload#>>'{practice,status}'='processing' AND (payload#>>'{practice,leaseUntil}')::bigint <= $1))
-          ORDER BY updated_at,ref LIMIT 1 FOR UPDATE SKIP LOCKED`, [now]);
+          ORDER BY updated_at,ref LIMIT 1 FOR UPDATE SKIP LOCKED`, [now, activity]);
         if (!result.rows[0]) return null;
         const session = result.rows[0].payload;
         const before = structuredClone(session);

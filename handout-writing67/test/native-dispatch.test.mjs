@@ -91,3 +91,30 @@ test('legacy signal is pinned to its own bearer and n8n cannot claim in native m
   const r=await post('jobs/claim',internal,{});
   assert.deepEqual(await r.json(),{ok:true,jobs:[]});
 });
+
+test('holds the observed production peak of two leases under a ten-job burst',async()=>{
+  const backlog=Array.from({length:10},(_,i)=>makeJob(i%2===0?'grade':'vocab'));
+  const rows=new Map(),results=[];
+  const done=deferred();
+  let active=0,peak=0;
+  const worker=createNativeDispatch({
+    capacity:2,service:{claim:async()=>backlog.length?[backlog.shift()]:[],job:id=>rows.get(id)},
+    processor:{async process(job){
+      peak=Math.max(peak,++active);
+      await new Promise(resolve=>setTimeout(resolve,2));
+      active--;
+      const row={productId,jobRef:job.jobRef,status:'completed',resultHash:'fixture-'+job.jobRef,tries:1};
+      rows.set(job.jobRef,row);
+      return row;
+    }},
+    hasWork:async()=>backlog.length>0,
+    onReceipt(row){results.push(row);if(results.length===10)done.resolve()},
+    onError:error=>assert.fail(error)
+  });
+  try{
+    worker.request();
+    await done.promise;
+    assert.equal(peak,2);
+    assert.equal(new Set(results.map(row=>row.jobRef)).size,10);
+  }finally{await worker.close();}
+});

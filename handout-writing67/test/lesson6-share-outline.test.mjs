@@ -32,6 +32,7 @@ test('Lesson 6 verifies selection evidence and a summary after the final stance'
   const verify = list => verifyLesson6Conversation(conversation,async()=>({milestones:list}));
   assert.equal((await verify(milestones)).status,'accepted');
   assert.equal((await verify(milestones.filter(item=>item.stage!=='ideas'))).stage,'ideas');
+  assert.equal((await verify(milestones.map(item=>item.stage==='opinion'?{...item,answers:[evidence(4,'tin sai dễ lan')]}:item))).stage,'opinion');
   assert.equal((await verify(milestones.map(item=>item.stage==='summary'?{...item,id:'m7'}:item))).stage,'summary');
   await assert.rejects(verify(milestones.map(item=>item.stage==='ideas'?{...item,dangers:[evidence(7,'quan điểm'),evidence(6,'dữ liệu bị phát tán')]}:item)),{code:'SHARE_EVIDENCE_INVALID'});
 });

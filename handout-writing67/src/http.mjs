@@ -93,12 +93,12 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
       else if(path.startsWith(prefix+'/lessons/')&&req.method==='GET')value={lesson:service.lesson(path.slice((prefix+'/lessons/').length))};
       else if(path===prefix+'/roster'&&req.method==='GET'){
         const activity=requestUrl.searchParams.get('activity')||'lesson5';
-        if(activity==='lesson4'&&!equal(req.headers.authorization,writingEntryKey&&'Bearer '+writingEntryKey))fail('WRITING_ENTRY_REQUIRED',403);
+        if(['lesson4','lesson6'].includes(activity)&&!equal(req.headers.authorization,writingEntryKey&&'Bearer '+writingEntryKey))fail('WRITING_ENTRY_REQUIRED',403);
         value={classes:await service.roster(activity)};
       }
       else if(path===prefix+'/sessions'&&req.method==='POST'){
         const input=await jsonBody(req);
-        if(input?.activity==='lesson4'&&!equal(req.headers.authorization,writingEntryKey&&'Bearer '+writingEntryKey))fail('WRITING_ENTRY_REQUIRED',403);
+        if(['lesson4','lesson6'].includes(input?.activity)&&!equal(req.headers.authorization,writingEntryKey&&'Bearer '+writingEntryKey))fail('WRITING_ENTRY_REQUIRED',403);
         value=await service.open(input,req.headers.authorization?.replace(/^Bearer /,''));status=201;
       }
       else if(path===prefix+'/integrations/homework/lesson5/open'&&req.method==='POST'){
@@ -113,6 +113,10 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
       else if(path===prefix+'/integrations/homework/lesson4/progress'&&req.method==='POST'){
         if(origin||!writingEntryKey||!equal(req.headers.authorization,'Bearer '+writingEntryKey))fail('WRITING_ENTRY_REQUIRED',403);
         value={progress:await service.readLesson4Progress(await jsonBody(req))};
+      }
+      else if(path===prefix+'/integrations/homework/lesson6/progress'&&req.method==='POST'){
+        if(origin||!writingEntryKey||!equal(req.headers.authorization,'Bearer '+writingEntryKey))fail('WRITING_ENTRY_REQUIRED',403);
+        value={progress:await service.readLesson6Progress(await jsonBody(req))};
       }
       else if(path===prefix+'/internal/jobs/claim'&&req.method==='POST'){await jsonBody(req);value={jobs:await service.claim()};}
       else if(internal){

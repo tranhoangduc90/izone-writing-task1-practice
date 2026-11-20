@@ -19,7 +19,7 @@ export function practiceStatus(practice) {
   return { id, url, status, message };
 }
 
-export function queueLesson4Share(session, { url, requestId }, now) {
+export function queueLesson4Share(session, { url, requestId, policy = LESSON4_SHARE_POLICY }, now) {
   const previous = session.practice;
   if (previous?.requestId === requestId) {
     if (previous.url !== url) throw error('SHARE_REQUEST_CONFLICT', 409);
@@ -35,7 +35,7 @@ export function queueLesson4Share(session, { url, requestId }, now) {
   if (previous) session.practiceHistory = [...(session.practiceHistory || []), previous].slice(-100);
   session.practice = {
     id: randomUUID(), url, requestId, status: 'queued', queuedAt: now,
-    policy: LESSON4_SHARE_POLICY, message: 'Đã lưu link, đang chờ kiểm tra.',
+    policy, message: 'Đã lưu link, đang chờ kiểm tra.',
   };
   return practiceStatus(session.practice);
 }
@@ -68,7 +68,7 @@ const messagesByStage = {
 
 export const lesson4Stages = Object.keys(messagesByStage);
 
-function transcript(conversation) {
+export function shareTranscript(conversation) {
   const messages = conversation?.messages;
   if (!Array.isArray(messages) || !messages.length ||
       messages.some(m => !m?.id || !['user', 'assistant'].includes(m.role) ||
@@ -105,7 +105,7 @@ const rejected = stage => ({
 // The semantic checker identifies evidence. This layer checks roles and ensures
 // the final outline follows the learner's input, including later revisions.
 export async function verifyLesson4Conversation(conversation, analyze) {
-  const messages = transcript(conversation);
+  const messages = shareTranscript(conversation);
   const topic = normalize(LESSON4_TOPIC);
   const start = messages.findIndex(m => m.role === 'assistant' && normalize(m.text).includes(topic));
   if (start < 0) return rejected('topic');
@@ -179,10 +179,11 @@ export function lesson4ShareAnalyzer(callAI) {
   };
 }
 
-export function createLesson4ShareWorker({ store, readShare, analyze, clock = Date.now }) {
+export function createLesson4ShareWorker({ store, readShare, analyze, clock = Date.now,
+  activity = 'lesson4', verify = verifyLesson4Conversation, recognizerVersion = RECOGNIZER_VERSION }) {
   return async function once() {
     const now = clock();
-    const session = await store.claimLesson4Share(now);
+    const session = await store.claimLesson4Share(now, activity);
     if (!session) return false;
     const { id, url, leaseToken } = session.practice;
     const update = (outcome) => store.edit(session.ref, current => {
@@ -194,12 +195,12 @@ export function createLesson4ShareWorker({ store, readShare, analyze, clock = Da
     let startedAnalysis = false;
     try {
       const conversation = await readShare(url);
-      const outcome = await verifyLesson4Conversation(conversation, async input => {
+      const outcome = await verify(conversation, async input => {
         if (!await update({ analysisStartedAt: clock() })) throw error('SHARE_SUPERSEDED', 409);
         startedAnalysis = true;
         return analyze(input);
       });
-      await update({ ...outcome, recognizerVersion: RECOGNIZER_VERSION, finishedAt: clock() });
+      await update({ ...outcome, recognizerVersion, finishedAt: clock() });
     } catch (failure) {
       if (failure.code !== 'SHARE_SUPERSEDED') {
         const evidenceInvalid = startedAnalysis && failure.code === INVALID_EVIDENCE;
@@ -211,7 +212,7 @@ export function createLesson4ShareWorker({ store, readShare, analyze, clock = Da
             evidenceInvalid ? evidenceRetryNotice :
             openingAttachment ? openingAttachmentNotice : 'Chưa đọc được link. Kiểm tra link chia sẻ công khai rồi thử lại.',
           ...(openingAttachment ? { readDetail: failure.shareReadDetail } : {}),
-          ...(startedAnalysis ? { recognizerVersion: RECOGNIZER_VERSION } : {}),
+          ...(startedAnalysis ? { recognizerVersion } : {}),
           errorCode: /^[A-Z_]+$/.test(failure.code || '') ? failure.code : 'SHARE_READ_FAILED',
           finishedAt: clock(),
         });

@@ -13,6 +13,8 @@ import { createService } from './service.mjs';
 import { createApi } from './http.mjs';
 import {createProcessor,gatewayAdapter} from './processor.mjs';
 import {createLesson4ShareWorker, lesson4ShareAnalyzer, lesson4ShareEnabled} from './writing-lesson4-share.mjs';
+import {lesson6ShareEnabled} from './writing-lesson6.mjs';
+import {LESSON6_RECOGNIZER_VERSION,lesson6ShareAnalyzer,verifyLesson6Conversation} from './writing-lesson6-share.mjs';
 import {readSpeakingShare} from './vendor/chatgpt-share-reader.mjs';
 
 // Chỉ mở tiến trình Handout 67. Không import app/server/notifier Writing hoặc biến env chung.
@@ -37,27 +39,38 @@ if(courseRosterPath){
   });
 }
 const roster=async(activity,scope)=>{
+  if(activity==='lesson6'&&courseRosterPath){
+    const current=lesson5CourseRoster();
+    if(!current)throw Object.assign(new Error('ROSTER_UNAVAILABLE'),{status:503});
+    return current.classes;
+  }
   const snapshot=activity==='lesson5'?lesson5CourseRoster():null;
   return snapshot?snapshot.classes:staticRoster(activity,scope);
 };
 const writingEntryKey=process.env.HANDOUT67_WRITING_ENTRY_KEY_FILE?
   fs.readFileSync(process.env.HANDOUT67_WRITING_ENTRY_KEY_FILE,'utf8').trim():null;
-if(lesson4ShareEnabled(lessons.lesson4)&&(!writingEntryKey||writingEntryKey.length<32||
+if((lesson4ShareEnabled(lessons.lesson4)||lesson6ShareEnabled(lessons.lesson6))&&(!writingEntryKey||writingEntryKey.length<32||
   [settings.internalSecret,settings.secret].includes(writingEntryKey)))throw Error('WRITING_ENTRY_CONFIG_REQUIRED');
 const service=createService({store,roster,secret:settings.secret,renderJob,lessons,
   lesson5HomeworkImport:process.env.HANDOUT67_LESSON5_HOMEWORK==='1',retryDelays:[0,5000,15000]});
 // Không có pump gọi AI nền; n8n phải chờ endpoint xử lý mỗi attempt để giữ trần chung.
 const callAI=gatewayAdapter(settings);
 const processor=createProcessor({service,callAI,onError:code=>console.error('Handout67: '+code)});
-const shareWorker=lesson4ShareEnabled(lessons.lesson4)?createLesson4ShareWorker({store,readShare:readSpeakingShare,analyze:lesson4ShareAnalyzer(callAI)}):null;
+const shareWorkers=[
+ lesson4ShareEnabled(lessons.lesson4)&&createLesson4ShareWorker({store,readShare:readSpeakingShare,analyze:lesson4ShareAnalyzer(callAI)}),
+ lesson6ShareEnabled(lessons.lesson6)&&createLesson4ShareWorker({store,readShare:readSpeakingShare,analyze:lesson6ShareAnalyzer(callAI),
+  activity:'lesson6',verify:verifyLesson6Conversation,recognizerVersion:LESSON6_RECOGNIZER_VERSION}),
+].filter(Boolean);
 let shareWorking=false;
 async function checkShare(){
-  if(!shareWorker||shareWorking)return;
+  if(shareWorking)return;
   shareWorking=true;
-  try{await shareWorker();}catch{console.error('Handout67: LESSON4_SHARE_WORKER_FAILED');}
+  try{
+    for(const worker of shareWorkers)await worker().catch(()=>console.error('Handout67: WRITING_SHARE_WORKER_FAILED'));
+  }
   finally{shareWorking=false;}
 }
-const shareTimer=shareWorker?setInterval(checkShare,2000):null;
+const shareTimer=shareWorkers.length?setInterval(checkShare,2000):null;
 shareTimer?.unref();
 // Grant hiện có thuộc Handout67. Chỉ Lesson 5 nhận thêm grant đã đối soát từ roster khóa 67.
 const oauth=new OAuth2Client();

@@ -4,6 +4,8 @@ import {readFile} from 'node:fs/promises';
 import {PGlite} from '@electric-sql/pglite';
 import {createStore} from '../src/store.mjs';
 import {createService} from '../src/service.mjs';
+import {createProcessor} from '../src/processor.mjs';
+import {createNativeDispatch} from '../src/native-dispatch.mjs';
 const choice='Đường tàu và tàu điện ngầm';
 const lesson={activity:'lesson11',number:11,topic:'Discuss rail and wider roads.',classes:['fixture'],promptVersion:'lesson11-rubric-ideas-first-test',handoutMode:'two-bodies-v1',preparationMode:'ideas-first-v1',workflowMode:'whole-chain-v1',bodies:[{body:1},{body:2}]};
 async function fixture(t){
@@ -43,4 +45,50 @@ test('P11 · lựa chọn ngoài hai phương án và bỏ bodyIndex của bư�
  const h=await fixture(t);await h.save({...h.ideas,chosenSolution:'Một phương án thứ ba'});await assert.rejects(()=>h.check('outline',0),/SOLUTION_INVALID/);
  await h.save({chosenSolution:choice});await assert.rejects(()=>h.check('outline',undefined),/BODY_IDENTITY_MISMATCH/);await h.check('outline',0);await h.attest('outline',0);
  await h.service.revise(h.ref,h.token,await h.input({field:'chosenSolution',value:'Thêm đường và mở rộng đường bộ',bodyIndex:0}));assert.equal((await h.read()).steps.outline.status,'revision');
+});
+
+
+test('P11 native · giữ chỉ số 0, đọc lại đúng kết quả khi mất ACK và phát từ vựng một lần',async t=>{
+ const h=await fixture(t);
+ const attempts=[];
+ const processor=createProcessor({service:h.service,async callAI(job){
+   attempts.push([job.kind,job.bodyIndex,job.ideaIndex]);
+   const vocabulary=Object.fromEntries(['A1','X1','B1','A2','X2','B2'].map(key=>[
+    key,[{phrase:'take the train',meaningVi:'đi tàu'},{phrase:'use public transport',meaningVi:'dùng giao thông công cộng'}]
+   ]));
+   const result=job.kind==='grade'?{resultStatus:'passed',feedback:'Dàn ý thử đúng cả hai thân bài.'}:vocabulary;
+   return {outputText:JSON.stringify({operation_key:job.operationKey,result}),model:'fixture',httpStatus:200};
+ }});
+ const results=[];
+ let notify;
+ const native=createNativeDispatch({
+   service:h.service,processor:{async process(job){
+     const answer=await processor.process(job);
+     if(job.kind==='grade') throw Error('fixture_lost_ack_after_commit');
+     return answer;
+   }},
+   hasWork:async()=>true,onReceipt(result){results.push(result);notify?.resolve(result);},
+   onError(error){notify?.reject(error);}
+ });
+ const dispatchOne=async()=>{
+   const future=Promise.withResolvers();
+   notify=future;
+   native.request();
+   return future.promise;
+ };
+ try {
+ await h.save(h.ideas);
+ await h.check('outline',0);
+ const grade=await dispatchOne();
+ assert.equal(grade.kind,'grade');
+ assert.deepEqual(attempts[0],['grade',0,0]);
+ assert.equal((await h.read()).steps.outline.history.length,1);
+ await h.pass(1,'topic');await h.pass(1,'si1');await h.service.openIdea2(h.ref,h.token,{bodyIndex:1});
+ await h.pass(1,'si2');
+ const vocab=await dispatchOne();
+ assert.equal(vocab.kind,'vocab');
+ assert.deepEqual(attempts[1],['vocab',1,0]);
+ assert.equal((await h.service.job(vocab.jobRef)).status,'completed');
+ assert.equal(results.filter(row=>row.jobRef===grade.jobRef).length,1);
+ } finally { await native.close(); }
 });

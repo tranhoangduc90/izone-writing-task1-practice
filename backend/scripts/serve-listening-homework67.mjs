@@ -11,6 +11,7 @@ import {sha256} from '../src/reading-listening67/web-grader.js';
 import {createReading67WebIdentity} from '../src/reading-listening67/web-identity.js';
 import {createReading67Postgres} from '../src/reading-listening67/web-postgres.js';
 import {createReading67HomeworkRuntime} from '../src/reading-listening67/web-homework-runtime.js';
+import {loadHomeworkSharedDocs} from '../src/reading-listening67/web-homework-shared-config.js';
 import {createReading67OwnerSource} from '../src/reading-listening67/web-owner-source.js';
 import {createCourse67Scope} from '../src/reading-listening67/web-course67-scope.js';
 const config=JSON.parse(await fs.readFile(process.argv[2],'utf8'));
@@ -23,6 +24,7 @@ const db=local?new (await import('@electric-sql/pglite')).PGlite(config.dataDir)
 if(!local){const role=(await db.query('SELECT current_database() AS db,current_user AS role,rolsuper,rolcreatedb,rolcreaterole FROM pg_roles WHERE rolname=current_user')).rows[0];if(role.db!=='listening_homework67'||role.role!=='listening_homework67_app'||role.rolsuper||role.rolcreatedb||role.rolcreaterole)throw Error('OWN_DATABASE_ROLE_REQUIRED');}
 // Migrations are operator actions in production. Never discover or migrate another DB.
 if(local)await db.exec(await fs.readFile(new URL('../ops/listening-homework67/schema.sql',import.meta.url),'utf8'));
+const sharedDocs=await loadHomeworkSharedDocs(!local&&process.env.LISTENING_HOMEWORK_SHARED_DOCS_CONFIG,db);
 const classScope=!local&&config.autoOpenCourse67!==false?createCourse67Scope({url:config.authority.url,key:(await fs.readFile(config.authority.keyFile,'utf8')).trim()}):null;
 const context=local?createListeningContext({url:'http://fixture',key:'fixture',fetcher:async()=>{
  const payload=JSON.parse(await fs.readFile(config.authority.path,'utf8'));
@@ -52,7 +54,7 @@ for(const definition of definitions){
  const lessonContext=definition.allowedClassIds&&!local?createListeningContext({url:config.authority.url,key:(await fs.readFile(config.authority.keyFile,'utf8')).trim(),allowedClassIds:definition.allowedClassIds,classScope:definition.autoOpenCourse67===false?null:classScope}):context;
  const lessonIdentity=definition.allowedClassIds?createReading67WebIdentity({db,context:lessonContext,allowedClassIds:definition.allowedClassIds,cookieName:'listening_homework_teacher',cookiePath:(config.publicPath||'')+'/api/listening-homework67',verifyGoogle:local?async credential=>{if(credential!=='fixture-teacher-allowed')throw Error('INVALID_FIXTURE');return {email:'teacher@example.test',sub:'fixture-google',email_verified:true};}:async credential=>(await google.verifyIdToken({idToken:credential,audience:config.googleClientId})).getPayload()}):identity;
  const lessonOwner=definition.allowedClassIds&&config.owner?createReading67OwnerSource({context:lessonContext,allowedClassIds:definition.allowedClassIds,url:config.owner.url,key:(await fs.readFile(config.owner.keyFile,'utf8')).trim()}):ownerSource;
- const homeworkRuntime=definition.homework?.enabled?await createReading67HomeworkRuntime({config:definition.homework,db,content:definition.lesson,identity:lessonIdentity,ownerSource:lessonOwner,contract:DOC_CONTRACT,resultSummary:listeningSummary,progressText:listeningProgressText,completionText:listeningCompletionText}):null;
+ const homeworkRuntime=definition.homework?.enabled?await createReading67HomeworkRuntime({config:definition.homework,db,content:definition.lesson,identity:lessonIdentity,ownerSource:lessonOwner,contract:DOC_CONTRACT,resultSummary:listeningSummary,progressText:listeningProgressText,completionText:listeningCompletionText,sharedDocs}):null;
  if(!local&&!homeworkRuntime)throw Error('LESSON_HOMEWORK_REQUIRED');
  const runtime=createListeningHomeworkApp({db,lesson:definition.lesson,provider,model:config.ai.model||'gemini-3.5-flash',identity:lessonIdentity,homeworkRuntime,audio:definition.audio,origins:config.origins,studentsOpen:definition.studentsOpen??config.studentsOpen,googleClientId:config.googleClientId,fixture:local,ssoBridge:config.sso?async q=>fetch(config.sso.bridgeUrl,{method:'POST',headers:{'Content-Type':'application/json',Origin:q.headers.origin,'X-Izone-Csrf':'1',Cookie:q.headers.cookie||''},body:JSON.stringify(q.body||{}),signal:AbortSignal.timeout(10000)}):null});
  runtimes.push({...runtime,code:definition.lesson.code,homeworkRuntime});
@@ -61,5 +63,5 @@ const runtime={app:createListeningLessonRouter(runtimes,{defaultCode:lesson.code
 if(local){runtime.app.use('/listening-homework',express.static(path.join(config.pagesPath,'listening-homework')));runtime.app.use('/shared',express.static(path.join(config.pagesPath,'shared')));runtime.app.use('/term-tests/shared',express.static(path.join(config.pagesPath,'term-tests/shared')));}
 const mounted=express();mounted.use(config.publicPath||'/',runtime.app);
 const server=mounted.listen(config.port,local?'127.0.0.1':'0.0.0.0',()=>{for(const r of runtimes){r.worker.start();r.homeworkRuntime?.start();}console.log(JSON.stringify({ready:true,product:'listening-homework67',port:config.port,fixture:local,classes:allowedClassIds.length,lessons:runtimes.map(r=>r.code)}));});
-async function close(){server.close();for(const r of runtimes){await r.worker.close();await r.homeworkRuntime?.close();}await db.close();process.exit(0);}
+async function close(){server.close();for(const r of runtimes){await r.worker.close();await r.homeworkRuntime?.close();}await sharedDocs?.close();await db.close();process.exit(0);}
 process.on('SIGTERM',close);process.on('SIGINT',close);

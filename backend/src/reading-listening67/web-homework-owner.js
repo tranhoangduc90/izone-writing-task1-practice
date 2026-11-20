@@ -49,7 +49,7 @@ export function createReading67HomeworkOwner({url,key,headerName='x-reading-owne
  function checkSubmission(s,source,workId){
   if(!s.id||s.userId!==source.googleUserId||s.courseId!==source.courseId||s.courseWorkId!==workId)fail('DOCUMENT_OWNER_MISMATCH',403);
  }
- async function verify(target){
+ async function verify(target,{deferDocumentCheck=false}={}){
   if(target.code!==metadata.code||target.version!==metadata.version)fail('DOC_CODE_MISMATCH');
   const source=await mapping(target);
   if(source.courseId!==target.courseId)fail('OWNER_MISMATCH',403);
@@ -59,13 +59,13 @@ export function createReading67HomeworkOwner({url,key,headerName='x-reading-owne
   const s=await classroom(base+'/studentSubmissions/'+encodeURIComponent(target.submissionId));checkSubmission(s,source,work.id);
   const files=(s.assignmentSubmission?.attachments||[]).filter(a=>a.driveFile?.id===target.documentId);
   if(s.id!==target.submissionId||files.length!==1)fail('DOCUMENT_OWNER_MISMATCH',403);
-  locate(await docs.read(target.documentId),{document_id:target.documentId,tab_id:target.tabId,code:metadata.code});
+  if(!deferDocumentCheck)locate(await docs.read(target.documentId),{document_id:target.documentId,tab_id:target.tabId,code:metadata.code});
   return {...target,googleUserId:source.googleUserId,sourceRevision:source.sourceRevision,verifiedAt:new Date(clock()).toISOString()};
  }
- async function resolve(scope,cached){
+ async function resolve(scope,cached,options){
   const identity={classId:scope.courseId,studentRef:scope.ownerId,code:scope.code,version:scope.version};
   if(identity.code!==metadata.code||identity.version!==metadata.version)fail('DOC_CODE_MISMATCH');
-  if(cached){if(Object.keys(identity).some(k=>identity[k]!==cached[k]))fail('DOC_IDENTITY_MISMATCH');return verify(cached);}
+  if(cached){if(Object.keys(identity).some(k=>identity[k]!==cached[k]))fail('DOC_IDENTITY_MISMATCH');return verify(cached,options);}
   const source=await mapping(identity),deadline=clock()+40000,base='courses/'+encodeURIComponent(source.courseId);
   const works=await list(base+'/courseWork','courseWork',{courseWorkStates:'PUBLISHED'},deadline);
   const candidates=new Map(works.filter(w=>eligible(w,source)&&templatesFor(w).length).map(w=>[w.id,templatesFor(w)]));
@@ -94,7 +94,7 @@ export function createReading67HomeworkOwner({url,key,headerName='x-reading-owne
    }
   }
   if(!targets.size)fail('HOMEWORK_NOT_FOUND');
-  return verify(targets.values().next().value);
+  return verify(targets.values().next().value,options);
  }
  return {verify,resolve,resolveClassroom:input=>mapping(input,true)};
 }

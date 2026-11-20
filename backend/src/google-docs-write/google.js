@@ -14,7 +14,7 @@ export class DocsWriteError extends Error {
   }
 }
 
-export function createGoogleDocsTokenProvider({ credentials, fetcher = fetch, now = Date.now }) {
+export function createGoogleDocsTokenProvider({ credentials, fetcher = fetch, now = Date.now, beforeRequest }) {
   const clientId = credentials?.clientId ?? credentials?.client_id;
   const clientSecret = credentials?.clientSecret ?? credentials?.client_secret;
   const refreshToken = credentials?.refreshToken ?? credentials?.refresh_token;
@@ -26,6 +26,7 @@ export function createGoogleDocsTokenProvider({ credentials, fetcher = fetch, no
   return async ({ refresh = false, rejectedToken, count = () => {} } = {}) => {
     if (current?.expiresAt > now() + 60_000 && (!refresh || current.token !== rejectedToken)) return current.token;
     refreshing ??= (async () => {
+      beforeRequest?.('oauth');
       count('oauth');
       try {
         const result = await fetcher('https://oauth2.googleapis.com/token', {
@@ -55,7 +56,7 @@ function documentPath(id) {
   return encodeURIComponent(id);
 }
 
-export function createGoogleDocsAccount({ role, getToken, fetcher = fetch }) {
+export function createGoogleDocsAccount({ role, getToken, fetcher = fetch, beforeRequest }) {
   const email = docsAccountEmails[role];
   if (!Object.hasOwn(docsAccountEmails, role) || typeof getToken !== 'function') {
     throw new DocsWriteError('DOC_GOOGLE_CONFIG_INVALID');
@@ -67,6 +68,7 @@ export function createGoogleDocsAccount({ role, getToken, fetcher = fetch }) {
     for (let pass = 0; pass < 2; pass++) {
       const token = await getToken({ refresh: pass === 1, rejectedToken, count });
       if (!token) throw new DocsWriteError('DOC_GOOGLE_AUTH_UNAVAILABLE');
+      beforeRequest?.(operation);
       count(operation);
       let response;
       try {

@@ -119,3 +119,21 @@ test('401 refreshes only the rejected token and concurrent callers share the new
   assert.deepEqual(result.map(d => d.documentId), ['target-one', 'target-two']);
   assert.equal(grants, 2);
 });
+
+test('a caller request budget can reject a write before sending it', async () => {
+  const blocked = Object.assign(new Error('GOOGLE_RATE_LIMITED'), { retryAtMs: 60_000 });
+  const account = createGoogleDocsAccount({
+    role: 'primary',
+    getToken: async () => 'fixture',
+    beforeRequest(operation) {
+      assert.equal(operation, 'write');
+      throw blocked;
+    },
+    fetcher: async () => assert.fail('budget rejection must never reach Google'),
+  });
+  await assert.rejects(account.write('target-one', { revisionId: 'v1', requests: [] }, () => {}), error => {
+    assert.equal(error, blocked);
+    assert.equal(error.uncertain, undefined);
+    return true;
+  });
+});

@@ -14,7 +14,7 @@ async function jsonBody(req,maxBytes=32768) {
 
 // Nhận HTTP, kiểm origin/token và dữ liệu trước khi gọi nghiệp vụ; chỉ trả mã lỗi an toàn.
 // ACK Check sau transaction. Không in bài, credential hoặc token khi SQL/AI lỗi.
-export function createApi({service,teacher=null,processor=null,origins,internalSecret,trustedProxyAddresses=[],verifySharedTeacher=null,ssoBootstrapKey=null,writingEntryKey=null,lesson5OutlineKey=null}) {
+export function createApi({service,teacher=null,processor=null,origins,internalSecret,trustedProxyAddresses=[],verifySharedTeacher=null,ssoBootstrapKey=null,writingEntryKey=null,lesson5OutlineKey=null,nativeWake=null,legacyWakeSecret=null}) {
   const normalize=ip=>ip?.startsWith('::ffff:')?ip.slice(7):ip;
   const trusted=new Set(trustedProxyAddresses.map(normalize));
   function networkAddress(req){
@@ -40,6 +40,15 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
       if(req.method==='OPTIONS') {res.setHeader('Access-Control-Allow-Methods','GET,POST,PUT,DELETE,OPTIONS');res.setHeader('Access-Control-Allow-Headers','Content-Type,Authorization,X-Handout67-CSRF,If-None-Match');res.writeHead(204);res.end();return;}
       const path=requestUrl.pathname;
       const internal=path.startsWith(prefix+'/internal/');
+      const nativeWakePath=path===prefix+'/internal/native-dispatch/wake';
+      if(nativeWakePath) {
+        if(!nativeWake||req.method!=='POST') fail('NOT_FOUND',404);
+        if(origin||!legacyWakeSecret||!equal(req.headers.authorization,`Bearer ${legacyWakeSecret}`)) fail('INTERNAL_UNAUTHORIZED',401);
+        const body=await jsonBody(req,512);
+        if(body?.productId!==PRODUCT) fail('HANDOUT67_NATIVE_WAKE_INVALID',422);
+        nativeWake();
+        res.writeHead(202);res.end(JSON.stringify({queued:true}));return;
+      }
       if(internal && !equal(req.headers.authorization,`Bearer ${internalSecret}`))fail('INTERNAL_UNAUTHORIZED',401);
       if(!internal && path!==prefix+'/health'){
         const now=Date.now();
@@ -114,7 +123,7 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
         if(origin||!writingEntryKey||!equal(req.headers.authorization,'Bearer '+writingEntryKey))fail('WRITING_ENTRY_REQUIRED',403);
         value={progress:await service.readLesson4Progress(await jsonBody(req))};
       }
-      else if(path===prefix+'/internal/jobs/claim'&&req.method==='POST'){await jsonBody(req);value={jobs:await service.claim()};}
+      else if(path===prefix+'/internal/jobs/claim'&&req.method==='POST'){await jsonBody(req);value={jobs:nativeWake?[]:await service.claim()};}
       else if(internal){
         const match=path.match(/^\/api\/handout67\/v1\/internal\/jobs\/([^/]+)(\/(?:complete|response|process))?$/);
         if(!match || !uuid.test(match[1]))fail('NOT_FOUND',404);

@@ -97,3 +97,24 @@ test('Lesson 6 HTTP opens one-idea Check after Share and projects coverage of cu
   assert.deepEqual((await progress()).bodies.map(body=>body.passed),[true,false]);
   assert.equal(revised.body.session.steps.body2_topic.history.length,1);
 });
+
+test('Lesson 6 Docs reads have a bounded authenticated budget separate from public entry', async t => {
+  const writingEntryKey='writing-entry'.padEnd(40,'x');
+  const api=createApi({service:{roster:async()=>[],readLesson6Progress:async()=>null},
+    origins:[],internalSecret:'internal-secret'.padEnd(40,'x'),writingEntryKey});
+  await new Promise(resolve=>api.listen(0,'127.0.0.1',resolve));
+  t.after(()=>new Promise(resolve=>api.close(resolve)));
+  const host='http://127.0.0.1:'+api.address().port+'/api/handout67/v1';
+  const read=async (suffix,options)=>{
+    const response=await fetch(host+suffix,options);
+    await response.arrayBuffer();
+    return response.status;
+  };
+  for(let i=0;i<120;i++)assert.equal(await read('/roster?activity=lesson6'),403);
+  assert.equal(await read('/roster?activity=lesson6'),429);
+  const auth={headers:{Authorization:'Bearer '+writingEntryKey}};
+  for(let i=0;i<121;i++)assert.equal(await read('/roster?activity=lesson6',auth),200);
+  const progress={method:'POST',headers:{...auth.headers,'Content-Type':'application/json'},body:'{}'};
+  for(let i=121;i<480;i++)assert.equal(await read('/integrations/homework/lesson6/progress',progress),200);
+  assert.equal(await read('/roster?activity=lesson6',auth),429);
+});

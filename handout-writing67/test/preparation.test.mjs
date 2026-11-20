@@ -2,13 +2,24 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {PGlite} from '@electric-sql/pglite';
-import {createStore} from '../src/store.mjs';
+import {createStore,postgresAdapter} from '../src/store.mjs';
 import {createService} from '../src/service.mjs';
+import {createProcessor} from '../src/processor.mjs';
+import {createNativeDispatch} from '../src/native-dispatch.mjs';
+import {createApi} from '../src/http.mjs';
 const choice='Đường tàu và tàu điện ngầm';
 const lesson={activity:'lesson11',number:11,topic:'Discuss rail and wider roads.',classes:['fixture'],promptVersion:'lesson11-rubric-ideas-first-test',handoutMode:'two-bodies-v1',preparationMode:'ideas-first-v1',workflowMode:'whole-chain-v1',bodies:[{body:1},{body:2}]};
 async function fixture(t){
- const db=new PGlite();for(const f of ['001-initial.sql','002-activity-log.sql'])await db.exec(await readFile(new URL('../db/'+f,import.meta.url),'utf8'));
- const store=createStore(db),service=createService({store,roster:async()=>[{classRef:'fixture',students:[{studentRef:'s'}]}],secret:'s'.repeat(40),lessons:{lesson11:lesson},renderJob:j=>'Prompt '+j.section});
+ const url=process.env.HANDOUT67_QA_POSTGRES_URL;
+ if(url && url!=='postgresql://lab@postgres:5432/lab') throw Error('HANDOUT_QA_DATABASE_NOT_ISOLATED');
+ const db=url?new (await import('pg')).default.Pool({connectionString:url,max:3}):new PGlite();
+ if(url){
+   const identity=await db.query('SELECT current_database() AS db, current_user AS role');
+   assert.deepEqual(identity.rows[0],{db:'lab',role:'lab'});
+ }
+ const execute=url?sql=>db.query(sql):sql=>db.exec(sql);
+ for(const f of ['001-initial.sql','002-activity-log.sql']) await execute(await readFile(new URL('../db/'+f,import.meta.url),'utf8'));
+ const store=createStore(url?postgresAdapter(db):db),service=createService({store,roster:async()=>[{classRef:'fixture',students:[{studentRef:'s'}]}],secret:'s'.repeat(40),lessons:{lesson11:lesson},renderJob:j=>'Prompt '+j.section});
  const {session,token}=await service.open({activity:'lesson11',classRef:'fixture',studentRef:'s'}),ref=session.ref;
  const read=()=>service.read(ref,token),input=async body=>({baseVersion:(await read()).version,requestId:crypto.randomUUID(),...body});
  const save=async responses=>service.save(ref,token,await input({responses}));
@@ -17,7 +28,7 @@ async function fixture(t){
  const ideas={chosenSolution:choice,body1_idea1:'Mở rộng đường khó thực hiện ở nơi thiếu đất',body1_idea2:'Đường rộng có thể lại thu hút thêm xe cá nhân',body2_idea1:'Tàu chở nhiều người giúp giảm xe cá nhân',body2_idea2:'Tàu dùng tuyến riêng nên không tạo dòng xe tại nút giao'};
  const plan=async()=>{await save(ideas);await check('outline',0);await attest('outline',0);};
  const pass=async(n,key)=>{const values=key==='topic'?{['body'+n+'_topicSentence']:'Topic cho thân bài '+n}:Object.fromEntries(['a','x','b'].map(k=>['body'+n+'_'+k+key.at(-1),'Nội dung '+n+' '+k+key.at(-1)]));await save(values);await check('body'+n+'_'+key,n);await attest('body'+n+'_'+key,n);};
- t.after(()=>db.close());return {db,store,service,ref,token,read,input,save,check,attest,ideas,plan,pass};
+ t.after(()=>url?db.end():db.close());return {db,store,service,ref,token,read,input,save,check,attest,ideas,plan,pass};
 }
 test('P11 · bốn idea và lựa chọn được chấm trước; chưa có Topic và hai body đều khóa',async t=>{
  const h=await fixture(t),s=await h.read();assert.equal(s.preparationMode,'ideas-first-v1');assert.ok(s.steps.outline);assert.equal(Object.keys(s.responses).length,19);
@@ -43,4 +54,77 @@ test('P11 · lựa chọn ngoài hai phương án và bỏ bodyIndex của bư�
  const h=await fixture(t);await h.save({...h.ideas,chosenSolution:'Một phương án thứ ba'});await assert.rejects(()=>h.check('outline',0),/SOLUTION_INVALID/);
  await h.save({chosenSolution:choice});await assert.rejects(()=>h.check('outline',undefined),/BODY_IDENTITY_MISMATCH/);await h.check('outline',0);await h.attest('outline',0);
  await h.service.revise(h.ref,h.token,await h.input({field:'chosenSolution',value:'Thêm đường và mở rộng đường bộ',bodyIndex:0}));assert.equal((await h.read()).steps.outline.status,'revision');
+});
+
+
+test('P11 native · giữ chỉ số 0, đọc lại khi mất ACK, phát từ vựng và quay lui',async t=>{
+ const h=await fixture(t);
+ const attempts=[];
+ const processor=createProcessor({service:h.service,async callAI(job){
+   attempts.push([job.kind,job.bodyIndex,job.ideaIndex]);
+   const vocabulary=Object.fromEntries(['A1','X1','B1','A2','X2','B2'].map(key=>[
+    key,[{phrase:'take the train',meaningVi:'đi tàu'},{phrase:'use public transport',meaningVi:'dùng giao thông công cộng'}]
+   ]));
+   const result=job.kind==='grade'?{resultStatus:'passed',feedback:'Dàn ý thử đúng cả hai thân bài.'}:vocabulary;
+   return {outputText:JSON.stringify({operation_key:job.operationKey,result}),model:'fixture',httpStatus:200};
+ }});
+ const results=[];
+ let notify;
+ const native=createNativeDispatch({
+   service:h.service,processor:{async process(job){
+     const answer=await processor.process(job);
+     if(job.kind==='grade') throw Error('fixture_lost_ack_after_commit');
+     return answer;
+   }},
+   hasWork:async()=>true,onReceipt(result){results.push(result);notify?.resolve(result);},
+   onError(error){notify?.reject(error);}
+ });
+ const dispatchOne=async()=>{
+   const future=Promise.withResolvers();
+   notify=future;
+   native.request();
+   return future.promise;
+ };
+ try {
+ await h.save(h.ideas);
+ await h.check('outline',0);
+ const grade=await dispatchOne();
+ assert.equal(grade.kind,'grade');
+ assert.deepEqual(attempts[0],['grade',0,0]);
+ assert.equal((await h.read()).steps.outline.history.length,1);
+ await h.pass(1,'topic');await h.pass(1,'si1');await h.service.openIdea2(h.ref,h.token,{bodyIndex:1});
+ await h.pass(1,'si2');
+ const vocab=await dispatchOne();
+ assert.equal(vocab.kind,'vocab');
+ assert.deepEqual(attempts[1],['vocab',1,0]);
+ assert.equal((await h.service.job(vocab.jobRef)).status,'completed');
+ assert.equal(results.filter(row=>row.jobRef===grade.jobRef).length,1);
+ } finally { await native.close(); }
+
+ const internalSecret='fixture-internal'.repeat(3);
+ const api=createApi({service:h.service,processor,origins:[],internalSecret});
+ await new Promise(resolve=>api.listen(0,'127.0.0.1',resolve));
+ t.after(()=>new Promise(resolve=>api.close(resolve)));
+ const base='http://127.0.0.1:'+api.address().port+'/api/handout67/v1/internal/';
+ const post=async(path,data={})=>fetch(base+path,{
+   method:'POST',
+   headers:{Authorization:'Bearer '+internalSecret,'Content-Type':'application/json'},
+   body:JSON.stringify(data),
+ });
+
+ assert.equal((await post('native-dispatch/wake',{productId:'handout-writing67'})).status,404);
+ assert.deepEqual(await (await post('jobs/claim')).json(),{ok:true,jobs:[]});
+ await h.save({body2_topicSentence:'Topic mới cho thân bài hai'});
+ await h.check('body2_topic',2);
+ const {jobs}=await (await post('jobs/claim')).json();
+ assert.equal(jobs.length,1);
+ const [job]=jobs;
+ assert.equal(job.section,'body2_topic');
+ assert.equal((await post('jobs/'+job.jobRef+'/process',job)).status,200);
+ const readback=await fetch(base+'jobs/'+job.jobRef,{headers:{Authorization:'Bearer '+internalSecret}});
+ assert.equal((await readback.json()).status,'completed');
+ assert.deepEqual(await (await post('jobs/claim')).json(),{ok:true,jobs:[]});
+ assert.equal((await h.read()).steps.outline.history.length,1);
+ assert.equal(attempts.length,3);
+ assert.deepEqual(attempts[2].slice(0,2),['grade',2]);
 });

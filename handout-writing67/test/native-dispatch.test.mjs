@@ -68,6 +68,33 @@ test('never processes an unexpected product or more than one lease',async()=>{
   }
 });
 
+test('identifies a failed queue read and accepts the next wake without duplicating work',async()=>{
+  const timeout=Object.assign(new Error('statement timeout'),{code:'57014'});
+  const job=makeJob('grade'), completed=deferred(), errors=[];
+  let checks=0, claims=0, processed=0;
+  const row={productId,jobRef:job.jobRef,status:'completed',resultHash:'saved',tries:1};
+  const worker=createNativeDispatch({
+    hasWork:async()=>{if(++checks===1) throw timeout;return claims===0;},
+    service:{claim:async()=>++claims===1?[job]:[],job:async()=>row},
+    processor:{process:async()=>{processed++;return row;}},
+    onReceipt:completed.resolve,
+    onError:(error,detail)=>errors.push({error,detail})
+  });
+  try {
+    await worker.tick();
+    assert.equal(claims,0);
+    assert.equal(errors.length,1);
+    assert.equal(errors[0].error,timeout);
+    assert.equal(errors[0].detail.phase,'hasWork');
+    assert.ok(errors[0].detail.durationMs>=0);
+    await worker.tick();
+    const receipt=await completed.promise;
+    assert.equal(receipt.status,'result_saved');
+    assert.equal(receipt.jobRef,job.jobRef);
+    assert.equal(processed,1);
+  } finally { await worker.close(); }
+});
+
 test('legacy signal is pinned to its own bearer and n8n cannot claim in native mode',async t=>{
   const {createApi}=await import('../src/http.mjs');
   let wakes=0;

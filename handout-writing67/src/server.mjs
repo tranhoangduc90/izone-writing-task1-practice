@@ -73,9 +73,11 @@ if(nativeDispatch) {
       return data.rowCount>0;
     },
     onReceipt:receipt=>console.log(JSON.stringify({event:'handout67_native_receipt',...receipt})),
-    onError:error=>{
+    onError:(error,detail)=>{
       const code=/^HANDOUT67_[A-Z0-9_]+$/.test(error?.message??'')?error.message:'HANDOUT67_NATIVE_FAILED';
-      console.error(JSON.stringify({event:'handout67_native_error',code}));
+      const candidate=error?.code??error?.cause?.code;
+      const sqlState=/^(?:[0-9]{2}|[A-Z]{2})[0-9A-Z]{3}$/.test(candidate??'')?candidate:undefined;
+      console.error(JSON.stringify({event:'handout67_native_error',code,sqlState,...detail}));
     }
   });
 }

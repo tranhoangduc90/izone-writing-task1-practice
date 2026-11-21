@@ -10,6 +10,24 @@ import { createK67CtaRuntime } from './classroom-cta-runtime.js';
 import { createK67ManualDocuments } from './classroom-cta-manual.js';
 import { createK67WritingSourceLane } from './classroom-cta-writing.js';
 
+export function limitK67RegistrarCredentialRetries(register, onPaused, clock = Date.now) {
+  let blockedUntil = 0;
+  return async (...args) => {
+    if (clock() < blockedUntil) {
+      throw Object.assign(new Error('CTA_PRODUCT_CREDENTIAL_PAUSED'), { code: 'CTA_PRODUCT_CREDENTIAL_PAUSED' });
+    }
+    try {
+      return await register(...args);
+    } catch (error) {
+      if (['WEB_UNAUTHORIZED', 'CTA_NATIVE_HTTP_401'].includes(error?.code)) {
+        blockedUntil = clock() + 15 * 60_000;
+        onPaused(error.code);
+      }
+      throw error;
+    }
+  };
+}
+
 function nativePracticeUrl(value, product, docId, code, classCode) {
   try {
     const url = new URL(value);
@@ -115,7 +133,11 @@ export function createK67CtaStack({ pool, getPortal, getMappings, classroomGet, 
       } }) };
     },
   });
-  const adapters = createK67ProductAdapters({ readDocument: docs.read, readingHomework, listeningHomework,
+  const bounded = (product, register) => limitK67RegistrarCredentialRetries(register, errorCode =>
+    log({ stage: 'registrar_credentials', product, outcome: 'paused', errorCode, pauseMs: 15 * 60_000 }));
+  const adapters = createK67ProductAdapters({ readDocument: docs.read,
+    readingHomework: bounded('reading_homework', readingHomework),
+    listeningHomework: bounded('listening_homework', listeningHomework),
     readingPractice, listeningPractice, speaking: speaking.event, legacy });
   const sourceKey = row => JSON.stringify([row.documentId, row.courseId, row.courseworkId, row.submissionId]);
   const producerStore = { ...store, async sourceBatch({ sources }) {

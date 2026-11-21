@@ -144,6 +144,8 @@ export function createClassroomCtaProcessor({ store, adapters, verifyProof, owns
       const proof = [];
       let failure;
       let needsReview;
+      let unsafeToContinue = false;
+      const rejected = new Set();
       try {
         const prepared = await prepare?.(context);
         if (prepared) {
@@ -152,11 +154,16 @@ export function createClassroomCtaProcessor({ store, adapters, verifyProof, owns
         }
       } catch (error) {
         failure = errorCode(error, 'CTA_COPY_PROOF_FAILED');
+        unsafeToContinue = true;
         log({ stage: 'copy_proof', runId, executionId, sourceTag, outcome: 'error', errorCode: failure });
       }
       for (const product of failure ? [] : products) {
         const started = performance.now();
         await context.assertOwnership();
+        if (product === 'legacy' && rejected.has('reading_practice')) {
+          log({ stage: 'product', runId, executionId, sourceTag, product, outcome: 'dependency_unavailable' });
+          continue;
+        }
         const previous = canReuseProof(product)
           ? acquired.previousProof?.find(p => p.product === product && p.documentId === item.documentId && terminal.has(p.status))
           : undefined;
@@ -174,25 +181,35 @@ export function createClassroomCtaProcessor({ store, adapters, verifyProof, owns
             outcome: result.status, resumed: Boolean(previous), durationMs: Math.round(performance.now() - started) });
         } catch (error) {
           const code = errorCode(error, 'CTA_PRODUCT_FAILED');
-          failure ??= code;
           log({ stage: 'product', runId, executionId, sourceTag, product,
             outcome: 'error', errorCode: code, durationMs: Math.round(performance.now() - started) });
+          // Only explicit registrar rejections allow another product to write this copy.
+          const credentialRejected = ['WEB_UNAUTHORIZED', 'CTA_NATIVE_HTTP_401', 'CTA_PRODUCT_CREDENTIAL_PAUSED'].includes(code);
+          if (credentialRejected || (product === 'reading_practice' && code === 'CTA_NATIVE_HTTP_403')) {
+            failure ??= code;
+            rejected.add(product);
+            continue;
+          }
+          unsafeToContinue = true;
+          failure = code;
           break;
         }
       }
-      if (!failure && !needsReview) {
+      if (!unsafeToContinue && (!failure && !needsReview || rejected.size && proof.length)) {
         try {
           const invalid = await verifyProof(context, proof);
           requireCta(Array.isArray(invalid) && invalid.every(product => products.includes(product)),
             'CTA_FINAL_READBACK_INVALID');
           if (invalid.length) {
-            failure = 'CTA_FINAL_READBACK_FAILED';
+            failure ??= 'CTA_FINAL_READBACK_FAILED';
             for (let index = proof.length - 1; index >= 0; index--) {
               if (invalid.includes(proof[index].product)) proof.splice(index, 1);
             }
           }
         } catch (error) {
-          failure = errorCode(error, 'CTA_FINAL_READBACK_UNAVAILABLE');
+          const code = errorCode(error, 'CTA_FINAL_READBACK_UNAVAILABLE');
+          if (rejected.size) log({ stage: 'partial_readback', runId, executionId, sourceTag, outcome: 'unknown', errorCode: code });
+          failure ??= code;
         }
       }
       await context.assertOwnership();

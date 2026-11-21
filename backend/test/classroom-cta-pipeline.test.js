@@ -8,7 +8,7 @@ import {
 } from '../src/reading-listening67/classroom-cta-pipeline.js';
 import { createReadingListening67Store } from '../src/reading-listening67/store.js';
 import { createK67NativeStore, releaseUnstartedK67CtaJobs } from '../src/reading-listening67/classroom-cta-native-store.js';
-import { createK67CtaStack } from '../src/reading-listening67/classroom-cta-stack.js';
+import { createK67CtaStack, limitK67RegistrarCredentialRetries } from '../src/reading-listening67/classroom-cta-stack.js';
 import { createK67CtaHttp } from '../src/reading-listening67/classroom-cta-http.js';
 import { createK67WritingRegistry, createK67WritingSourceLane } from '../src/reading-listening67/classroom-cta-writing.js';
 
@@ -18,6 +18,56 @@ const documentId = 'fixture_document_123456789012345';
 const sourceVersion = '2026-11-19T06:00:00Z';
 const scope = { courseId, courseWorkId, classCode: 'QA67', classroomName: 'CTA QA', shared: true, epoch: 3, speaking: [] };
 const enrollmentSql = () => readFile(new URL('../../docs/migrations/2026-11-20-k67-cta-scope-enrollment.sql', import.meta.url), 'utf8');
+
+test('downstream Reading rejection does not stop independent CTA links and replay writes only the missing product',async()=>{
+  let blocked=true, previousProof=[], legacyCalls=0;
+  const writes=[], finalReads=[];
+  const done=async()=>({ documentId, status:'verified' });
+  const write=product=>async()=>{writes.push(product);return done();};
+  const process=createClassroomCtaProcessor({
+    store:{
+      async sourceCtaState(){return {shouldProcess:true,previousProof};},
+      async sourceCtaResult({proof,state}){previousProof=proof;return {saved:true,documentId,changed:1,state};}
+    },
+    adapters:{
+      async reading_practice(){
+        if(blocked) throw Object.assign(new Error('rejected'),{code:'CTA_NATIVE_HTTP_403'});
+        return write('reading_practice')();
+      },
+      speaking:write('speaking'), listening_homework:done, reading_homework:done,
+      async legacy(){legacyCalls++;return done();}, listening_practice:write('listening_practice'),
+    },
+    async verifyProof(_,proof){finalReads.push(proof.map(row=>row.product));return [];},
+    async ownsScope(){return true;}, lockDocument:(_,fn)=>fn(),
+  });
+  const job={dispatchToken:'test-dispatch',runId:'test-run',epoch:3,source:{documentId,classroom:{courseId,courseworkId:courseWorkId,submissionId:'400',classCode:'QA67'}}};
+  const partial=await process(job);
+  assert.equal(partial.state,'error');
+  assert.deepEqual(writes,['speaking','listening_practice']);
+  assert.deepEqual(finalReads[0],['speaking','listening_homework','reading_homework','listening_practice']);
+  assert.equal(legacyCalls,0);
+  blocked=false;
+  assert.equal((await process(job)).state,'ready');
+  assert.deepEqual(writes,['speaking','listening_practice','reading_practice']);
+  assert.equal(legacyCalls,1);
+  assert.equal(finalReads[1].length,6);
+});
+
+test('a confirmed registrar credential rejection pauses requests only until a bounded recheck',async()=>{
+  let now=0, calls=0;
+  const notices=[];
+  const send=limitK67RegistrarCredentialRetries(async()=>{
+    if(++calls===1) throw Object.assign(new Error('rejected'),{code:'WEB_UNAUTHORIZED'});
+    return {ok:true};
+  },code=>notices.push(code),()=>now);
+  await assert.rejects(send(),{code:'WEB_UNAUTHORIZED'});
+  await assert.rejects(send(),{code:'CTA_PRODUCT_CREDENTIAL_PAUSED'});
+  assert.equal(calls,1);
+  assert.deepEqual(notices,['WEB_UNAUTHORIZED']);
+  now=15*60_000;
+  assert.deepEqual(await send(),{ok:true});
+  assert.equal(calls,2);
+});
 
 test('quyền nhận lớp không sửa owner cũ và công tắc khóa trước khi quay về n8n',
   { skip: !process.env.K67_CTA_REPLAY_DB }, async t => {

@@ -54,30 +54,39 @@ export function createNativeDispatch({service,processor,hasWork,capacity=1,inter
   let closed=false;
 
   async function run(job) {
-    let outcome;
+    let phase='process';
+    const started=performance.now();
     try {
-      outcome=await processor.process(job);
-    } catch {
-      // Read back the leased job before scheduling anything else. A successful commit may have lost its reply.
-      const row=await service.job(job.jobRef);
-      if(row?.productId!==PRODUCT||row?.jobRef!==job.jobRef||row.status!=='completed'||!row.resultHash) {
-        throw Error('HANDOUT67_NATIVE_PROCESS_UNVERIFIED');
+      let outcome;
+      try {
+        outcome=await processor.process(job);
+      } catch (error) {
+        // A successful commit may have lost its reply. Read the leased job before retrying.
+        phase='readback';
+        const row=await service.job(job.jobRef);
+        if(row?.productId!==PRODUCT||row?.jobRef!==job.jobRef||row.status!=='completed'||!row.resultHash) {
+          phase='process';
+          throw new Error('HANDOUT67_NATIVE_PROCESS_UNVERIFIED',{cause:error});
+        }
+        outcome={jobRef:job.jobRef,status:'completed',resultHash:row.resultHash};
       }
-      outcome={jobRef:job.jobRef,status:'completed',resultHash:row.resultHash};
+      phase='readback';
+      const row=await service.job(job.jobRef);
+      if(outcome?.jobRef!==job.jobRef||row?.jobRef!==job.jobRef||row?.productId!==PRODUCT) {
+        throw Error('HANDOUT67_NATIVE_RECEIPT_IDENTITY_INVALID');
+      }
+      const disposition=receiptOutcome(row,outcome);
+      onReceipt({jobRef:job.jobRef,kind:job.kind,status:disposition,resultHash:row.resultHash,tries:row.tries});
+    } catch(error) {
+      onError(error,{phase,kind:job.kind,durationMs:performance.now()-started});
     }
-    const row=await service.job(job.jobRef);
-    if(outcome?.jobRef!==job.jobRef||row?.jobRef!==job.jobRef||row?.productId!==PRODUCT) {
-      throw Error('HANDOUT67_NATIVE_RECEIPT_IDENTITY_INVALID');
-    }
-    const disposition=receiptOutcome(row,outcome);
-    onReceipt({jobRef:job.jobRef,kind:job.kind,status:disposition,resultHash:row.resultHash,tries:row.tries});
   }
 
   async function fill() {
     while(!closed&&inflight.size<capacity) {
       const job=claimedJob(await service.claim());
       if(!job) return;
-      const pending=run(job).catch(onError).finally(()=>{
+      const pending=run(job).finally(()=>{
         inflight.delete(pending);
         request();
       });
@@ -94,7 +103,7 @@ export function createNativeDispatch({service,processor,hasWork,capacity=1,inter
         requested=false;
         await fill();
       }
-    }).catch(onError).finally(()=>{
+    }).catch(error=>onError(error,{phase:'claim'})).finally(()=>{
       pumping=null;
       if(requested&&!closed) request();
     });
@@ -102,9 +111,10 @@ export function createNativeDispatch({service,processor,hasWork,capacity=1,inter
 
   async function tick() {
     if(closed||pumping||inflight.size>=capacity) return;
+    const started=performance.now();
     try {
       if(await hasWork()) request();
-    } catch(error) { onError(error); }
+    } catch(error) { onError(error,{phase:'hasWork',durationMs:performance.now()-started}); }
   }
 
   const timer=setInterval(()=>void tick(),intervalMs);

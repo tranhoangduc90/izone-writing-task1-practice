@@ -35,6 +35,10 @@ Registry Writing bỏ đúng bản ghi Lesson 5 đang chờ ghép Coursework the
 
 ## Chuyển và quay lui
 
+Trước khi nạp cấu hình CTA hoặc đổi khóa ở một dịch vụ đích, đối chiếu sáu cặp khóa caller–receiver. Kiểm từ mạng của caller bằng tuyến đọc hoặc check_only đã xác minh không phát việc. Giữ biên nhận từng tuyến với kết quả khớp và mã phản hồi, bỏ giá trị khóa. Tệp khóa được đọc khi tiến trình khởi động, nên cần đọc lại sau khi nạp.
+
+Nếu registrar từ chối xác thực, worker giữ kết quả lỗi cho tuyến đó. Các sản phẩm độc lập vẫn kiểm quyền và ghi đúng Docs. Nhánh legacy đợi khi cần biên nhận Reading thực chiến. Reading và Listening Homework tạm dừng gọi registrar của chính sản phẩm 15 phút sau lỗi xác thực kết nối rõ ràng. Mã lỗi quyền tài liệu, lỗi DB và lỗi phản hồi chưa rõ tiếp tục dùng đường xử lý hiện hành. Tra `registrar_credentials`, log `product` và biên nhận đọc lại để phân biệt ba tình huống.
+
 Chốt snapshot nguyên trạng từng workflow, revision live, queue và lease theo đúng scope. Chạy QA trên VPS2 với các registrar đúng sản phẩm, kiểm cả ACK, Google readback, lỗi một phần và quyền vào bài. Khi chuyển một lớp, khóa tuyến n8n theo lớp, chờ in-flight cũ kết thúc, đọc lại queue và receipt. Sau đó mới ghi `owner=backend` cho chính khóa Classroom/lớp với epoch mới. Với lớp có bản sao đủ điều kiện, đối chiếu một lượt định kỳ và một lần chạy tay, link và quyền đúng chủ, replay giữ nguyên revision. Mở dần từ IC2353.
 
 Quay lui bằng trạng thái `draining` và epoch tăng. Kiểm writer, job lease và nguồn đang có kết quả chưa xác định, chạy đọc lại đúng Docs trước khi giải quyết. Khôi phục tuyến n8n đã ghim cho phạm vi cần trả lại, đổi quyền về n8n và kiểm một nhịp thật. Giữ biên nhận, Docs đã gắn, lịch sử làm bài và queue. Thao tác thực tế của từng đợt lấy revision/epoch từ preflight ngay lúc thực hiện.

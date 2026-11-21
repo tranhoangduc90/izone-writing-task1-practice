@@ -47,7 +47,7 @@ function fixture({ reader = false, fallbackReader = false, fallbackMissing = fal
     withDocumentLock: async (id, fn) => { assert.equal(id, documentId); return fn(); },
     recordAttempt: attempt => { trace.push(`record:${attempt.accountRole}`); },
   };
-  return { run: () => executeDocsWrite(input, services), trace, revision: () => revision,
+  return { run: overrides => executeDocsWrite(input, { ...services, ...overrides }), trace, revision: () => revision,
     wrongTab: () => { position = 'wrong'; }, wrongSource: () => { rejectSource = true; },
     resume: accountRole => { reconciliation = { accountRole }; } };
 }
@@ -136,4 +136,20 @@ test('a caller request budget can reject a write before sending it', async () =>
     assert.equal(error.uncertain, undefined);
     return true;
   });
+});
+
+test('logs a safe Writing error and its phase before any Google write', async () => {
+  const f = fixture();
+  const records = [];
+  const reason = Object.assign(new Error('learner information stays private'), { code: 'LESSON4_PROGRESS_CHANGED' });
+  await assert.rejects(f.run({
+    assertWriter() { throw reason; },
+    log: event => records.push(event),
+  }), error => error === reason);
+  assert.equal(records.length, 1);
+  assert.equal(records[0].reason, 'LESSON4_PROGRESS_CHANGED');
+  assert.equal(records[0].failurePhase, 'assert_writer');
+  assert.equal(records[0].googleCalls.write, 0);
+  assert.ok(!JSON.stringify(records).includes(reason.message));
+  assert.deepEqual(f.trace, ['read:primary']);
 });

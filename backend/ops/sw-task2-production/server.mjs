@@ -20,6 +20,7 @@ import {createProvisionalStudentService} from '../../src/provisional-service.js'
 import {createLesson9VocabularyService} from './lesson9-vocabulary.js';
 import {createShopsResults,installShopsResultRoutes} from './atomic-results.mjs';
 import {loadSwRoster} from '../../../task1-handout/vendor/sw-roster-runtime.mjs';
+import {SW_CLASS_CODE_PATTERN} from '../../../task1-handout/vendor/sw-roster-projection.mjs';
 
 const config=loadConfig();
 const readOnlyCanary=process.env.SW_ROSTER_READ_ONLY_CANARY==='1';
@@ -102,21 +103,22 @@ app.get('/api/v1/admin/lesson9/sessions/:ref',teacherAuth.authenticate,safe(asyn
 app.get('/api/v1/shops/status',safe(async(q,r)=>r.json({ok:true,environment:'production',aiMode:'n8n-task2-connected',database:(await pool.query('SELECT current_database() name')).rows[0].name,queued:Number((await pool.query("SELECT count(*) n FROM writing_practice.check_attempt a JOIN writing_practice.activity_session s ON s.id=a.session_id JOIN writing_practice.activity task ON task.id=s.activity_id WHERE a.status='queued' AND task.grading_pool='task2'")).rows[0].n)})));
 
 app.get('/api/v1/sw/status',safe(async(_q,r)=>r.json({ok:true,environment:'production',database:(await pool.query('SELECT current_database() name')).rows[0].name,aiMode:'sw-task2-native',enabledLessons:ENABLED_LESSONS,queued:Number((await pool.query("SELECT count(*) n FROM writing_practice.check_attempt WHERE status='queued'")).rows[0].n)})));
+const swClassCode = new RegExp(SW_CLASS_CODE_PATTERN);
 app.get('/api/v1/activities/:slug/roster',safe(async(q,r)=>{
  const slug=q.params.slug;requireLesson(slug);
  await swRoster?.syncActivity(slug);
  const source=await service.getRoster(slug);
  const data=swRoster?await swRoster.enrichRoster(slug,source):source;
- r.json({...data,ok:true,classes:data.classes.filter(c=>c.className.startsWith('CS.'))});
+ r.json({...data,ok:true,classes:data.classes.filter(c=>swClassCode.test(c.className))});
 }));
 app.get('/api/v1/admin/activities/:slug/roster',teacherAuth.authenticate,safe(async(q,r)=>{
  requireLesson(q.params.slug);
  const source=await service.getRoster(q.params.slug),allowed=new Set((await access.listClasses(q.reviewer)).map(c=>c.classCode));
- const classes=source.classes.filter(c=>c.className.startsWith('CS.')&&allowed.has(c.className));
+ const classes=source.classes.filter(c=>swClassCode.test(c.className)&&allowed.has(c.className));
  const history=await pool.query(`SELECT c.public_id AS "classRef",s.student_public_id AS "studentRef",COALESCE(r.display_alias,r.display_name,'Hồ sơ đã lưu') AS "displayName"
  FROM writing_practice.activity_session s JOIN writing_practice.activity a ON a.id=s.activity_id JOIN writing_practice.activity_class_scope c ON c.id=s.activity_class_id
  LEFT JOIN writing_practice.activity_roster r ON r.activity_class_id=c.id AND r.student_public_id=s.student_public_id
- WHERE a.slug=$1 AND c.status='active' AND c.class_name_snapshot LIKE 'CS.%' AND ($2 OR ${reviewerClassAccessSql('c','$3')})`,[q.params.slug,q.reviewer.role==='admin',q.reviewer.email]);
+ WHERE a.slug=$1 AND c.status='active' AND c.class_name_snapshot ~ '${SW_CLASS_CODE_PATTERN}' AND ($2 OR ${reviewerClassAccessSql('c','$3')})`,[q.params.slug,q.reviewer.role==='admin',q.reviewer.email]);
  for(const row of history.rows){const c=classes.find(c=>c.classRef===row.classRef);if(c&&!c.students.some(p=>p.studentRef===row.studentRef))c.students.push({studentRef:row.studentRef,displayName:row.displayName});}
  r.json({ok:true,classes,...(swRoster?{permissions:{swClassRoster:true,swClassRosterAdds:swRoster.allowAdds}}:{})});
 }));

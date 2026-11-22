@@ -1,3 +1,5 @@
+export const SW_CLASS_CODE_PATTERN = '^CS[0-9]*[.]';
+
 function scopeResult(row, product) {
   return {
     product,
@@ -24,7 +26,7 @@ export function createSwRosterProjection({ pool, product }) {
     FROM writing_practice.activity_class_scope c
     JOIN writing_practice.activity a ON a.id=c.activity_id
     WHERE a.grading_pool=$1 AND a.status='active' AND c.status='active'
-      AND c.end_date>=CURRENT_DATE AND c.class_name_snapshot LIKE 'CS.%'`;
+      AND c.end_date>=CURRENT_DATE AND c.class_name_snapshot ~ '${SW_CLASS_CODE_PATTERN}'`;
 
   async function resolveScope(activitySlug, classRef) {
     const { rows: [row] } = await pool.query(`${eligibleScopes} AND a.slug=$2 AND c.public_id=$3`,

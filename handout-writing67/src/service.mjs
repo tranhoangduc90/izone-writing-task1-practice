@@ -69,6 +69,13 @@ export function lesson4BodyProgress(session, body) {
   };
 }
 
+export function lesson6Progress(session, sharePolicy) {
+  const accepted=session.practice?.status==='accepted'&&session.practice.policy===sharePolicy;
+  const relation=accepted?outlineRelation(session):'waiting';
+  const bodies=[1,2].map(body=>({...lesson4BodyProgress(session,body),...(!accepted?{passed:false}:{})}));
+  return {ref:session.ref,version:session.version,accepted,bodies,relation,completed:relation==='passed'};
+}
+
 export function createService({store, roster, secret, clock=Date.now, leaseMs=300000, sessionMs=43200000, maxLeases=null, maxJobMs=1800000, retryDelays=[0,0,0], renderJob, lesson5HomeworkImport=false, promptVersion='lesson5-rubric-v3',lessons={lesson5:{...LEGACY_LESSON5,promptVersion}}}) {
   if (typeof secret!=='string' || secret.length<32 || leaseMs<=180000) fail('CONFIG_INVALID');
   if(maxLeases!==null&&(!Number.isSafeInteger(maxLeases)||maxLeases<1))fail('CONFIG_INVALID');
@@ -314,10 +321,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
       if(!isLesson6Outline(session)||session.classRef!==input.classRef||session.studentRef!==input.studentRef||
         session.writingEntry?.assignmentId!==input.assignmentId||session.writingEntry?.contentVersion!==input.contentVersion)
         fail('WRITING_ENTRY_MISMATCH',409);
-      const accepted=session.practice?.status==='accepted'&&session.practice.policy===lessonFor('lesson6').sharePolicy;
-      const relation=accepted?outlineRelation(session):'waiting';
-      const bodies=[1,2].map(body=>({...lesson4BodyProgress(session,body),...(!accepted?{passed:false}:{})}));
-      return {ref:session.ref,version:session.version,accepted,bodies,relation,completed:relation==='passed'};
+      return lesson6Progress(session,lessonFor('lesson6').sharePolicy);
     },
     async read(ref,token) {
       authorize(ref,token);const s=await store.read(ref);if(!s)fail('SESSION_NOT_FOUND',404);

@@ -1,6 +1,7 @@
 import {createHmac,randomUUID,timingSafeEqual} from 'node:crypto';
-import {fail,lesson4BodyProgress,publicTeacherComments,withBodies} from './service.mjs';
+import {fail,lesson4BodyProgress,lesson6Progress,publicTeacherComments,withBodies} from './service.mjs';
 import {bodyKey,isTwoQuestionOutline,workflowFor,GUIDED,preparationContext} from './workflow.mjs';
+import {isLesson6Outline,lesson6CoverageMissing,LESSON6_STANCES} from './writing-lesson6.mjs';
 import {publicThreads,changeThread} from './comments.mjs';
 import {dashboardProjection} from './dashboard.mjs';
 import {LEGACY_LESSON5} from './lessons.mjs';
@@ -26,9 +27,9 @@ export function createTeacher({db,store,roster,registry,secret,verifyGoogleToken
     if(!row)fail('CLASS_NOT_OPEN',404);
     return row;
   }
-  async function authorizedSession(actor,ref,lesson4Only=false){
+  async function authorizedSession(actor,ref,matches=()=>true){
     const s=await store.read(ref);if(!s)fail('SESSION_NOT_FOUND',404);
-    if(lesson4Only&&(!isTwoQuestionOutline(s)||!s.writingEntry))fail('SESSION_NOT_FOUND',404);
+    if(!matches(s))fail('SESSION_NOT_FOUND',404);
     const row=await context(actor,s.classRef,s.activity);
     const student=row.students.find(x=>x.studentRef===s.studentRef);
     if(!student)fail('TEACHER_FORBIDDEN',403);
@@ -69,18 +70,26 @@ export function createTeacher({db,store,roster,registry,secret,verifyGoogleToken
       })};
     },
     async detail(actor,ref){return publicSession(await sessionFor(actor,ref));},
-    async lesson4Outline(actor,ref){
-      const {s,student}=await authorizedSession(actor,ref,true);
-      const bodies=[1,2].map(body=>{
-        const progress=lesson4BodyProgress(s,body);
+    async homeworkOutline(actor,ref,activity){
+      const lesson6=activity==='lesson6';
+      const {s,student}=await authorizedSession(actor,ref,s=>lesson6
+        ? isLesson6Outline(s)&&/^hw-k67-writing-lesson6-\d+$/.test(s.writingEntry?.assignmentId||'')&&
+          Number.isSafeInteger(s.writingEntry.contentVersion)&&s.writingEntry.contentVersion>0
+        : isTwoQuestionOutline(s)&&Boolean(s.writingEntry));
+      const progress=lesson6?lesson6Progress(s,lessonFor(activity).sharePolicy):null;
+      if(lesson6&&!progress.accepted)fail('SESSION_NOT_FOUND',404);
+      const bodies=(progress?.bodies||[1,2].map(body=>lesson4BodyProgress(s,body))).map(({body,passed,status})=>{
         const result=s.steps[bodyKey(body,'topic')]?.history?.at(-1);
         const fields=Object.fromEntries(['topicSentence','idea1','idea2'].map(key=>[key,s.responses[bodyKey(body,key)]||'']));
         const feedbackMatches=result&&Object.entries(fields).every(([key,value])=>(result.snapshot?.[bodyKey(body,key)]||'')===value);
-        return {body,passed:progress.passed,status:progress.status,fields,
+        return {body,passed,status,fields,
           feedback:feedbackMatches?result.feedback||'':'',
           feedbackFromEarlierVersion:Boolean(result?.feedback&&!feedbackMatches)};
       });
-      return {ref:s.ref,classRef:s.classRef,displayName:student.displayName,passed:bodies.filter(body=>body.passed).length,bodies};
+      return {ref:s.ref,classRef:s.classRef,displayName:student.displayName,passed:bodies.filter(body=>body.passed).length,bodies,
+        ...(lesson6?{activity,stance:Object.hasOwn(LESSON6_STANCES,s.responses.stance)?s.responses.stance:null,
+          completed:progress.completed,relation:progress.relation,
+          missingDimensions:progress.relation==='coverage'?lesson6CoverageMissing([s.steps.body1_topic,s.steps.body2_topic]):[]}:{} )};
     },
     // Quyền lớp/roster lấy lại từ backend; không lấy học viên/lớp hoặc quyền từ query client.
     async activity(actor,ref,query={}){await sessionFor(actor,ref);return store.audit.read(ref,query);},

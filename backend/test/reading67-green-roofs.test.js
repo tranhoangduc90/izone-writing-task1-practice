@@ -65,3 +65,56 @@ run('SQL thật: đúng người/lớp/version; claim chỉ lấy việc củaGr
  const job=await store.submit(scope,{revision:saved.revision,requestId:randomUUID()});const claim=await store.claim();assert.equal(claim.attemptId,job.attemptId);assert.deepEqual(claim.answers,answers);
  await assert.rejects(()=>store.attempt({...scope,ownerId:'22222222-2222-4222-8222-222222222222'},job.attemptId),e=>e.code==='ATTEMPT_NOT_FOUND');
 });
+
+run('Sửa đúng một dẫn chứng và một mã nhận xét, tiếp tục từ checkpoint đã lưu', async () => {
+ let value;
+ let repairPrompt;
+ let calls = 0;
+ const {grader, answers} = await setup(async request => {
+  calls++;
+  if (calls === 4) repairPrompt = request.prompt;
+  return response(grader, value);
+ });
+ const prepared = grader.prepareWeb(answers, 'sparse-green-roofs-repair');
+ const valid = audit(prepared);
+ const evidence = valid.results.find(row => row.unit_audit.length > 1);
+ const invalidCode = valid.results.find(row => row.target_id !== evidence.target_id);
+ const [brokenUnit, lockedUnit] = evidence.unit_audit;
+ value = structuredClone(valid);
+ value.results.find(row => row.target_id === evidence.target_id).unit_audit[0].student_span = 'not in the synthetic answer';
+ value.results.find(row => row.target_id === invalidCode.target_id).proposed_error_code = 'UNSUPPORTED';
+ let state = await pending(() => grader.finish(prepared));
+ assert.equal(state.phase, 'repair');
+
+ value = {results: [{target_id: invalidCode.target_id, proposed_error_code: null, next_step: 'Lần sau, trường hướng dẫn này đang bị khóa.'}]};
+ state = await pending(() => grader.finish(prepared, {validationState: state}));
+ assert.equal(state.lastRepairError.code, 'AI_REPAIR_LOCKED_FIELD');
+ assert.equal(state.aiValue.results.find(row => row.target_id === invalidCode.target_id).proposed_error_code, 'UNSUPPORTED');
+
+ value = {results: [{target_id: evidence.target_id, unit_audit: [brokenUnit, {...lockedUnit, status: 'absent', student_span: null}]}]};
+ state = await pending(() => grader.finish(prepared, {validationState: state}));
+ assert.equal(state.lastRepairError.code, 'AI_REPAIR_LOCKED_FIELD');
+ assert.deepEqual(state.aiValue.results.find(row => row.target_id === evidence.target_id).unit_audit[1], lockedUnit);
+
+ value = {results: [
+  {target_id: invalidCode.target_id, proposed_error_code: null},
+  {target_id: evidence.target_id, unit_audit: [brokenUnit]},
+ ]};
+ state = await pending(() => grader.finish(prepared, {validationState: state}));
+ const targets = JSON.parse(repairPrompt.split('<DATA>')[1].split('</DATA>')[0]);
+ const unitScope = targets.find(row => row.target_id === evidence.target_id);
+ const codeScope = targets.find(row => row.target_id === invalidCode.target_id);
+ assert.deepEqual(unitScope.allowed_fields, ['unit_audit']);
+ assert.deepEqual(unitScope.allowed_unit_ids, [brokenUnit.unit_id]);
+ assert.deepEqual(codeScope.allowed_fields, ['proposed_error_code']);
+ assert.deepEqual(codeScope.allowed_error_codes, [null, ...prepared.graded.stability_decision_profile.error_codes]);
+ assert.equal(state.phase, 'review');
+ assert.deepEqual(state.aiValue.results.find(row => row.target_id === evidence.target_id).unit_audit, evidence.unit_audit);
+
+ value = reviews(prepared);
+ let complete;
+ const result = await grader.finish(prepared, {validationState: state, onCheckpoint: checkpoint => {complete = checkpoint;}});
+ assert.equal(reading67ResultSummary(result).allCorrect, true);
+ await grader.finish(prepared, {validationState: complete});
+ assert.equal(calls, 5);
+});

@@ -80,30 +80,81 @@ export function validateAudit(value,targets,profile,chooseIssue,feedbackStatesPr
   return {issues,accepted,decisions};
 }
 
+export function repairScope(issues) {
+  const fields = new Set(issues.map(({field, scope}) => {
+    if (field === 'next_step') return field;
+    if (scope === 'feedback') return 'why_student_wrong';
+    if (field === 'result' || field === 'target_id') return '*';
+    return field?.split('.')[0] || '*';
+  }));
+  const unitIds = !fields.has('*') && !issues.some(issue => issue.field === 'unit_audit')
+    ? new Set(issues.filter(issue => issue.field?.startsWith('unit_audit.')).map(issue => issue.field.split('.')[1]))
+    : new Set();
+  return {fields, unitIds};
+}
+
+function lockedRepairField(targetId, field) {
+  return Object.assign(Error('AI_REPAIR_LOCKED_FIELD'), {
+    code: 'AI_REPAIR_LOCKED_FIELD',
+    details: {targetId, field},
+  });
+}
+
+function mergeRepairUnits(previous, patch, unitIds, targetId) {
+  if (!Array.isArray(previous) || !Array.isArray(patch)) throw Object.assign(Error('AI_REPAIR_SCHEMA_INVALID'), {code: 'AI_REPAIR_SCHEMA_INVALID'});
+  const units = new Map(previous.map(unit => [unit?.unit_id, unit]));
+  const seen = new Set();
+  for (const unit of patch) {
+    const id = unit?.unit_id;
+    if (typeof id !== 'string' || seen.has(id)) {
+      throw Object.assign(Error('AI_REPAIR_SCHEMA_INVALID'), {code: 'AI_REPAIR_SCHEMA_INVALID'});
+    }
+    seen.add(id);
+    if (unitIds.has(id)) units.set(id, unit);
+    else if (!units.has(id) || !isDeepStrictEqual(unit, units.get(id))) throw lockedRepairField(targetId, 'unit_audit');
+  }
+  return [...units.values()];
+}
+
 export function mergeRepair(value,response,issues,targets,profile) {
   if(!response||!Array.isArray(response.results))throw Object.assign(Error('AI_REPAIR_SCHEMA_INVALID'),{code:'AI_REPAIR_SCHEMA_INVALID'});
   const original=copy({schema_version:profile.ai_schema_version,lesson_id:profile.lesson_id,prompt_version:profile.prompt_version,oracle_version:profile.oracle_version,results:Array.isArray(value?.results)?value.results:[]});
-  const allowed=new Map();for(const issue of issues)if(issue.targetId){
-    const fields=allowed.get(issue.targetId)||new Set();fields.add(issue.scope==='feedback'?'why_student_wrong':['result','target_id'].includes(issue.field)?'*':issue.field?.split('.')[0]||'*');allowed.set(issue.targetId,fields);
+  const byTarget = new Map();
+  for (const issue of issues) if (issue.targetId) {
+    const scoped = byTarget.get(issue.targetId) || [];
+    scoped.push(issue);
+    byTarget.set(issue.targetId, scoped);
   }
-  if(!allowed.size)for(const target of targets)allowed.set(target.target_id,new Set(['*']));
+  const allowed = new Map([...byTarget].map(([id, scoped]) => [id, repairScope(scoped)]));
+  if (!allowed.size) for (const target of targets) {
+    allowed.set(target.target_id, {fields: new Set(['*']), unitIds: new Set()});
+  }
   const expectedIds=new Set(targets.map(t=>t.target_id));
   const seen=new Set(),byId=new Map((original.results||[]).filter(r=>r&&typeof r==='object'&&expectedIds.has(r.target_id)).map(r=>[r.target_id,r]));
   for(const row of response.results){
     if(!allowed.has(row?.target_id)||seen.has(row.target_id))throw Object.assign(Error('AI_REPAIR_TARGET_MISMATCH'),{code:'AI_REPAIR_TARGET_MISMATCH'});
     seen.add(row.target_id);
-    const previous=byId.get(row.target_id),fields=allowed.get(row.target_id);
-    if(fields.size===1&&fields.has('why_student_wrong')&&!keys(row,['target_id','why_student_wrong']))throw Object.assign(Error('AI_REPAIR_LOCKED_FIELD'),{code:'AI_REPAIR_LOCKED_FIELD'});
-    if(fields.has('*')||!previous)byId.set(row.target_id,row);
-    else{
-      for(const field of Object.keys(row))if(field!=='target_id'&&!fields.has(field)&&!isDeepStrictEqual(row[field],previous[field]))throw Object.assign(Error('AI_REPAIR_LOCKED_FIELD'),{code:'AI_REPAIR_LOCKED_FIELD'});
-      for(const issue of issues.filter(i=>i.targetId===row.target_id&&i.field?.startsWith('unit_audit.'))){
-        const dirtyUnits=new Set(issues.filter(i=>i.targetId===row.target_id&&i.field?.startsWith('unit_audit.')).map(i=>i.field.split('.')[1]));
-        for(const unit of row.unit_audit||[])if(!dirtyUnits.has(unit.unit_id)&&!isDeepStrictEqual(unit,previous.unit_audit?.find(u=>u.unit_id===unit.unit_id)))throw Object.assign(Error('AI_REPAIR_LOCKED_FIELD'),{code:'AI_REPAIR_LOCKED_FIELD'});
-        break;
-      }
-      byId.set(row.target_id,{...previous,...row});
+    const previous = byId.get(row.target_id);
+    const {fields, unitIds} = allowed.get(row.target_id);
+    if (fields.size === 1 && fields.has('why_student_wrong') && !keys(row, ['target_id', 'why_student_wrong'])) {
+      throw lockedRepairField(row.target_id, 'why_student_wrong');
     }
+    if (fields.has('*') || !previous) {
+      byId.set(row.target_id, row);
+      continue;
+    }
+    const updated = {...previous};
+    for (const [field, patchValue] of Object.entries(row)) {
+      if (field === 'target_id') continue;
+      if (!fields.has(field)) {
+        if (!isDeepStrictEqual(patchValue, previous[field])) throw lockedRepairField(row.target_id, 'audit');
+        continue;
+      }
+      updated[field] = field === 'unit_audit' && unitIds.size
+        ? mergeRepairUnits(previous.unit_audit, patchValue, unitIds, row.target_id)
+        : patchValue;
+    }
+    byId.set(row.target_id, updated);
   }
   // Thiếu phần bổ sung vẫn để validator báo thiếu; không lấy phần tử đầu hoặc đoán ID.
   original.results=targets.map(t=>byId.get(t.target_id)).filter(Boolean);return original;

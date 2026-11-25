@@ -19,6 +19,10 @@ export async function auditChange(tx,before,after,now,saveRequestId){
   if(!before)await event(`${after.ref}:open`,'session_opened');
   if(after.lesson5IdeaSource&&!before?.lesson5IdeaSource)
     await event(`${after.ref}:lesson5-homework`,'lesson5_homework_ideas_applied',null,{...after.lesson5IdeaSource,targetVersion:after.version});
+  if(after.lesson7IdeaSource&&!before?.lesson7IdeaSource){
+    const {requestId,sourceVersion,fields}=after.lesson7IdeaSource;
+    await event(`${after.ref}:lesson7-homework`,'lesson7_homework_ideas_applied',null,{requestId,sourceVersion,fields,targetVersion:after.version});
+  }
   const practice=after.practice;
   if(practice&&(practice.id!==before?.practice?.id||practice.status!==before.practice.status)){
     await event(`${practice.id}:${practice.status}:${practice.startedAt||practice.queuedAt}`,'share_'+practice.status,null,{

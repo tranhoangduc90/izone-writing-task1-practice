@@ -76,7 +76,7 @@ export function lesson6Progress(session, sharePolicy) {
   return {ref:session.ref,version:session.version,accepted,bodies,relation,completed:relation==='passed'};
 }
 
-export function createService({store, roster, secret, clock=Date.now, leaseMs=300000, sessionMs=43200000, maxLeases=null, maxJobMs=1800000, retryDelays=[0,0,0], renderJob, lesson5HomeworkImport=false, promptVersion='lesson5-rubric-v3',lessons={lesson5:{...LEGACY_LESSON5,promptVersion}}}) {
+export function createService({store, roster, secret, clock=Date.now, leaseMs=300000, sessionMs=43200000, maxLeases=null, maxJobMs=1800000, retryDelays=[0,0,0], renderJob, lesson5HomeworkImport=false, lesson7HomeworkImport=false, lesson7CanOpen=false, promptVersion='lesson5-rubric-v3',lessons={lesson5:{...LEGACY_LESSON5,promptVersion}}}) {
   if (typeof secret!=='string' || secret.length<32 || leaseMs<=180000) fail('CONFIG_INVALID');
   if(maxLeases!==null&&(!Number.isSafeInteger(maxLeases)||maxLeases<1))fail('CONFIG_INVALID');
   if(!Number.isSafeInteger(maxJobMs)||maxJobMs<leaseMs*3||retryDelays.length!==3||retryDelays.some(v=>!Number.isSafeInteger(v)||v<0))fail('CONFIG_INVALID');
@@ -87,13 +87,13 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     // Lấy job cuối của từng bước/ý trước khi lọc, không hiện lỗi cũ sau lượt mới đã đạt.
     const latest=Object.fromEntries(s.jobs.map(j=>[jobStateKey(j),j]));
     const processing=Object.fromEntries(Object.entries(latest).filter(([,j])=>['queued','leased','failed'].includes(j.status)).map(([key,j])=>[key,{jobRef:j.jobRef,status:j.status,tries:j.tries,maxTries:3,createdAt:j.createdAt,deadlineAt:j.deadlineAt??j.createdAt+maxJobMs,leaseUntil:j.leaseUntil,nextAttemptAt:j.nextAttemptAt??null,error:j.error??null}]));
-    return withBodies({ref:s.ref,activity:s.activity,...(isBodyOutline(s)?{outlineOnly:true}:{}),...(isMulti(s)?{handoutMode:s.handoutMode,bodyProgress:s.bodyProgress,...(isPrepared(s)?{preparationMode:s.preparationMode,...preparationContext(s)}:{})}:{}),workflowMode:s.workflowMode||GUIDED,workflowVersion:s.workflowVersion||1,body:s.body||2,classRef:s.classRef,studentRef:s.studentRef,responses:s.responses,version:s.version,idea2Open:s.idea2Open,steps:s.steps,vocabulary:s.vocabulary,teacherComments:publicTeacherComments(s),commentThreads:publicThreads(s),commentVersion:s.commentVersion||0,...(s.lesson5IdeaSource?{lesson5IdeaSource:s.lesson5IdeaSource}:{}),submittedSections:[...new Set(s.jobs.filter(j=>j.kind==='grade').map(j=>j.section))],processing,...(usesShare(s)?{practice:practiceStatus(s.practice),writingEntry:s.writingEntry,...(canOfferLesson5(s)?{lesson5IdeaAvailable:true}:{})}:{})});
+    return withBodies({ref:s.ref,activity:s.activity,...(isBodyOutline(s)?{outlineOnly:true}:{}),...(isMulti(s)?{handoutMode:s.handoutMode,bodyProgress:s.bodyProgress,...(isPrepared(s)?{preparationMode:s.preparationMode,...preparationContext(s)}:{})}:{}),workflowMode:s.workflowMode||GUIDED,workflowVersion:s.workflowVersion||1,body:s.body||2,classRef:s.classRef,studentRef:s.studentRef,responses:s.responses,version:s.version,idea2Open:s.idea2Open,steps:s.steps,vocabulary:s.vocabulary,teacherComments:publicTeacherComments(s),commentThreads:publicThreads(s),commentVersion:s.commentVersion||0,...(s.lesson5IdeaSource?{lesson5IdeaSource:s.lesson5IdeaSource}:{}),...(s.lesson7IdeaSource?{lesson7IdeaSource:lesson7IdeaSummary(s.lesson7IdeaSource)}:{}),submittedSections:[...new Set(s.jobs.filter(j=>j.kind==='grade').map(j=>j.section))],processing,...(usesShare(s)?{practice:practiceStatus(s.practice),writingEntry:s.writingEntry,...(canOfferLesson5(s)?{lesson5IdeaAvailable:true}:{}),...lesson7Offer(s)}:{})});
   };
   const expiryDue = (session, now) => session.jobs.some(job =>
     ['queued', 'leased'].includes(job.status) && (now >= (job.deadlineAt ?? job.createdAt + maxJobMs) ||
       (job.status === 'leased' && job.leaseUntil <= now)));
   const signed = content => `${content}.${sign(content)}`;
-  const issue = s => signed(`${isTwoQuestionOutline(s)?'writing4-':isLesson6Outline(s)?'writing6-':s.lesson5IdeaSource?'writing5-':''}${s.ref}.${clock()+sessionMs}`);
+  const issue = s => signed(`${isTwoQuestionOutline(s)?'writing4-':isLesson6Outline(s)?'writing6-':s.lesson5IdeaSource?'writing5-':s.activity==='lesson7'&&s.lesson7IdeaSource?'writing7-':''}${s.ref}.${clock()+sessionMs}`);
   function signatureMatches(content,sig){
     const expected=sign(content);
     return typeof sig==='string'&&Buffer.byteLength(sig)===Buffer.byteLength(expected)&&timingSafeEqual(Buffer.from(sig),Buffer.from(expected));
@@ -101,13 +101,18 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
   const authorize = (ref,token) => {
     if (typeof token!=='string') fail('SESSION_UNAUTHORIZED',401);
     const [owner,expiry,sig,...extra] = token.split('.');
-    if(extra.length||![ref,'writing4-'+ref,'writing5-'+ref,'writing6-'+ref].includes(owner)||!/^\d+$/.test(expiry||'')||Number(expiry)<=clock()||!signatureMatches(`${owner}.${expiry}`,sig))fail('SESSION_UNAUTHORIZED',401);
+    if(extra.length||![ref,'writing4-'+ref,'writing5-'+ref,'writing6-'+ref,'writing7-'+ref].includes(owner)||!/^\d+$/.test(expiry||'')||Number(expiry)<=clock()||!signatureMatches(`${owner}.${expiry}`,sig))fail('SESSION_UNAUTHORIZED',401);
     return owner;
   };
   function authorizeHomework(ref,token){
     if(typeof token!=='string'||!token.startsWith('writing5-')||authorize(ref,token)!=='writing5-'+ref)
       fail('LESSON5_HOMEWORK_AUTH_REQUIRED',403);
   }
+  function authorizeLesson7(ref,token){
+    if(typeof token!=='string'||!token.startsWith('writing7-')||authorize(ref,token)!=='writing7-'+ref)
+      fail('LESSON7_HOMEWORK_AUTH_REQUIRED',403);
+  }
+  const lesson7IdeaSummary=({fields,sourceVersion,stance})=>({fields,sourceVersion,stance});
   const verifiedOutline=s=>isTwoQuestionOutline(s)&&s.writingEntry&&s.practice?.status==='accepted'&&
     s.practice.policy===lessons.lesson4?.sharePolicy;
   const sourceIdeas=s=>Object.fromEntries(['idea1','idea2'].flatMap(field=>{
@@ -116,6 +121,24 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
   }));
   const canOfferLesson5=s=>verifiedOutline(s)&&lessons.lesson5&&
     (!lessons.lesson5.classes||lessons.lesson5.classes.includes(s.classRef))&&Object.keys(sourceIdeas(s)).length>0;
+  function lesson7Offer(s){
+    if(!(lesson7HomeworkImport||lesson7CanOpen)||!isLesson6Outline(s)||!lessons.lesson7||
+      lessons.lesson6.topic!==lessons.lesson7.topic||!(lessons.lesson7.classes||[]).includes(s.classRef))return {};
+    if(!lesson7HomeworkImport)return {lesson7Transfer:{eligible:false,version:s.version,suspended:true}};
+    const progress=lesson6Progress(s,lessons.lesson6.sharePolicy);
+    return {lesson7Transfer:{eligible:progress.accepted&&progress.completed&&progress.bodies.every(body=>body.passed)&&
+      Boolean(sourceIdeas(s).idea1),version:s.version}};
+  }
+  async function lesson7Context(input){
+    if(!object(input)||!/^IC[0-9]+$/.test(input.classRef||'')||!id(input.studentRef)||
+      !homeworkAssignment(input.assignmentId,'lesson6')||!Number.isSafeInteger(input.contentVersion)||input.contentVersion<1)
+      fail('WRITING_ENTRY_REQUIRED',403);
+    for(const activity of ['lesson6','lesson7']){
+      const room=(await api.roster(activity)).find(row=>row.classRef===input.classRef);
+      if(!room?.students.some(student=>student.studentRef===input.studentRef))fail('STUDENT_OUT_OF_SCOPE',403);
+    }
+    return {activity:'lesson7',classRef:input.classRef,studentRef:input.studentRef};
+  }
   function lesson5Offer(s,token){
     if(!token.startsWith('writing4-')||!canOfferLesson5(s))return {};
     return {lesson5IdeaTicket:signed(`lesson5-ideas.${s.ref}.${s.version}.${clock()+120000}`)};
@@ -135,6 +158,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     authorize(ref,token);
     const result = await store.edit(ref, s=>{
       if(s.lesson5IdeaSource)authorizeHomework(ref,token);
+      if(s.lesson7IdeaSource)authorizeLesson7(ref,token);
       if(usesShare(s)&&!practiceAccess&&
         (!shareEnabled(lessonFor(s.activity))||s.practice?.status!=='accepted'||s.practice.policy!==lessonFor(s.activity).sharePolicy))
         fail('PRACTICE_NOT_ACCEPTED',422);
@@ -230,6 +254,11 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
       }
     }
   }
+  function makeSession(input,lesson,writingEntry){
+    const policy=workflowFor(lesson);
+    return ref=>({ref,activity:input.activity,...(writingEntry?{writingEntry:{assignmentId:writingEntry.assignmentId,contentVersion:writingEntry.contentVersion}}:{}),...(isBodyOutline(lesson)?{outlineOnly:true}:{}),handoutMode:lesson.handoutMode,...(isPrepared(lesson)?{preparationMode:lesson.preparationMode,...preparationContext(lesson)}:{}),...(isMulti(lesson)?{bodyProgress:{1:{idea2Open:false},2:{idea2Open:false}}}:{}),workflowMode:lesson.workflowMode||GUIDED,workflowVersion:1,body:lesson.body,classRef:input.classRef,studentRef:input.studentRef,responses:Object.fromEntries([...Object.values(policy.fields).flat(),...(isBodyOutline(lesson)&&!isTwoQuestionOutline(lesson)?['stance']:[])].map(k=>[k,''])),version:0,idea2Open:false,steps:Object.fromEntries(policy.order.map(k=>[k,{status:'draft',history:[],error:null}])),jobs:[],vocabulary:{},saves:{}});
+  }
+  const opened=current=>({session:publicSession(current),token:issue(current)});
   const api = {
     authorizeSession(ref,token) {authorize(ref,token);},
     lesson(activity='lesson5'){return publicLesson(lessonFor(activity));},
@@ -238,7 +267,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
       if (!object(input) || !id(input.activity) || !id(input.classRef) || !id(input.studentRef)) fail('IDENTITY_INVALID');
       const rows=await api.roster(input.activity);
       if (!rows.some(c=>c.classRef===input.classRef && c.students.some(s=>s.studentRef===input.studentRef))) fail('STUDENT_OUT_OF_SCOPE',403);
-      const lesson=lessonFor(input.activity),policy=workflowFor(lesson);
+      const lesson=lessonFor(input.activity);
       const writingEntry=usesShare(lesson)?input.writingEntry:undefined;
       if(usesShare(lesson)&&(!object(writingEntry)||!homeworkAssignment(writingEntry.assignmentId,input.activity)||
         !Number.isSafeInteger(writingEntry.contentVersion)||writingEntry.contentVersion<1))fail('WRITING_ENTRY_REQUIRED',403);
@@ -257,11 +286,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
           if(verifiedOutline(candidate))source=candidate;
         }
       }
-      const s=await store.open(key,ref=>({ref,activity:input.activity,...(writingEntry?{writingEntry:{assignmentId:writingEntry.assignmentId,contentVersion:writingEntry.contentVersion}}:{}),...(isBodyOutline(lesson)?{outlineOnly:true}:{}),handoutMode:lesson.handoutMode,...(isPrepared(lesson)?{preparationMode:lesson.preparationMode,...preparationContext(lesson)}:{}),...(isMulti(lesson)?{bodyProgress:{1:{idea2Open:false},2:{idea2Open:false}}}:{}),workflowMode:lesson.workflowMode||GUIDED,workflowVersion:1,body:lesson.body,classRef:input.classRef,studentRef:input.studentRef,responses:Object.fromEntries([...Object.values(policy.fields).flat(),...(isBodyOutline(lesson)&&!isTwoQuestionOutline(lesson)?['stance']:[])].map(k=>[k,''])),version:0,idea2Open:false,steps:Object.fromEntries(policy.order.map(k=>[k,{status:'draft',history:[],error:null}])),jobs:[],vocabulary:{},saves:{}}));
-      const opened=current=>({
-        session:publicSession(current),
-        token:issue(current)
-      });
+      const s=await store.open(key,makeSession(input,lesson,writingEntry));
       if(source)return store.edit(s.ref,current=>{
         // Apply once, before the first Topic Check. Never alter a submitted outline or later progress.
         if(lesson5HomeworkImport&&!current.lesson5IdeaSource&&current.steps.topic?.status==='draft'&&
@@ -278,7 +303,46 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
         return opened(current);
       });
       if(s.lesson5IdeaSource&&!verifiedLesson5)authorizeHomework(s.ref,token);
+      if(s.lesson7IdeaSource)fail('LESSON7_HOMEWORK_AUTH_REQUIRED',403);
       return opened(s);
+    },
+    async openHomeworkLesson7(input){
+      const target=await lesson7Context(input);
+      const session=await store.open(JSON.stringify([target.activity,target.classRef,target.studentRef]),makeSession(target,lessonFor('lesson7')));
+      if(session.lesson7IdeaSource&&session.lesson7IdeaSource.assignmentId!==input.assignmentId)fail('WRITING_ENTRY_MISMATCH',403);
+      return opened(session);
+    },
+    async transferHomeworkLesson7(input){
+      if(!lesson7HomeworkImport)fail('LESSON7_TRANSFER_UNAVAILABLE',404);
+      const target=await lesson7Context(input);
+      if(!uuid.test(input.sourceRef||'')||!uuid.test(input.requestId||'')||!Number.isSafeInteger(input.sourceVersion)||input.sourceVersion<0)
+        fail('LESSON7_TRANSFER_INVALID',422);
+      const {classRef,studentRef,assignmentId,contentVersion,sourceVersion,sourceRef,requestId}=input;
+      const sourceKey=JSON.stringify(['lesson6',classRef,studentRef,assignmentId,contentVersion]);
+      const targetKey=JSON.stringify(['lesson7',classRef,studentRef]);
+      const validate=source=>{
+        if(!isLesson6Outline(source)||source.ref!==sourceRef||source.classRef!==classRef||source.studentRef!==studentRef||
+          source.writingEntry?.assignmentId!==assignmentId||source.writingEntry?.contentVersion!==contentVersion)
+          fail('WRITING_ENTRY_MISMATCH',403);
+        if(source.version!==sourceVersion)fail('LESSON7_SOURCE_CHANGED',409);
+        if(!lesson7Offer(source).lesson7Transfer?.eligible)fail('LESSON7_SOURCE_INCOMPLETE',409);
+      };
+      return store.transferLesson7(sourceKey,targetKey,makeSession(target,lessonFor('lesson7')),validate,(source,session)=>{
+        if(session.lesson7IdeaSource&&session.lesson7IdeaSource.assignmentId!==assignmentId)fail('WRITING_ENTRY_MISMATCH',403);
+        let fields=[];
+        if(!session.lesson7IdeaSource&&session.steps.topic?.status==='draft'&&!session.steps.topic.history.length&&
+          !session.jobs.some(job=>job.kind==='grade'&&job.section==='topic')){
+          const additions=Object.entries(sourceIdeas(source)).filter(([field])=>!session.responses[field]?.trim());
+          fields=additions.map(([field])=>field);
+          if(fields.length){
+            Object.assign(session.responses,Object.fromEntries(additions));
+            session.version++;
+            session.lesson7IdeaSource={fields,sourceVersion,sourceSessionRef:sourceRef,assignmentId,contentVersion,
+              requestId,stance:source.responses.stance,at:new Date(clock()).toISOString()};
+          }
+        }
+        return {fields,sourceVersion,targetVersion:session.version,status:fields.length?'applied':'unchanged'};
+      });
     },
     async readHomeworkLesson5Outline(input){
       if(!object(input)||!/^IC[0-9]+$/.test(input.classRef||'')||!id(input.studentRef))fail('WRITING_ENTRY_REQUIRED',403);
@@ -326,6 +390,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     async read(ref,token) {
       authorize(ref,token);const s=await store.read(ref);if(!s)fail('SESSION_NOT_FOUND',404);
       if(s.lesson5IdeaSource)authorizeHomework(ref,token);
+      if(s.lesson7IdeaSource)authorizeLesson7(ref,token);
       if(expiryDue(s,clock()))return edit(ref,token,current=>{expire(current);return publicSession(current);},undefined,true);
       return publicSession(s);
     },
@@ -337,6 +402,7 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
       const row = await store.readForPoll(ref, knownRevision, maxJobMs);
       if (!row) fail('SESSION_NOT_FOUND', 404);
       if(row.requires_homework||row.payload?.lesson5IdeaSource)authorizeHomework(ref,token);
+      if(row.requires_lesson7_homework||row.payload?.lesson7IdeaSource)authorizeLesson7(ref,token);
       const etag = `${prefix}${row.revision}"`;
       const now = clock();
       const needsExpiry = row.payload

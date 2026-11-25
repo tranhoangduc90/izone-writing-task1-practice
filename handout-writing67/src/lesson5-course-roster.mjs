@@ -58,15 +58,15 @@ export function createLesson5CourseRoster(path, onError) {
   };
 }
 
-export function lesson5TeacherRegistry(registry, snapshot) {
+export function lesson5TeacherRegistry(registry, snapshot, activity = 'lesson5') {
   if (!snapshot) return registry;
   const accounts = new Map(registry.teachers.map(person => [person.email, person]));
   for (const grant of snapshot.teachers) {
     const current = accounts.get(grant.email);
     if (current && current.subject !== grant.subject) continue;
     const person = current || {email: grant.email, subject: grant.subject, classes: [], displayName: grant.displayName || grant.email};
-    accounts.set(grant.email, {...person, lessonClasses: {...person.lessonClasses, lesson5: [
-      ...new Set([...(person.lessonClasses?.lesson5 || []), ...grant.classes]),
+    accounts.set(grant.email, {...person, lessonClasses: {...person.lessonClasses, [activity]: [
+      ...new Set([...(person.lessonClasses?.[activity] || []), ...grant.classes]),
     ]}});
   }
   return {...registry, teachers: [...accounts.values()]};

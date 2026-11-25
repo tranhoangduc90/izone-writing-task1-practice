@@ -43,7 +43,39 @@ if(courseRosterPath){
     defaultClass:{enumerable:true,get(){return this.classes.includes(defaultClass)?defaultClass:this.classes[0];}},
   });
 }
+const lesson7Scope=process.env.HANDOUT67_LESSON7_COURSE_SCOPE?.split(',').filter(Boolean)||[];
+if(lesson7Scope.some(ref=>!/^IC[0-9]+$/.test(ref))||lesson7Scope.length&&(!courseRosterPath||!lessons.lesson7))
+  throw Error('LESSON7_COURSE_SCOPE_INVALID');
+function lesson7CourseRoster(){
+  if(!lesson7Scope.length)return null;
+  const snapshot=lesson5CourseRoster();
+  if(!snapshot)return null;
+  const classes=snapshot.classes.filter(row=>lesson7Scope.includes(row.classRef)&&row.students.length);
+  const refs=classes.map(row=>row.classRef);
+  const teachers=snapshot.teachers.map(grant=>({...grant,classes:grant.classes.filter(ref=>refs.includes(ref))})).filter(grant=>grant.classes.length);
+  return {classes,refs,teachers};
+}
+const lesson7LegacyClasses=lessons.lesson7?.classes||[];
+if(lesson7Scope.length){
+  const {defaultClass}=lessons.lesson7;
+  Object.defineProperties(lessons.lesson7,{
+    classes:{enumerable:true,get:()=>[...new Set([...lesson7LegacyClasses,...(lesson7CourseRoster()?.refs||[])])]},
+    defaultClass:{enumerable:true,get(){return this.classes.includes(defaultClass)?defaultClass:this.classes[0];}},
+  });
+}
 const roster=async(activity,scope)=>{
+  if(activity==='lesson7'&&lesson7Scope.length){
+    const snapshot=lesson7CourseRoster();
+    const legacy=(await staticRoster(activity,scope)).filter(row=>lesson7LegacyClasses.includes(row.classRef));
+    if(!snapshot)return legacy;
+    const combined=new Map(legacy.map(row=>[row.classRef,row]));
+    for(const row of snapshot.classes){
+      const previous=combined.get(row.classRef)?.students||[];
+      const currentRefs=new Set(row.students.map(student=>student.studentRef));
+      combined.set(row.classRef,{...row,students:[...row.students,...previous.filter(student=>!currentRefs.has(student.studentRef))]});
+    }
+    return [...combined.values()];
+  }
   if(activity==='lesson6'&&courseRosterPath){
     const current=lesson5CourseRoster();
     if(!current)throw Object.assign(new Error('ROSTER_UNAVAILABLE'),{status:503});
@@ -57,7 +89,8 @@ const writingEntryKey=process.env.HANDOUT67_WRITING_ENTRY_KEY_FILE?
 if((lesson4ShareEnabled(lessons.lesson4)||lesson6ShareEnabled(lessons.lesson6))&&(!writingEntryKey||writingEntryKey.length<32||
   [settings.internalSecret,settings.secret].includes(writingEntryKey)))throw Error('WRITING_ENTRY_CONFIG_REQUIRED');
 const service=createService({store,roster,secret:settings.secret,renderJob,lessons,
-  lesson5HomeworkImport:process.env.HANDOUT67_LESSON5_HOMEWORK==='1',retryDelays:[0,5000,15000]});
+  lesson5HomeworkImport:process.env.HANDOUT67_LESSON5_HOMEWORK==='1',
+  lesson7HomeworkImport:process.env.HANDOUT67_LESSON7_HOMEWORK==='1',lesson7CanOpen:lesson7Scope.length>0,retryDelays:[0,5000,15000]});
 // Không có pump gọi AI nền; n8n phải chờ endpoint xử lý mỗi attempt để giữ trần chung.
 const callAI=gatewayAdapter(settings);
 const processor=createProcessor({service,callAI,onError:code=>console.error('Handout67: '+code)});
@@ -102,7 +135,8 @@ const oauth=new OAuth2Client();
 oauth.transporter.defaults={...oauth.transporter.defaults,timeout:5000};
 const registry=()=>{
   const value=JSON.parse(fs.readFileSync(settings.teacherFile,'utf8'));
-  return lesson5TeacherRegistry(validateTeacherRegistry(value,settings.classes),lesson5CourseRoster());
+  const lesson5Registry=lesson5TeacherRegistry(validateTeacherRegistry(value,settings.classes),lesson5CourseRoster());
+  return lesson5TeacherRegistry(lesson5Registry,lesson7CourseRoster(),'lesson7');
 };
 if(settings.teacherFile)registry();
 const teacher=settings.teacherFile?createTeacher({db:pool,store,roster,registry,lessons,secret:settings.teacherSecret,verifyGoogleToken:async(token,audience)=>(await oauth.verifyIdToken({idToken:token,audience})).getPayload()}):null;
@@ -111,7 +145,8 @@ if(Boolean(ssoUrl)!==Boolean(ssoKeyFile))throw Error('SSO_CONSUMER_CONFIG_REQUIR
 const ssoBootstrapKey=ssoKeyFile?fs.readFileSync(ssoKeyFile,'utf8').trim():null;
 const verifySharedTeacher=ssoUrl?createSharedTeacherVerifier({url:ssoUrl,key:ssoBootstrapKey}):null;
 const server=createApi({service,teacher,processor,...settings,verifySharedTeacher,ssoBootstrapKey,writingEntryKey,
-  nativeWake:nativeDispatch?wake.request:null,legacyWakeSecret:settings.wakeSecret});
+  nativeWake:nativeDispatch?wake.request:null,legacyWakeSecret:settings.wakeSecret,
+  onLesson7Transfer:receipt=>console.log(JSON.stringify({event:'handout67_lesson7_transfer',...receipt}))});
 let sweeping=false,cleaning=false;
 async function sweep(){if(sweeping)return;sweeping=true;try{await service.sweep();}catch{console.error('Handout67: chưa kiểm được thời hạn lượt chấm.');}finally{sweeping=false;}}
 async function cleanup(){

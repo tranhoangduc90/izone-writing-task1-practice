@@ -14,7 +14,7 @@ async function jsonBody(req,maxBytes=32768) {
 
 // Nhận HTTP, kiểm origin/token và dữ liệu trước khi gọi nghiệp vụ; chỉ trả mã lỗi an toàn.
 // ACK Check sau transaction. Không in bài, credential hoặc token khi SQL/AI lỗi.
-export function createApi({service,teacher=null,processor=null,origins,internalSecret,trustedProxyAddresses=[],verifySharedTeacher=null,ssoBootstrapKey=null,writingEntryKey=null,lesson5OutlineKey=null,nativeWake=null,legacyWakeSecret=null}) {
+export function createApi({service,teacher=null,processor=null,origins,internalSecret,trustedProxyAddresses=[],verifySharedTeacher=null,ssoBootstrapKey=null,writingEntryKey=null,lesson5OutlineKey=null,nativeWake=null,legacyWakeSecret=null,onLesson7Transfer=()=>{}}) {
   const normalize=ip=>ip?.startsWith('::ffff:')?ip.slice(7):ip;
   const trusted=new Set(trustedProxyAddresses.map(normalize));
   function networkAddress(req){
@@ -122,6 +122,26 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
         const {classRef,studentRef,lesson4Entry}=await jsonBody(req);
         value=await service.open({activity:'lesson5',classRef,studentRef},undefined,{verifiedLesson5:true,lesson4Entry});status=201;
       }
+      else if([prefix+'/integrations/homework/lesson7/open',prefix+'/integrations/homework/lesson7/transfer'].includes(path)&&req.method==='POST'){
+        if(origin||!writingEntryKey||!equal(req.headers.authorization,'Bearer '+writingEntryKey))fail('WRITING_ENTRY_REQUIRED',403);
+        const input=await jsonBody(req);
+        if(path.endsWith('/open')){value=await service.openHomeworkLesson7(input);status=201;}
+        else {
+          const started=Date.now();
+          const action={requestId:uuid.test(input?.requestId||'')?input.requestId:null,
+            classRef:/^IC[0-9]+$/.test(input?.classRef||'')?input.classRef:null,
+            sourceVersion:Number.isSafeInteger(input?.sourceVersion)?input.sourceVersion:null};
+          try {
+            const transfer=await service.transferHomeworkLesson7(input);
+            onLesson7Transfer({...action,...transfer,durationMs:Date.now()-started});
+            value={transfer};
+          }catch(error){
+            onLesson7Transfer({...action,durationMs:Date.now()-started,status:error.status===403?'denied':
+              ['LESSON7_SOURCE_CHANGED','LESSON7_SOURCE_INCOMPLETE','LESSON7_TRANSFER_UNAVAILABLE','LESSON7_TRANSFER_INVALID'].includes(error.message)?error.message:'technical_failure'});
+            throw error;
+          }
+        }
+      }
       else if(path===prefix+'/integrations/homework/lesson5/outline'&&req.method==='POST'){
         if(origin||!lesson5OutlineKey||!equal(req.headers.authorization,'Bearer '+lesson5OutlineKey))fail('WRITING_ENTRY_REQUIRED',403);
         value={outline:await service.readHomeworkLesson5Outline(await jsonBody(req))};
@@ -150,7 +170,7 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
         const match=path.match(/^\/api\/handout67\/v1\/sessions\/([^/]+)(?:\/(practice|responses|checks|attest|edit|threads|idea2|vocabulary\/(?:[012]|all)\/retry))?$/);
         if(!match||!uuid.test(match[1]))fail('NOT_FOUND',404);
         const ref=match[1],token=req.headers.authorization?.replace(/^Bearer /,'');
-        if(token?.startsWith('writing4-')&&!equal(req.headers['x-handout67-writing-entry'],writingEntryKey))fail('WRITING_ENTRY_REQUIRED',403);
+        if((token?.startsWith('writing4-')||token?.startsWith('writing7-'))&&!equal(req.headers['x-handout67-writing-entry'],writingEntryKey))fail('WRITING_ENTRY_REQUIRED',403);
         if(req.method==='GET'&&!match[2]){
           const result=await service.readForPoll(ref,token,req.headers['if-none-match']);
           if(result.etag){

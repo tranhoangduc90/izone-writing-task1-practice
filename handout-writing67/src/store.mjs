@@ -54,6 +54,24 @@ export function createStore(db,{clock=Date.now,onQueueCommitted,onQueueError=()=
         return result.rows[0].payload;
       });
     },
+    async transferLesson7(sourceIdentity,targetIdentity,initial,validate,change) {
+      return db.transaction(async tx=>{
+        // Luôn khóa nguồn Lesson 6 trước đích Lesson 7. Không mở đích khi nguồn đã đổi.
+        const {rows:[source]}=await tx.query('SELECT payload FROM handout67.session WHERE identity_key=$1 FOR UPDATE',[sourceIdentity]);
+        validate(source?.payload);
+        const ref=randomUUID();
+        const initialSession=initial(ref);
+        const inserted=await tx.query('INSERT INTO handout67.session (ref,identity_key,payload) VALUES ($1,$2,$3::jsonb) ON CONFLICT (identity_key) DO NOTHING RETURNING ref',
+          [ref,targetIdentity,JSON.stringify(initialSession)]);
+        if(inserted.rows.length)await auditChange(tx,null,initialSession,clock());
+        const {rows:[target]}=await tx.query('SELECT payload FROM handout67.session WHERE identity_key=$1 FOR UPDATE',[targetIdentity]);
+        const before=target.payload;
+        const session=structuredClone(before);
+        const result=change(source.payload,session);
+        if(JSON.stringify(before)!==JSON.stringify(session))await saveChanged(tx,before,session);
+        return result;
+      });
+    },
     async readIdentity(identity) {
       const result = await db.query('SELECT payload FROM handout67.session WHERE identity_key=$1', [identity]);
       return result.rows[0]?.payload;
@@ -90,6 +108,7 @@ export function createStore(db,{clock=Date.now,onQueueCommitted,onQueueError=()=
       // Include the row version because changes to feedback or a lease need not change draft version.
       const result = await db.query(`
         SELECT revision, payload ? 'lesson5IdeaSource' AS requires_homework,
+          payload ? 'lesson7IdeaSource' AS requires_lesson7_homework,
           CASE WHEN revision IS DISTINCT FROM $2::text THEN payload END AS payload,
           CASE WHEN revision = $2::text THEN (
             SELECT min(least(

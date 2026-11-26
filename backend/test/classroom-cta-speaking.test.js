@@ -76,8 +76,11 @@ test('không chọn bừa registry trùng hoặc timestamp thiếu múi giờ', 
     { code: 'SPEAKING_ASSIGNMENT_SCOPE_INVALID' });
 });
 
-test('registry và luồng Speaking giữ nguyên hai mã ôn tập clone đã phát', async () => {
-  for (const code of ['67-speaking-on_tap_lam_ro_diem_giua-clone', '67-speaking-freestyle_on_tap-clone']) {
+test('registry và luồng Speaking giữ nguyên mã CTA clone ở lớp đã đăng ký', async () => {
+  for (const code of [
+    '67-speaking-on_tap_lam_ro_diem_giua-clone', '67-speaking-freestyle_on_tap-clone',
+    '67-speaking-ly_do_hanh_vi-clone', '67-speaking-cach_lam_mot_viec-clone'
+  ]) {
     const apiRow = { ...registry, assignment_code: code };
     const [scanned] = parseK67SpeakingScopes({ ok: true, assignments: [apiRow] });
     const document = { documentId: id, revisionId: 'r1', body: { content: [{ paragraph: { elements: [{ textRun: { content: code } }] } }] } };

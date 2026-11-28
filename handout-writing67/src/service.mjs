@@ -41,7 +41,7 @@ const relevant = (job,responses) => hash(Object.fromEntries(dependencies(job.sec
 const usesShare = value => isTwoQuestionOutline(value) || isLesson6Outline(value);
 const shareEnabled = lesson => lesson4ShareEnabled(lesson) || lesson6ShareEnabled(lesson);
 const homeworkAssignment = (value, activity) => typeof value === 'string' &&
-  /^hw-k67-writing-lesson[46]-\d+$/.test(value) && value.startsWith('hw-k67-writing-'+activity+'-');
+  /^hw-k67-writing-lesson[467]-\d+$/.test(value) && value.startsWith('hw-k67-writing-'+activity+'-');
 
 export function withBodies(value){
   if(!isMulti(value))return value;
@@ -129,15 +129,32 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     return {lesson7Transfer:{eligible:progress.accepted&&progress.completed&&progress.bodies.every(body=>body.passed)&&
       Boolean(sourceIdeas(s).idea1),version:s.version}};
   }
-  async function lesson7Context(input){
+  async function lesson7Context(input,assignmentLesson='lesson6'){
     if(!object(input)||!/^IC[0-9]+$/.test(input.classRef||'')||!id(input.studentRef)||
-      !homeworkAssignment(input.assignmentId,'lesson6')||!Number.isSafeInteger(input.contentVersion)||input.contentVersion<1)
+      !homeworkAssignment(input.assignmentId,assignmentLesson)||!Number.isSafeInteger(input.contentVersion)||input.contentVersion<1)
       fail('WRITING_ENTRY_REQUIRED',403);
-    for(const activity of ['lesson6','lesson7']){
+    for(const activity of assignmentLesson==='lesson7'?['lesson7']:['lesson6','lesson7']){
       const room=(await api.roster(activity)).find(row=>row.classRef===input.classRef);
       if(!room?.students.some(student=>student.studentRef===input.studentRef))fail('STUDENT_OUT_OF_SCOPE',403);
     }
     return {activity:'lesson7',classRef:input.classRef,studentRef:input.studentRef};
+  }
+  function assertLesson7Assignment(session,assignmentId){
+    // Lesson 6 owns the imported ideas; the Lesson 7 assignment may reopen that
+    // exact learner/class session only when its authority class is the same.
+    const sourceAssignment=assignmentId.replace('writing-lesson7-','writing-lesson6-');
+    if(session.lesson7IdeaSource&&session.lesson7IdeaSource.assignmentId!==sourceAssignment)
+      fail('WRITING_ENTRY_MISMATCH',403);
+  }
+  function projectGuidedWritingOutline(s,activity,classRef,studentRef){
+    if(!s)fail('SESSION_NOT_FOUND',404);
+    if(s.activity!==activity||s.classRef!==classRef||s.studentRef!==studentRef||s.body!==2||
+      s.outlineOnly||s.handoutMode||(s.workflowMode||GUIDED)!==GUIDED)fail('WRITING_ENTRY_MISMATCH',409);
+    const steps=Object.fromEntries(ORDER.map(key=>[key,{status:s.steps[key]?.status,approval:s.steps[key]?.approval}]));
+    return {activity:s.activity,classRef,studentRef,ref:s.ref,version:s.version,
+      questionHash:createHash('sha256').update(lessonFor(activity).topic).digest('hex'),body:2,workflowMode:GUIDED,
+      approved:ORDER.every(key=>steps[key].status==='passed'&&FIELDS[key].every(field=>string(s.responses[field]))),
+      responses:Object.fromEntries(Object.values(FIELDS).flat().map(field=>[field,s.responses[field]])),steps,vocabulary:s.vocabulary};
   }
   function lesson5Offer(s,token){
     if(!token.startsWith('writing4-')||!canOfferLesson5(s))return {};
@@ -312,6 +329,19 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
       if(session.lesson7IdeaSource&&session.lesson7IdeaSource.assignmentId!==input.assignmentId)fail('WRITING_ENTRY_MISMATCH',403);
       return opened(session);
     },
+    async openLesson7Writing(input){
+      const target=await lesson7Context(input,'lesson7');
+      const session=await store.open(JSON.stringify([target.activity,target.classRef,target.studentRef]),makeSession(target,lessonFor('lesson7')));
+      assertLesson7Assignment(session,input.assignmentId);
+      return opened(session);
+    },
+    async readLesson7WritingOutline(input){
+      const {classRef,studentRef}=await lesson7Context(input,'lesson7');
+      const session=await store.readIdentity(JSON.stringify(['lesson7',classRef,studentRef]));
+      if(!session)fail('SESSION_NOT_FOUND',404);
+      assertLesson7Assignment(session,input.assignmentId);
+      return projectGuidedWritingOutline(session,'lesson7',classRef,studentRef);
+    },
     async transferHomeworkLesson7(input){
       if(!lesson7HomeworkImport)fail('LESSON7_TRANSFER_UNAVAILABLE',404);
       const target=await lesson7Context(input);
@@ -346,20 +376,11 @@ export function createService({store, roster, secret, clock=Date.now, leaseMs=30
     },
     async readHomeworkLesson5Outline(input){
       if(!object(input)||!/^IC[0-9]+$/.test(input.classRef||'')||!id(input.studentRef))fail('WRITING_ENTRY_REQUIRED',403);
-      const lesson=lessonFor('lesson5');
       const rooms=await api.roster('lesson5');
       const room=rooms.find(c=>c.classRef===input.classRef);
       if(!room?.students.some(s=>s.studentRef===input.studentRef))fail('STUDENT_OUT_OF_SCOPE',403);
       const s=await store.readIdentity(JSON.stringify(['lesson5',input.classRef,input.studentRef]));
-      if(!s)fail('SESSION_NOT_FOUND',404);
-      if(s.activity!=='lesson5'||s.classRef!==input.classRef||s.studentRef!==input.studentRef||s.body!==2||
-        s.outlineOnly||s.handoutMode||(s.workflowMode||GUIDED)!==GUIDED)fail('WRITING_ENTRY_MISMATCH',409);
-      const steps=Object.fromEntries(ORDER.map(key=>[key,{status:s.steps[key]?.status,approval:s.steps[key]?.approval}]));
-      return {activity:s.activity,classRef:s.classRef,studentRef:s.studentRef,ref:s.ref,version:s.version,
-        questionHash:createHash('sha256').update(lesson.topic).digest('hex'),body:2,workflowMode:GUIDED,
-        approved:ORDER.every(key=>steps[key].status==='passed'&&FIELDS[key].every(field=>string(s.responses[field]))),
-        responses:Object.fromEntries(Object.keys(FIELDS).flatMap(key=>FIELDS[key]).map(field=>[field,s.responses[field]])),
-        steps,vocabulary:s.vocabulary};
+      return projectGuidedWritingOutline(s,'lesson5',input.classRef,input.studentRef);
     },
     async readLesson4Progress(input) {
       if (!object(input) || !/^IC[0-9]+$/.test(input.classRef || '') || !id(input.studentRef) ||

@@ -54,10 +54,14 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
       const lesson6Progress=path===prefix+'/integrations/homework/lesson6/progress'&&req.method==='POST';
       const lesson6Read=!origin&&writingEntryKey&&(lesson6Roster||lesson6Progress)&&
         equal(req.headers.authorization,'Bearer '+writingEntryKey);
+      const lesson7Writing=path===prefix+'/integrations/homework/lesson7/open-writing'||
+        path===prefix+'/integrations/homework/lesson7/writing-outline';
+      const lesson7Entry=!origin&&writingEntryKey&&lesson7Writing&&req.method==='POST'&&
+        equal(req.headers.authorization,'Bearer '+writingEntryKey);
       if(!internal && path!==prefix+'/health'){
         const now=Date.now();
         // The authenticated Docs worker reads independently of the public entry budget.
-        let key=lesson6Read?'writing-lesson6-read':'bootstrap:'+networkAddress(req);
+        let key=lesson6Read?'writing-lesson6-read':lesson7Entry?'writing-lesson7-entry':'bootstrap:'+networkAddress(req);
         const sessionPath=path.match(/^\/api\/handout67\/v1\/sessions\/([^/]+)(?:\/|$)/);
         if(sessionPath && uuid.test(sessionPath[1])) {
           service.authorizeSession(sessionPath[1],req.headers.authorization?.replace(/^Bearer /,''));
@@ -66,7 +70,7 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
         for(const [k,v] of limits)if(v.until<=now)limits.delete(k);
         if(limits.size>=10000&&!limits.has(key))fail('RATE_LIMITED',429);
         const bucket=limits.get(key)||{until:now+60000,count:0};bucket.count++;limits.set(key,bucket);
-        if(bucket.count>(lesson6Read?480:120)){res.setHeader('Retry-After','60');fail('RATE_LIMITED',429);}
+        if(bucket.count>(lesson6Read||lesson7Entry?480:120)){res.setHeader('Retry-After','60');fail('RATE_LIMITED',429);}
       }
       let value,status=200;
       if(teacherPath){
@@ -121,6 +125,12 @@ export function createApi({service,teacher=null,processor=null,origins,internalS
         if(origin||!writingEntryKey||!equal(req.headers.authorization,'Bearer '+writingEntryKey))fail('WRITING_ENTRY_REQUIRED',403);
         const {classRef,studentRef,lesson4Entry}=await jsonBody(req);
         value=await service.open({activity:'lesson5',classRef,studentRef},undefined,{verifiedLesson5:true,lesson4Entry});status=201;
+      }
+      else if([prefix+'/integrations/homework/lesson7/open-writing',prefix+'/integrations/homework/lesson7/writing-outline'].includes(path)&&req.method==='POST'){
+        if(origin||!writingEntryKey||!equal(req.headers.authorization,'Bearer '+writingEntryKey))fail('WRITING_ENTRY_REQUIRED',403);
+        const input=await jsonBody(req);
+        if(path.endsWith('/open-writing')){value=await service.openLesson7Writing(input);status=201;}
+        else value={outline:await service.readLesson7WritingOutline(input)};
       }
       else if([prefix+'/integrations/homework/lesson7/open',prefix+'/integrations/homework/lesson7/transfer'].includes(path)&&req.method==='POST'){
         if(origin||!writingEntryKey||!equal(req.headers.authorization,'Bearer '+writingEntryKey))fail('WRITING_ENTRY_REQUIRED',403);

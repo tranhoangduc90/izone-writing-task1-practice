@@ -109,6 +109,23 @@ test('L6 → L7 locks both identities, preserves drafts and completes Topic in t
   assert.equal(reentry.status, 201);
   const { session, token } = reentry.body;
   assert.equal(session.ref, prior.session.ref);
+  const lesson7Scope=scope('owner',{assignmentId:'hw-k67-writing-lesson7-9996'});
+  const writing=options=>h.http('/integrations/homework/lesson7/open-writing',{method:'POST',body:lesson7Scope,...options});
+  assert.equal((await writing()).status,403);
+  assert.equal((await writing({token:writingEntryKey,caller:origin})).status,403);
+  assert.equal((await writing({token:writingEntryKey,body:{...lesson7Scope,assignmentId:'hw-k67-writing-lesson7-9998'}})).status,403);
+  const writer=await writing({token:writingEntryKey});
+  assert.equal(writer.status,201);
+  assert.equal(writer.body.session.ref,session.ref);
+  const readOutline=body=>h.http('/integrations/homework/lesson7/writing-outline',{method:'POST',body,token:writingEntryKey});
+  assert.equal((await readOutline({...lesson7Scope,studentRef:'missing'})).status,403);
+  assert.equal((await readOutline(lesson7Scope)).body.outline.approved,false);
+  const newScope=scope('other',{assignmentId:lesson7Scope.assignmentId});
+  const blank=await writing({token:writingEntryKey,body:newScope});
+  assert.equal(blank.status,201);
+  assert.notEqual(blank.body.session.ref,session.ref);
+  assert.equal((await readOutline(newScope)).body.outline.approved,false);
+
   assert.deepEqual(session.lesson7IdeaSource, { fields: ['idea2'], sourceVersion: 6, stance: 'disagree' });
   assert.equal(session.responses.idea1, 'My initial idea');
   assert.equal(session.responses.idea2, initial.body2_idea2);
